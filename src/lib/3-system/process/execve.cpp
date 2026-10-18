@@ -1,0 +1,12 @@
+#include "2-vocabulary/failure.hpp"
+#include "3-system/error/last_error.hpp"
+#include "3-system/process/execve.hpp"
+
+#include <unistd.h>
+
+
+[[nodiscard]] auto ca::sys::execve(const char* const path, char* const* const argv, char* const* const envp) noexcept -> ca::result<void> {
+
+	::execve(path, argv, envp);
+	return ca::failure{ca::sys::impl::libc_error()};
+}

@@ -1,0 +1,23 @@
+#ifndef ca_collections_format_is_displayable_hpp
+#define ca_collections_format_is_displayable_hpp
+
+#include "5-collections/format/impl/display_kind.hpp"
+
+
+// -- CA NAMESPACE -----------------------------------------------------------
+
+namespace ca {
+
+
+	// -- IS DISPLAYABLE -----------------------------------------------------
+
+	/* @DOC Whether print and printf take a T: bool, char, standard integers, enums (as their
+	   integer), f32, f64, C strings and char arrays, string views (ca::sv) and types with
+	   `view() -> sv::basic<C>` (fs::path, ca::str), ca::error (its message), object pointers, nullptr, and
+	   types with `display(ca::text_writer&) const`. */
+	template <typename T>
+	concept is_displayable = ca::impl::display_kind_of<T> != ca::impl::display_kind::none;
+
+} // namespace ca
+
+#endif // ca_collections_format_is_displayable_hpp
