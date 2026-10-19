@@ -69,10 +69,11 @@ rather than writing `new` directly.
 | `string_length(s)` | strlen, any code unit type, constexpr |
 | `compare_units`, `equal_units`, `find_unit` | memcmp, memchr over char16_t and char32_t too |
 
-Each takes a count of 0 with any pointer, null included, unlike the C functions. `copy_bytes`
-and `move_bytes` are the compiler's builtins, so small constant copies become a few moves; the
-calls left over reach the memcpy and memmove that ca itself defines on x86-64 (see
-`memory/impl/`), so no libc is needed for them.
+Each takes a count of 0 with any pointer, null included, unlike the C functions. `copy_bytes`,
+`move_bytes`, `fill_bytes` and `compare_bytes` are the compiler's builtins, so small constant
+ones become a few moves or fold away; the calls left over reach the memcpy, memmove, memset,
+memcmp and bcmp that ca itself defines on x86-64 (see `memory/impl/`), so no libc is needed for
+them.
 
 ```c++
 #include "ca/integers.hpp"

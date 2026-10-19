@@ -15,7 +15,7 @@
 
 status=0
 inside_ca='^_Z(N[rVKRO]*|GVN|ZN[rVKRO]*|THN|TWN|TVN)2ca'
-C_SYMBOLS='memcpy memmove'
+C_SYMBOLS='memcpy memmove memset memcmp bcmp'
 flags=$(printf '%s\n' $CXXFLAGS | grep -v -x -e -MMD -e -MP | tr '\n' ' ')
 
 deps() {

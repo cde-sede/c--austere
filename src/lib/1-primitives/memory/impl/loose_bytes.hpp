@@ -25,6 +25,13 @@ namespace ca {
 				T _value;
 		}; // struct loose_bytes
 
+		/* @DOC T at an address aligned for T, of any type: an aliasing aligned load or store. */
+		template <typename T>
+		struct [[gnu::may_alias]] aligned_bytes final {
+				using self = ca::impl::aligned_bytes<T>;
+				T _value;
+		}; // struct aligned_bytes
+
 		/* @DOC The loose T at at, by reference: vectors never pass by value, so no ABI warning
 		   where AVX is off. */
 		template <typename T>
