@@ -81,7 +81,7 @@ functions compilers call by name. A program can therefore link without libc at a
 on `ca::heap`, `fork` and `posix_spawn`. It is not part of `libca.a`: it defines what libc's own
 startup files define, and must not be linked next to them.
 
-```
+```sh
 c++ -std=c++2c -nostdinc++ -fno-exceptions -fno-rtti -I src/lib prog.cpp -nostdlib -static-pie \
     -Wl,-u,_start -Wl,--start-group libca.a libca_runtime.a -Wl,--end-group
 ```

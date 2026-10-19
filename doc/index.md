@@ -64,7 +64,7 @@ The habits it shows run through the whole library: every allocation is a `result
 
 On Linux x86-64, ca reaches the kernel itself: `ca::sys` makes its syscalls through `ca::syscall` (the vDSO for the clock), formats and reads floats, finds time zones and copies memory without the C library, and defines `memcpy`, `memset`, `memcmp`, `strlen` and the other functions compilers call by name. A program can therefore link without libc at all, with `build/<compiler>-<mode>/libca_runtime.a` (from `src/runtime/`) in its place: the process entry (`_start`, the main thread's TLS, constructors, `exit` and `atexit`), the environment, `malloc` on `ca::heap`, `fork` and `posix_spawn`. It is not part of `libca.a`: it defines what libc's own startup files define, and must not be linked next to them.
 
-```c++
+```sh
 c++ -std=c++2c -nostdinc++ -fno-exceptions -fno-rtti -I src/lib prog.cpp -nostdlib -static-pie \
     -Wl,-u,_start -Wl,--start-group libca.a libca_runtime.a -Wl,--end-group
 ```
