@@ -1,5 +1,6 @@
-/* Process entry for programs linked without libc (linux x86-64, -static -no-pie):
-   _start, then the main thread's TLS, the init arrays, main and exit.
+/* Process entry for programs linked without libc (linux x86-64, -static or -static-pie):
+   _start, then the program's own relocations (static PIE), the main thread's TLS, the init
+   arrays, main and exit.
 
    src/runtime/ is not part of libca.a: it builds libca_runtime.a, linked only by freestanding
    programs, because it defines the symbols libc's startup files and libc itself define (_start,
@@ -50,6 +51,11 @@ extern "C" [[gnu::visibility("hidden")]] init_function __preinit_array_end[];
 extern "C" [[gnu::visibility("hidden")]] init_function __init_array_start[];
 extern "C" [[gnu::visibility("hidden")]] init_function __init_array_end[];
 
+/* The dynamic section, only in a static PIE (weak: null in a static non-PIE program), and the
+   ELF header, at the load address in a PIE. */
+extern "C" [[gnu::visibility("hidden"), gnu::weak]] const Elf64_Dyn _DYNAMIC[];
+extern "C" [[gnu::visibility("hidden")]] const Elf64_Ehdr __ehdr_start;
+
 static constexpr ca::usz CONTROL_BLOCK = 256U;
 static constexpr ca::isz ARCH_SET_FS = 0x1002;
 
@@ -74,18 +80,72 @@ template <typename... As>
 	asm("" : : "r"(to) : "memory");
 }
 
+/* A static PIE relocates itself before reading any global: R_X86_64_RELATIVE entries of DT_RELA
+   (the only kind a static link leaves), and DT_RELR's packed ones (-z pack-relative-relocs).
+   Locals and PC-relative addresses only, nothing else is in place yet: _DYNAMIC by lea in asm,
+   since the compiler reads a weak symbol through the GOT, itself not yet relocated. */
+[[gnu::no_stack_protector]] static auto relocate(void) noexcept -> void {
+
+	const Elf64_Dyn* dynamic;
+	asm(".weak _DYNAMIC\n\tleaq _DYNAMIC(%%rip), %0" : "=r"(dynamic));
+	if (dynamic == nullptr)
+		return;
+	const ca::u64 base = reinterpret_cast<ca::u64>(&__ehdr_start);
+	const Elf64_Rela* rela = nullptr;
+	ca::usz rela_size = 0U;
+	const ca::u64* relr = nullptr;
+	ca::usz relr_size = 0U;
+	for (; dynamic->d_tag != DT_NULL; ++dynamic) {
+		if (dynamic->d_tag == DT_RELA)
+			rela = reinterpret_cast<const Elf64_Rela*>(base + dynamic->d_un.d_ptr);
+		else if (dynamic->d_tag == DT_RELASZ)
+			rela_size = dynamic->d_un.d_val;
+		else if (dynamic->d_tag == 36)
+			relr = reinterpret_cast<const ca::u64*>(base + dynamic->d_un.d_ptr);
+		else if (dynamic->d_tag == 35)
+			relr_size = dynamic->d_un.d_val;
+	}
+	for (ca::usz i = 0U; rela != nullptr && i < rela_size / sizeof(Elf64_Rela); ++i) {
+		if (ELF64_R_TYPE(rela[i].r_info) == R_X86_64_RELATIVE)
+			*reinterpret_cast<ca::u64*>(base + rela[i].r_offset) = base + static_cast<ca::u64>(rela[i].r_addend);
+	}
+	ca::u64* where = nullptr;
+	for (ca::usz i = 0U; relr != nullptr && i < relr_size / sizeof(ca::u64); ++i) {
+		ca::u64 entry = relr[i];
+		if ((entry & 1U) == 0U) {
+			where = reinterpret_cast<ca::u64*>(base + entry);
+			*where++ += base;
+			continue;
+		}
+		for (ca::usz bit = 0U; (entry >>= 1U) != 0U; ++bit) {
+			if ((entry & 1U) != 0U)
+				where[bit] += base;
+		}
+		where += 63;
+	}
+}
+
 /* The main thread's TLS block and control block, then %fs. */
 [[gnu::no_stack_protector]] static auto set_up_thread(const ca::u64* const auxv) noexcept -> void {
 
 	const Elf64_Phdr* const segments = reinterpret_cast<const Elf64_Phdr*>(auxiliary(auxv, AT_PHDR));
 	const ca::usz count = auxiliary(auxv, AT_PHNUM);
 	ca::u64 bias = 0U;
+	bool placed = false;
 	const Elf64_Phdr* tls = nullptr;
 	for (ca::usz i = 0U; i < count; ++i) {
-		if (segments[i].p_type == PT_PHDR)
-			bias = reinterpret_cast<ca::u64>(segments) - segments[i].p_vaddr;
-		else if (segments[i].p_type == PT_TLS)
+		if (segments[i].p_type == PT_PHDR) {
+			  bias = reinterpret_cast<ca::u64>(segments) - segments[i].p_vaddr;
+			placed = true;
+		} else if (segments[i].p_type == PT_TLS) {
 			tls = segments + i;
+		}
+	}
+	for (ca::usz i = 0U; i < count && !placed; ++i) {
+		if (segments[i].p_type == PT_LOAD && segments[i].p_offset == 0U) {
+			  bias = reinterpret_cast<ca::u64>(segments) - __ehdr_start.e_phoff - segments[i].p_vaddr;
+			placed = true;
+		}
 	}
 	ca::usz align = 64U;
 	ca::usz size = 0U;
@@ -114,6 +174,7 @@ template <typename... As>
 
 extern "C" [[noreturn, gnu::no_stack_protector, gnu::used]] auto ca_runtime_start(ca::u64* const stack) noexcept -> void { // ns-leak: ignore
 
+	relocate();
 	const int argc = static_cast<int>(stack[0]);
 	char** const argv = reinterpret_cast<char**>(stack + 1);
 	char** const envp = argv + argc + 1;

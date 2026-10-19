@@ -13,8 +13,9 @@
 #   // expect: error REGEX     does not build; diagnostics match REGEX (grep -E)
 #   // expect: trap            builds, then dies by a trap (SIGILL or SIGTRAP)
 #   // mode: debug             only checked in debug builds (or: release)
-#   // link: freestanding      linked without libc: static, ca's own _start and runtime
-#                              (RUNTIME, built from src/runtime/), no startup files
+#   // link: freestanding      linked without libc, ca's own _start and runtime (RUNTIME,
+#                              built from src/runtime/), no startup files: twice, -static
+#                              and -static-pie, both run
 #   // link: both              checked twice: against libc, then freestanding
 
 ulimit -c 0
@@ -41,7 +42,10 @@ fi
 # runs it, and sets failure (empty when it behaved as expected), out and built.
 check() {
 	if [ "$1" = freestanding ]; then
-		out=$($CXX $CXXFLAGS "$test" -o "$2" -nostdlib -static -Wl,-u,_start \
+		out=$($CXX $CXXFLAGS -c "$test" -o "$2.o" 2>&1) &&
+		out=$($CXX "$2.o" -o "$2" -nostdlib -static -Wl,-u,_start \
+			-Wl,--start-group "$LIB" "$RUNTIME" -Wl,--end-group 2>&1) &&
+		out=$($CXX "$2.o" -o "$2_pie" -nostdlib -static-pie -Wl,-u,_start \
 			-Wl,--start-group "$LIB" "$RUNTIME" -Wl,--end-group 2>&1)
 	else
 		out=$($CXX $CXXFLAGS "$test" -o "$2" "$LIB" $LDFLAGS 2>&1)
@@ -60,6 +64,10 @@ check() {
 			failure="does not build"
 		else
 			status=$("$2" >/dev/null 2>&1; echo $?)
+			if [ "$1" = freestanding ] && [ "$status" = "$arg" ]; then
+				pie=$("$2_pie" >/dev/null 2>&1; echo $?)
+				[ "$pie" != "$status" ] && status="$pie (static-pie)"
+			fi
 			if [ "$kind" = exit ] && [ "$status" != "$arg" ]; then
 				failure="expected exit $arg, got status $status"
 			elif [ "$kind" = trap ] && [ "$status" != 132 ] && [ "$status" != 133 ]; then
