@@ -1,3 +1,6 @@
+#include "1-primitives/config/architecture.hpp"
+#include "1-primitives/config/platform.hpp"
+#include "3-system/syscall/syscalls.hpp"
 #include "3-system/time/resolution.hpp"
 
 #include <time.h>
@@ -9,6 +12,10 @@
 		: source == ca::sys::clock::monotonic ? CLOCK_MONOTONIC
 		: source == ca::sys::clock::process_cpu ? CLOCK_PROCESS_CPUTIME_ID : CLOCK_THREAD_CPUTIME_ID;
 	timespec step{};
+#if ca_platform(linux) && ca_architecture(x86_64)
+	static_cast<void>(ca::syscall::clock_getres(id, &step));
+#else
 	::clock_getres(id, &step);
+#endif
 	return static_cast<ca::i64>(step.tv_sec) * 1000000000 + static_cast<ca::i64>(step.tv_nsec);
 }

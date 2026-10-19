@@ -1,21 +1,18 @@
+#include "1-primitives/integers/i64.hpp"
+#include "1-primitives/integers/u32.hpp"
 #include "2-vocabulary/failure.hpp"
-#include "3-system/error/errc.hpp"
+#include "3-system/time/impl/civil.hpp"
 #include "3-system/time/utc_seconds.hpp"
 
-#include <time.h>
 
-
+/* As timegm: fields out of their range carry over (month 13 is January of the next year, day 0
+   the last of the previous month). Never fails for i32 fields. */
 [[nodiscard]] auto ca::sys::utc_seconds(const ca::sys::calendar_time& time) noexcept -> ca::result<ca::i64> {
 
-	tm raw{};
-	raw.tm_year = time.year() - 1900;
-	 raw.tm_mon = time.month() - 1;
-	raw.tm_mday = time.day();
-	raw.tm_hour = time.hour();
-	 raw.tm_min = time.minute();
-	 raw.tm_sec = time.second();
-	const time_t seconds = ::timegm(&raw);
-	if (seconds == static_cast<time_t>(-1) && !(raw.tm_year == 69 && raw.tm_mon == 11 && raw.tm_mday == 31)) [[unlikely]]
-		return ca::failure{ca::errc::out_of_range};
-	return static_cast<ca::i64>(seconds);
+	const ca::i64 months = static_cast<ca::i64>(time.month()) - 1;
+	const ca::i64 carried = (months >= 0 ? months : months - 11) / 12;
+	const ca::i64 year = static_cast<ca::i64>(time.year()) + carried;
+	const ca::u32 month = static_cast<ca::u32>(months - carried * 12) + 1U;
+	const ca::i64 days = ca::sys::impl::days_from_civil(year, month, 1U) + static_cast<ca::i64>(time.day()) - 1;
+	return days * 86400 + static_cast<ca::i64>(time.hour()) * 3600 + static_cast<ca::i64>(time.minute()) * 60 + static_cast<ca::i64>(time.second());
 }
