@@ -29,7 +29,7 @@ namespace ca {
 	// -- UNIQUE -------------------------------------------------------------
 
 	/* @DOC Sole owner of one T in memory from A, or of nothing; from make_in (ca::make_in<unique<T>>
-	   over any allocator). Move-only; the allocator moves with the object. destroy() runs T's destroy() when T is cleanable, then its
+	   over any allocator). Move-only; the allocator moves with the object. cleanup() runs T's cleanup() when T is cleanable, then its
 	   destructor, then gives the memory back; the destructor is a failsafe doing the same
 	   silently. Holding a stateless allocator, as wide as a pointer. */
 	template <typename T, ca::is_allocator A = ca::heap>
@@ -97,10 +97,10 @@ namespace ca {
 			: _object{ca::exchange(other._object, nullptr)}, _allocator{other._allocator} {
 			}
 
-			/* @DOC Failsafe for a skipped destroy(): destroys the object and frees, silently. */
-			~unique(void) noexcept {
-				this->_release();
-			}
+			// Failsafe for a skipped cleanup(): destroys the object and frees, silently.
+			// ~unique(void) noexcept {
+			// 	this->_release();
+			// }
 
 			/* @DOC Takes ownership of object, built in memory of at least sizeof(T) bytes, aligned for
 			   T, from allocator or a copy of it. */
@@ -138,7 +138,7 @@ namespace ca {
 			auto operator=(const self&) -> self& = delete;
 
 			/* @DOC Takes other's object and allocator; the previous object is released as by the
-			   destructor. Traps when T is cleanable and an object remains: destroy() first. */
+			   destructor. Traps when T is cleanable and an object remains: cleanup() first. */
 			auto operator=(self&& other) noexcept -> self& {
 
 				if (this == &other)
@@ -232,15 +232,15 @@ namespace ca {
 				return self{copy, _allocator};
 			}
 
-			/* @DOC Cleans up the object (destroy() when T has one), destroys it and frees its memory:
+			/* @DOC Cleans up the object (cleanup() when T has one), destroys it and frees its memory:
 			   empty after, even when cleanup fails; returns that failure. */
-			[[nodiscard]] auto destroy(void) noexcept -> ca::result<void> {
+			[[nodiscard]] auto cleanup(void) noexcept -> ca::result<void> {
 
 				if (_object == nullptr)
 					return ca::result<void>{};
 				ca::result<void> cleaned{};
 				if constexpr (ca::is_cleanable<T>)
-					cleaned = _object->destroy();
+					cleaned = _object->cleanup();
 				this->_release();
 				_object = nullptr;
 				return cleaned;

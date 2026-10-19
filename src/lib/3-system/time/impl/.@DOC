@@ -1,0 +1,4 @@
+`calendar_of(raw)` turns the platform's `struct tm`, passed as an opaque pointer, into a
+`sys::calendar_time`: month and year-day counted from 1 rather than from 0, the full year rather
+than years since 1900, and the zone offset in seconds. `utc_time` and `local_time` share it, and
+no header names `struct tm`.

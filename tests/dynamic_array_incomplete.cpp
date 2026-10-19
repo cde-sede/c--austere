@@ -12,5 +12,5 @@ auto main(void) -> int {
 		return 1;
 	if (!root.children[0].children.append(node{2, {}}))
 		return 2;
-	return root.children.destroy() ? 0 : 3;
+	return root.children.cleanup() ? 0 : 3;
 }

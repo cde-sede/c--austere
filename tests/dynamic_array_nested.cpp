@@ -10,5 +10,5 @@ auto main(void) -> int {
 		return 2;
 	if (inner.size() != 0 || outer[0][0] != 1)
 		return 3;
-	return outer.destroy() ? 0 : 4;
+	return outer.cleanup() ? 0 : 4;
 }

@@ -21,7 +21,7 @@ struct lst {
 	auto begin(void) { return l.begin(); }
 	auto end(void) { return l.end(); }
 	auto size(void) const -> size_t { return l.size(); }
-	auto destroy(void) -> bool { l.clear(); return true; }
+	auto cleanup(void) -> bool { l.clear(); return true; }
 };
 #else
 #include "5-collections/list/list.hpp"
@@ -40,7 +40,7 @@ struct lst {
 	auto begin(void) { return l.begin(); }
 	auto end(void) { return l.end(); }
 	auto size(void) const -> size_t { return l.size(); }
-	auto destroy(void) -> bool { return static_cast<bool>(l.destroy()); }
+	auto cleanup(void) -> bool { return static_cast<bool>(l.cleanup()); }
 };
 #endif
 
@@ -55,12 +55,12 @@ static auto scrambled(const int i) -> int {
 	return static_cast<int>((static_cast<unsigned>(i) * 2654435761U) >> 8U);
 }
 
-NI static auto append_destroy(void) -> void {
+NI static auto append_cleanup(void) -> void {
 	lst<int> l;
 	for (int i = 0; i < N; ++i)
 		CHECK(l.append(i));
 	sink = l.size();
-	CHECK(l.destroy());
+	CHECK(l.cleanup());
 }
 
 NI static auto prepend_take(void) -> void {
@@ -72,7 +72,7 @@ NI static auto prepend_take(void) -> void {
 		sum += static_cast<uint64_t>(l.take_front());
 	}
 	sink = sum;
-	CHECK(l.destroy());
+	CHECK(l.cleanup());
 }
 
 NI static auto walk(lst<int>& l) -> void {
@@ -89,7 +89,7 @@ NI static auto sort_scrambled(void) -> void {
 		CHECK(l.append(scrambled(i)));
 	l.sort();
 	sink = static_cast<uint64_t>(*l.begin());
-	CHECK(l.destroy());
+	CHECK(l.cleanup());
 }
 
 NI static auto middle_edits(void) -> void {
@@ -105,7 +105,7 @@ NI static auto middle_edits(void) -> void {
 		sum += static_cast<uint64_t>(l.take(added));
 	}
 	sink = sum;
-	CHECK(l.destroy());
+	CHECK(l.cleanup());
 }
 
 NI static auto splice_runs(void) -> void {
@@ -117,7 +117,7 @@ NI static auto splice_runs(void) -> void {
 		all.splice_all(run);
 	}
 	sink = all.size();
-	CHECK(all.destroy());
+	CHECK(all.cleanup());
 }
 
 
@@ -126,13 +126,13 @@ NI static auto splice_runs(void) -> void {
 auto main(void) -> int {
 	if (!open_counters())
 		return 1;
-	bench("append 1e6, then destroy", append_destroy);
+	bench("append 1e6, then cleanup", append_cleanup);
 	bench("prepend twice, pop_front once, 1e6 times", prepend_take);
 	lst<int> l;
 	for (int i = 0; i < N; ++i)
 		CHECK(l.append(i));
 	bench("walk 1e6 nodes 10 times", "the heap packs nodes of one size class together", [&l] { walk(l); });
-	CHECK(l.destroy());
+	CHECK(l.cleanup());
 	bench("sort 1e6 scrambled ints", sort_scrambled);
 	bench("insert + pop at a held middle position, 1e7", middle_edits);
 	bench("build 1e4 runs of 100 and splice each", "splice is O(1) in both; the gap is node allocation", splice_runs);

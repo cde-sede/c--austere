@@ -23,5 +23,5 @@ auto main(void) -> int {
 		return 3;
 	char prompt[16];
 	auto shown = ca::sys::read(output->read_end(), prompt);
-	return shown && ca::sv::str{prompt, *shown} == ca::sv::str{"name? "} && name.destroy() ? 0 : 4;
+	return shown && ca::sv::str{prompt, *shown} == ca::sv::str{"name? "} && name.cleanup() ? 0 : 4;
 }

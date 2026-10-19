@@ -37,6 +37,7 @@ namespace ca {
 		inline constexpr ca::error symlink_loop{40};
 		inline constexpr ca::error not_supported{95};
 		inline constexpr ca::error not_implemented{38};
+		inline constexpr ca::error not_recoverable{131};
 #else
 		inline constexpr ca::error try_again{35};
 		inline constexpr ca::error name_too_long{63};
@@ -44,6 +45,7 @@ namespace ca {
 		inline constexpr ca::error symlink_loop{62};
 		inline constexpr ca::error not_supported{45};
 		inline constexpr ca::error not_implemented{78};
+		inline constexpr ca::error not_recoverable{104};
 #endif
 
 	} // namespace errc

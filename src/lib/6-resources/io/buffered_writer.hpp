@@ -41,9 +41,9 @@ namespace ca {
 
 		/* @DOC ca::io::writer whose buffer comes from allocator A, sized by the caller and
 		   resizable; over a borrowed descriptor (an int or a ca::fs::descriptor that outlives it)
-		   or an adopted one (a ca::fs::descriptor moved in), closed by destroy(). Build with
+		   or an adopted one (a ca::fs::descriptor moved in), closed by cleanup(). Build with
 		   over/adopt, or make_in<buffered_writer<>>(arena, fd, mode, capacity). A writer itself:
-		   print and format_to write into it. Cleanup is destroy() (flush, free, close: first
+		   print and format_to write into it. Cleanup is cleanup() (flush, free, close: first
 		   error); the destructor is a failsafe doing the same silently. */
 		template <ca::is_allocator A = ca::heap>
 		class buffered_writer final {
@@ -91,13 +91,13 @@ namespace ca {
 				: _owned{ca::move(other._owned)}, _writer{ca::move(other._writer)}, _allocator{other._allocator} {
 				}
 
-				/* @DOC Failsafe for a skipped destroy(): flushes, frees and closes, ignoring errors. */
-				~buffered_writer(void) noexcept {
-
-					static_cast<void>(_writer.flush());
-					self::_free(_allocator, _writer.buffer());
-					static_cast<void>(_writer.set_buffer(ca::span<char>{}));
-				}
+				// Failsafe for a skipped cleanup(): flushes, frees and closes, ignoring errors.
+				// ~buffered_writer(void) noexcept {
+				//
+				// 	static_cast<void>(_writer.flush());
+				// 	self::_free(_allocator, _writer.buffer());
+				// 	static_cast<void>(_writer.set_buffer(ca::span<char>{}));
+				// }
 
 				/* @DOC Over fd, borrowed, with a capacity-byte buffer from allocator. */
 				[[nodiscard]] static auto over(const A& allocator, const int fd, const ca::io::buffering mode, const ca::usz capacity) noexcept
@@ -120,7 +120,7 @@ namespace ca {
 					return self::over(A{}, file, mode, capacity);
 				}
 
-				/* @DOC Takes file, closed by destroy(); on failure file is closed too. */
+				/* @DOC Takes file, closed by cleanup(); on failure file is closed too. */
 				[[nodiscard]] static auto adopt(const A& allocator, ca::fs::descriptor&& file, const ca::io::buffering mode, const ca::usz capacity) noexcept
 				-> ca::result<self> {
 
@@ -167,7 +167,7 @@ namespace ca {
 					return _writer.native();
 				}
 
-				/* @DOC Whether destroy() closes the descriptor. */
+				/* @DOC Whether cleanup() closes the descriptor. */
 				[[nodiscard]] constexpr auto owns_descriptor(void) const noexcept -> bool {
 					return _owned.is_open();
 				}
@@ -234,13 +234,13 @@ namespace ca {
 
 				/* @DOC Flushes, frees the buffer, closes an adopted descriptor; the first error. The
 				   writer is closed afterwards whatever happened. */
-				[[nodiscard]] auto destroy(void) noexcept -> ca::result<void> {
+				[[nodiscard]] auto cleanup(void) noexcept -> ca::result<void> {
 
 					auto flushed = _writer.flush();
 					self::_free(_allocator, _writer.buffer());
 					ca::destroy_at(&_writer);
 					ca::construct_at(&_writer);
-					auto closed = _owned.destroy();
+					auto closed = _owned.cleanup();
 					if (!flushed) [[unlikely]]
 						return flushed;
 					return closed;
@@ -274,7 +274,7 @@ namespace ca {
 					if (capacity != 0U) {
 						auto block = allocator.allocate(capacity, ALIGNMENT);
 						if (!block) [[unlikely]] {
-							static_cast<void>(owned.destroy());
+							static_cast<void>(owned.cleanup());
 							return block.propagate();
 						}
 						buffer = ca::span<char>{static_cast<char*>(block->data()), capacity};

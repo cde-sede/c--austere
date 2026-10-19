@@ -1,0 +1,33 @@
+What machine the program runs on.
+
+| Function | Returns |
+|---|---|
+| `sys::processor_count()` | processors online now, at least 1 |
+| `sys::gethostname(buffer)` | the host name written into buffer, NUL-terminated, and its length |
+| `sys::uname()` | a `system_name`: `system()`, `node()`, `release()`, `version()`, `machine()` |
+
+```c++
+#include "ca/machine.hpp"
+#include "ca/sv.hpp"
+
+auto main(void) -> int {
+	const ca::usz workers = ca::sys::processor_count();
+	if (workers < 1U)
+		return 1;
+
+	auto names = ca::sys::uname();
+	if (!names || names->system().empty() || names->machine().empty())
+		return 2;
+
+	char host[256]{};
+	auto length = ca::sys::gethostname(host);
+	if (!length || ca::sv::str{host, *length} != names->node())
+		return 3;
+
+	char tiny[1]{};
+	return ca::sys::gethostname(tiny) ? 4 : 0;
+}
+```
+
+The views of `system_name` point into the object, which holds the names inline: they live as
+long as it does. `gethostname` fails when the name does not fit, instead of truncating it.

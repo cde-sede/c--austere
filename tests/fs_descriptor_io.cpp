@@ -20,7 +20,7 @@ auto main(void) -> int {
 	auto status = d->stat();
 	if (!status || status->size() != 12U || status->kind() != ca::sys::file_kind::regular)
 		return 6;
-	if (!d->sync() || !twin->destroy() || !d->destroy() || d->is_open())
+	if (!d->sync() || !twin->cleanup() || !d->cleanup() || d->is_open())
 		return 7;
 	auto gone = ca::fs::path::from("build/fs_descriptor_io.tmp").and_then([](const ca::fs::path& p) {
 		return p.unlink();

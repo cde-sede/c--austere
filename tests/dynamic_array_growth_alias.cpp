@@ -21,7 +21,7 @@ auto main(void) -> int {
 		return 3;
 	if (!a.resize(3000) || a[2999] != 0 || a[999] != 7)
 		return 4;
-	if (!a.destroy())
+	if (!a.cleanup())
 		return 5;
 
 	ca::dynamic_array<move_only> m;
@@ -35,5 +35,5 @@ auto main(void) -> int {
 	ca::dynamic_array<ca::dynamic_array<int>> n;
 	if (!n.resize(5) || !n[4].append(1) || !n.resize(50) || n[4][0] != 1 || !n[49].empty())
 		return 8;
-	return m.destroy() && n.destroy() ? 0 : 9;
+	return m.cleanup() && n.cleanup() ? 0 : 9;
 }

@@ -1,0 +1,10 @@
+`bit_methods.hpp`: the bit operations written once for `bit_array<N>` and
+`dynamic_bit_array<A>`, as a CRTP base over a type exposing its words. Everything works a 64-bit
+word at a time: `count` is one popcount per word, `find_first` and `find_next` skip zero words and
+finish with `countr_zero`, `all` and `none` compare whole words, and the bits past the size in the
+last word are kept zero so that every word-wise answer is right without masking.
+
+`set_bit_iterator` walks the indices of the set bits in increasing order, clearing the lowest bit
+of a copy of the current word at each step: `for (ca::usz i : bits.ones())` costs one
+`countr_zero` per set bit, not one test per bit. `bit_words_for(n)` is the number of words holding
+n bits.

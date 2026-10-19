@@ -5,6 +5,7 @@
 
 #include "3-system/error/errc.hpp"
 #include "3-system/error/error_message.hpp"
+#include "3-system/error/error_name.hpp"
 #include "3-system/error/last_error.hpp"
 
 #endif // ca_include_error_hpp

@@ -40,7 +40,7 @@ static auto basics(void) noexcept -> int {
 	if (!ones->none() || ones->words()[1] != 0U)
 		return 12;
 	bits.clear();
-	return bits.destroy() && ones->destroy() && copy->destroy() ? 0 : 13;
+	return bits.cleanup() && ones->cleanup() && copy->cleanup() ? 0 : 13;
 }
 
 static auto arena(void) noexcept -> int {
@@ -54,10 +54,10 @@ static auto arena(void) noexcept -> int {
 		if (!bits || bits->size() != 1000U)
 			return 21;
 		bits->set(777U);
-		if (bits->find_first().value_or(0U) != 777U || !bits->destroy())
+		if (bits->find_first().value_or(0U) != 777U || !bits->cleanup())
 			return 22;
 	}
-	return arena.destroy() ? 0 : 23;
+	return arena.cleanup() ? 0 : 23;
 }
 
 auto main(void) -> int {

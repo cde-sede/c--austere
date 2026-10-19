@@ -58,7 +58,7 @@ namespace ca {
 	/* @DOC An error and its trace, owned, in memory from A: what to return as E once an error
 	   leaves the thread or needs formatted context. of(e) copies the thread's trace of e;
 	   context("reading {}", path) adds a frame here (the caller); see also ca::context. Prints
-	   with `{}` as ca::trace::record. Clean up with destroy(); the destructor is a failsafe. */
+	   with `{}` as ca::trace::record. Clean up with cleanup(); the destructor is a failsafe. */
 	template <ca::is_allocator A = ca::heap>
 	class report final {
 
@@ -108,8 +108,8 @@ namespace ca {
 
 			report(self&&) noexcept = default;
 
-			/* @DOC Failsafe for a skipped destroy(): frees, silently. */
-			~report(void) noexcept = default;
+			// Failsafe for a skipped cleanup(): frees, silently.
+			// ~report(void) noexcept = default;
 
 
 			// -- assignment operators ---------------------------------------
@@ -185,10 +185,10 @@ namespace ca {
 			}
 
 			/* @DOC Frees the text and the frames; the error stays. */
-			[[nodiscard]] auto destroy(void) noexcept -> ca::result<void> {
+			[[nodiscard]] auto cleanup(void) noexcept -> ca::result<void> {
 
-				auto text = _text.destroy();
-				auto frames = _frames.destroy();
+				auto text = _text.cleanup();
+				auto frames = _frames.cleanup();
 				if (!text) [[unlikely]]
 					return text;
 				return frames;

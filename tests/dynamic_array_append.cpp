@@ -14,5 +14,5 @@ auto main(void) -> int {
 		sum += x;
 	if (sum != 4950)
 		return 3;
-	return a.destroy() ? 0 : 4;
+	return a.cleanup() ? 0 : 4;
 }

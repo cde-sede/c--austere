@@ -78,7 +78,7 @@ NI static auto fixed(void) -> void {
 		static_cast<void>(ring->read(out));
 		sum += static_cast<unsigned char>(out[i & 63]);
 	}
-	static_cast<void>(ring->destroy());
+	static_cast<void>(ring->cleanup());
 	sink = sum;
 }
 
@@ -95,7 +95,7 @@ NI static auto mixed(void) -> void {
 			sum += *got + static_cast<unsigned char>(out[0]);
 		}
 	}
-	static_cast<void>(ring->destroy());
+	static_cast<void>(ring->cleanup());
 	sink = sum;
 }
 
@@ -110,7 +110,7 @@ NI static auto formatted(void) -> void {
 			sum += *got + static_cast<unsigned char>(out[*got - 1U]);
 		}
 	}
-	static_cast<void>(ring->destroy());
+	static_cast<void>(ring->cleanup());
 	sink = sum;
 }
 #endif

@@ -1,0 +1,17 @@
+`run_context.hpp`: the one function every context goes through, for `ca::with`,
+`ca::context_manager` and `ca::ctx` alike.
+
+`run_context<E>(enter, leave)` pushes a recovery point (layer 1, `impl::recovery`), runs `enter`,
+pops the point and calls `leave` with nullptr on success or the error otherwise. The error is
+what `enter` returned when it returned a failed `result<void, E>`, or what a trap left on the
+point: the failed result's own error when the trap came from reading one (an E taken whole,
+moved when it cannot be copied, else its `ca::error` made an E), or `errc::not_recoverable` with
+the trap's reason in a new trace frame (`trapped_error`).
+
+`is_context_error<E>` admits the error types a context may fail with: `ca::error`, or a type made
+from one through `E::of(error)` (as `ca::report` is) or a constructor.
+
+`enter_recovery` is the function that calls `__builtin_setjmp`. It is `gnu::noipa` on gcc: when the
+body never returns normally, gcc's interprocedural analysis would otherwise conclude that the
+landing path is the only exit and drop the body's stores before a trap, which the caller then
+would not see. Clang only needs it out of line.

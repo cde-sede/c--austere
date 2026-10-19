@@ -80,7 +80,7 @@ NI static auto lines_copy(void) -> void {
 			break;
 		sum += line.size() + 1U;
 	}
-	static_cast<void>(line.destroy());
+	static_cast<void>(line.cleanup());
 	close(fd);
 	sink = sum;
 }

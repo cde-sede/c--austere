@@ -45,5 +45,5 @@ auto main(void) -> int {
 	const ca::span<const ca::byte> text_bytes = ca::span{"abc", 3U};
 	if (text_bytes[2] != 'c' || ca::span<int>{}.data() != nullptr)
 		return 6;
-	return a.destroy() ? 0 : 7;
+	return a.cleanup() ? 0 : 7;
 }

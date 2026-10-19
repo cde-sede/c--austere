@@ -17,6 +17,6 @@ auto main(void) -> int {
 	auto first = ca::format_to(m, "{} [{}] {} {} {} {}|", "lit", ca::sv::str{"view"}, array, *p, none, color::red);
 	auto second = ca::format_to(m, "[{.2}] [{>5}] [{^7}] {{x}} }}|", "truncate", "r", "mid");
 	auto third = ca::format_to(m, "{} {d} {} {p} {}", ca::errc::no_entry, ca::errc::no_entry, nullptr, static_cast<const char*>(nullptr), 1 < 2);
-	const bool ok = first && second && third && *first + *second + *third == m.size() && m.view() == ca::sv::str{"lit [view] xy a/b (null) 3|[tr] [    r] [  mid  ] {x} }|No such file or directory 2 0x0 0x0 true"};
-	return p->destroy() && ok ? 0 : 2;
+	const bool ok = first && second && third && *first + *second + *third == m.size() && m.view() == ca::sv::str{"lit [view] xy a/b (null) 3|[tr] [    r] [  mid  ] {x} }|no_entry 2 0x0 0x0 true"};
+	return p->cleanup() && ok ? 0 : 2;
 }

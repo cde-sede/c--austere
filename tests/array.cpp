@@ -24,7 +24,7 @@ static int cleanups = 0;
 
 struct cleanable {
 	int code;
-	auto destroy(void) noexcept -> ca::result<void> {
+	auto cleanup(void) noexcept -> ca::result<void> {
 		++cleanups;
 		if (code != 0)
 			return ca::fail(code);
@@ -37,7 +37,7 @@ auto main(void) -> int {
 	if (!build())
 		return 1;
 	ca::array<cleanable, 3> parts{cleanable{0}, cleanable{4}, cleanable{5}};
-	auto cleaned = parts.destroy();
+	auto cleaned = parts.cleanup();
 	if (cleaned || cleaned.error().code() != 4 || cleanups != 3)
 		return 2;
 
@@ -50,5 +50,5 @@ auto main(void) -> int {
 	int total = 0;
 	for (const auto& inner : *copy)
 		total += inner.first().value_or(0);
-	return total == 15 && nested.destroy() && copy->destroy() ? 0 : 5;
+	return total == 15 && nested.cleanup() && copy->cleanup() ? 0 : 5;
 }

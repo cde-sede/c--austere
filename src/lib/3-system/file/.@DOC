@@ -1,0 +1,87 @@
+Files and directories through their POSIX calls, one wrapper per call, each returning a
+`ca::result`. Paths are NUL-terminated `const char*`; descriptors are plain `int`s the caller
+closes; buffers are spans, so a `char` array or any contiguous container passes directly.
+
+| Group | Functions |
+|---|---|
+| open and close | `open`, `openat`, `close`, `dup`, `mkstemp`, `fcntl` |
+| data | `read`, `write`, `write_all`, `pread`, `pwrite`, `seek`, `truncate`, `ftruncate`, `fallocate`, `fsync`, `fdatasync` |
+| status | `stat`, `lstat`, `fstat`, `fstatat`, `access`, `faccessat` (a `file_status`, a `file_kind`) |
+| names | `rename`, `rename_noreplace`, `renameat`, `link`, `linkat`, `symlink`, `symlinkat`, `readlink`, `readlinkat`, `realpath`, `unlink`, `unlinkat` |
+| directories | `mkdir`, `mkdirat`, `mkdtemp`, `rmdir`, `opendir`, `fdopendir`, `readdir`, `dirfd`, `closedir`, `chdir`, `getcwd` |
+| ownership | `chmod`, `fchmod`, `chown`, `fchown`, `lchown`, `umask`, `utimens` |
+
+The flags of `open` are the raw values of the `ca::fs` options (`fs::access::READ_ONLY`,
+`fs::create_t::OPEN_VALUE`, ...), defined without `<fcntl.h>`; `fs::descriptor` (layer 6)
+combines them as typed options instead, and closes the descriptor for you.
+
+```c++
+#include "ca/error.hpp"
+#include "ca/file.hpp"
+#include "ca/fs.hpp"
+#include "ca/integers.hpp"
+#include "ca/sv.hpp"
+
+auto main(void) -> int {
+	char dir[] = "example_XXXXXX";
+	if (!ca::sys::mkdtemp(dir))
+		return 1;
+	auto here = ca::sys::openat(ca::sys::at::cwd, dir, ca::fs::access::READ_ONLY | ca::fs::directory_t::OPEN_VALUE, 0U);
+	if (!here)
+		return 2;
+
+	constexpr int create = ca::fs::access::READ_WRITE | ca::fs::create_t::OPEN_VALUE | ca::fs::exclusive_t::OPEN_VALUE
+		| ca::fs::cloexec_t::OPEN_VALUE;
+	auto fd = ca::sys::openat(*here, "notes.txt", create, 0644U);
+	if (!fd || !ca::sys::write_all(*fd, ca::sv::str{"first line\nsecond line\n"}))
+		return 3;
+
+	char word[6]{};
+	auto got = ca::sys::pread(*fd, ca::span<char>{word}.prefix(6U), 11U);
+	if (!got || ca::sv::str{word, *got} != ca::sv::str{"second"})
+		return 4;
+	auto status = ca::sys::fstat(*fd);
+	if (!status || status->size() != 23U || status->kind() != ca::sys::file_kind::regular)
+		return 5;
+	auto end = ca::sys::seek(*fd, 0, ca::sys::seek_origin::end);
+	if (!end || *end != 23 || !ca::sys::close(*fd))
+		return 6;
+
+	auto again = ca::sys::openat(*here, "notes.txt", create, 0644U);
+	if (again || again.error() != ca::errc::exists)
+		return 7;
+
+	auto listing = ca::sys::opendir(dir);
+	if (!listing)
+		return 8;
+	ca::usz entries = 0U;
+	for (auto name = ca::sys::readdir(*listing); name && !name->empty(); name = ca::sys::readdir(*listing))
+		++entries;
+	if (entries != 1U || !ca::sys::closedir(*listing))
+		return 9;
+
+	if (!ca::sys::unlinkat(*here, "notes.txt", 0) || !ca::sys::close(*here))
+		return 10;
+	return ca::sys::rmdir(dir) ? 0 : 11;
+}
+```
+
+### Details worth knowing
+
+- `read`, `write`, `pread`, `pwrite`, `open` and `ftruncate` retry on EINTR. `read` returns 0 only at
+  end of file; `write` may write less than asked, `write_all` loops until everything is written
+  (and on failure an unknown prefix was).
+- `close` releases the descriptor even when it fails, and counts EINTR as success: retrying could
+  close a descriptor another thread was just given.
+- `readdir` skips "." and ".." and returns an empty name at the end; the name is valid until the
+  next call on the stream.
+- `readlink` writes the target unterminated and returns its length; a length equal to the buffer
+  size may mean truncation.
+- `realpath` returns a block to release with `ca::sys::free`.
+- `rename_noreplace` fails with `errc::exists` atomically instead of replacing, where the file
+  system supports it.
+- The `*at` variants resolve relative paths against an open directory (`sys::at::cwd` for the
+  working directory), which avoids races on paths that change underneath; their flags are in
+  `sys::at` (`symlink_nofollow`, `remove_directory`, ...).
+- `file_status` gives times in nanoseconds since the epoch, permissions as the 07777 bits, and the
+  type as a `file_kind`.

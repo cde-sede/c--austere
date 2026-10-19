@@ -14,7 +14,7 @@
    | extend(view) | amortized O(n) | at most two memcpy for trivially copyable T |
    | reserve | O(n) | trivially relocatable T: ca::reallocate, then the shorter run (at most half) moves once |
    | shrink, clone | O(n) | elements laid out from slot 0 |
-   | clear, destroy | O(n) | O(1) for trivially destructible T without destroy() |
+   | clear, cleanup | O(n) | O(1) for trivially destructible T without cleanup() |
    | as_slices | O(1) | the two contiguous runs, front first |
    | find, count, contains | O(n) | over the two runs |
 
@@ -196,7 +196,7 @@ namespace ca {
 	   collections.deque, Rust's VecDeque. append/prepend and pop/pop_front in O(1) at both ends,
 	   operator[] in O(1). Construction allocates nothing; reserve, append, prepend, extend,
 	   shrink and clone acquire memory and can fail, changing nothing then. Elements live in at
-	   most two contiguous runs (as_slices). Clean up with destroy(); the destructor is a failsafe
+	   most two contiguous runs (as_slices). Clean up with cleanup(); the destructor is a failsafe
 	   that frees silently. operator[] traps out of range; get allows the doubt. A stateful A has
 	   no default construction and moves with the elements. */
 	template <typename T, ca::is_allocator A = ca::heap>
@@ -272,10 +272,10 @@ namespace ca {
 			  _capacity{ca::exchange(other._capacity, 0U)}, _allocator{other._allocator} {
 			}
 
-			/* @DOC Failsafe for a skipped destroy(): destroys the elements and frees, silently. */
-			~deque(void) noexcept {
-				this->_release();
-			}
+			// Failsafe for a skipped cleanup(): destroys the elements and frees, silently.
+			// ~deque(void) noexcept {
+			// 	this->_release();
+			// }
 
 
 			// -- assignment operators ---------------------------------------
@@ -283,7 +283,7 @@ namespace ca {
 			auto operator=(const self&) -> self& = delete;
 
 			/* @DOC Takes other's contents and allocator; the previous contents are released as by the
-			   destructor. Traps when T is cleanable and elements remain: clear() or destroy() first. */
+			   destructor. Traps when T is cleanable and elements remain: clear() or cleanup() first. */
 			auto operator=(self&& other) noexcept -> self& {
 
 				if (this == &other)
@@ -543,7 +543,7 @@ namespace ca {
 				for (ca::usz i = 0U; i < _size; ++i) {
 					T* const element = _data + this->_slot(i);
 					if constexpr (ca::is_cleanable<T>) {
-						element->destroy().match([] {
+						element->cleanup().match([] {
 						}, [&first](const ca::error& error) {
 							if (first.ok())
 								first = error;
@@ -558,9 +558,9 @@ namespace ca {
 				return ca::result<void>{};
 			}
 
-			/* @DOC Cleans up every element (destroy() when T has one), then frees the storage: empty,
+			/* @DOC Cleans up every element (cleanup() when T has one), then frees the storage: empty,
 			   no capacity. Returns the first cleanup error; everything is released regardless. */
-			[[nodiscard]] auto destroy(void) noexcept -> ca::result<void> {
+			[[nodiscard]] auto cleanup(void) noexcept -> ca::result<void> {
 
 				auto cleaned = this->clear();
 				this->_release();
@@ -631,7 +631,7 @@ namespace ca {
 					for (const T& element : *this) {
 						auto cloned = element.clone();
 						if (!cloned) {
-							static_cast<void>(copy.destroy());
+							static_cast<void>(copy.cleanup());
 							return cloned.propagate();
 						}
 						ca::construct_at(copy._data + copy._size, ca::move(*cloned));

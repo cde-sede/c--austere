@@ -1,0 +1,40 @@
+Layer 1: what the language and the compiler give, wrapped once. Nothing here includes a
+header outside the compiler's own, allocates, or calls the C library: every function is a
+builtin under a ca name, constexpr wherever the builtin allows it. Every other layer builds on
+these names instead of calling builtins directly, so a builtin's quirks are handled in one
+place.
+
+The folders are independent groups, each with its umbrella in the facade (`ca/bit.hpp`,
+`ca/traits.hpp`, ...):
+
+| Folder | Contents |
+|---|---|
+| `atomic/` | lock-free atomics over the `__atomic` builtins, fences |
+| `bit/` | std `<bit>`: popcount, rotations, counts, bit_cast, byteswap, endian |
+| `config/` | compiler, platform and architecture probes, `ca_debug` |
+| `debug/` | trap, assume, unreachable, source_location, the recovery points of contexts |
+| `floats/` | `f32`, `f64`, checked to be IEEE 754 |
+| `hash/` | wyhash over bytes, one-multiply hash of a word |
+| `integers/` | exact-width aliases (`u8` .. `i64`, `usz`, `isz`, `byte`) |
+| `memory/` | object lifetime (construct, destroy, relocate, launder) and byte primitives |
+| `numeric/` | overflow-checked arithmetic, min, max, align_up |
+| `text/` | the code unit types |
+| `traits/` | every std type trait, as concepts where they answer yes or no |
+| `utility/` | move, forward, exchange, swap, declval, initializer_list |
+
+`limits.hpp`, at the root, gives the range of an arithmetic type, the counterpart of
+`std::numeric_limits`. Every member is consteval: the values exist only at compile time.
+
+```c++
+#include "ca/integers.hpp"
+#include "ca/limits.hpp"
+
+static_assert(ca::limits<ca::u8>::max() == 255U);
+static_assert(ca::limits<ca::i16>::min() == -32768);
+static_assert(ca::limits<double>::epsilon() > 0.0);
+static_assert(ca::limits<float>::lowest() == -ca::limits<float>::max());
+```
+
+Floating point types add `epsilon`, `infinity` and `quiet_nan`; their `min` is the smallest
+positive normal value, as in std, and `lowest` the most negative finite one. `limits<T>` is
+not instantiable: it is a namespace of functions for T.

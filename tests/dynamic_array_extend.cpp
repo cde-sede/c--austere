@@ -11,5 +11,5 @@ auto main(void) -> int {
 		return 2;
 	if (!a.extend(ca::borrowed_slice{values}.prefix(0U)) || a.size() != 500U)
 		return 3;
-	return a.destroy() ? 0 : 4;
+	return a.cleanup() ? 0 : 4;
 }

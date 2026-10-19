@@ -1,0 +1,94 @@
+String views: read-only runs of code units that a view does not own, with Python's
+read-only str methods. `ca::sv::str` (char, UTF-8 by convention) is the everyday one; every
+code unit type has its own.
+
+| View | Units |
+|---|---|
+| `sv::str` | char, UTF-8 by convention |
+| `sv::u8` (`sv::utf8`) | char8_t |
+| `sv::u16` (`sv::utf16`) | char16_t |
+| `sv::u32` (`sv::utf32`) | char32_t, one per code point |
+| `sv::wide` | wchar_t |
+| `sv::basic<C>` | any of them, for generic code |
+
+A view is two words, copied in registers, and is not NUL-terminated. It converts implicitly
+from a C string (a literal included, its NUL excluded), and every string type of layer 5
+(`ca::str`, `inline_str`) converts to it, so a function taking `sv::str` accepts all of them.
+Sizes and indices count code units; `code_point_count()` is Python's `len()`.
+
+```c++
+#include "ca/sv.hpp"
+
+static_assert(ca::sv::str{"  key = value  "}.strip() == ca::sv::str{"key = value"});
+static_assert(ca::sv::str{"report.tar.gz"}.find_last('.').value_or(0U) == 10U);
+static_assert(ca::sv::str{"report.tar.gz"}.strip_suffix(".gz") == ca::sv::str{"report.tar"});
+static_assert(ca::sv::str{"banana"}.count("an") == 2U);
+static_assert(ca::sv::str{"Hello"}.slice(1U, 3U) == ca::sv::str{"ell"});
+static_assert(ca::sv::str{"ABC"}.is_upper() && ca::sv::str{"x9"}.is_alnum());
+static_assert(ca::sv::str{"café"}.size() == 5U);
+static_assert(ca::sv::str{"café"}.code_point_count() == 4U);
+```
+
+### Splitting and partitioning
+
+`split`, `split_lines` and `partition` follow Python's rules exactly, and allocate nothing:
+`split` returns a lazy range computing each piece as the loop advances.
+
+- `split()` cuts on runs of white space and drops empty pieces.
+- `split(sep)` keeps empty pieces, and yields one empty piece for empty text.
+- `split(sep, max)` cuts at most max times, leaving the rest whole in the last piece.
+- `split_lines()` cuts on every line boundary ("\r\n" counts as one); `split_lines(true)` keeps
+  the boundaries.
+- `partition(sep)` and `partition_last(sep)` give the text before, the separator and the text
+  after; when the separator is missing, `found()` is false.
+
+```c++
+#include "ca/sv.hpp"
+
+auto main(void) -> int {
+	const ca::sv::str line{"name=ada,age=36,,lang=en"};
+	int fields = 0;
+	int empty = 0;
+	for (const ca::sv::str field : line.split(",")) {
+		++fields;
+		if (field.empty())
+			++empty;
+	}
+	if (fields != 4 || empty != 1)
+		return 1;
+
+	const auto kv = ca::sv::str{"age=36"}.partition("=");
+	if (!kv.found() || kv.before() != ca::sv::str{"age"} || kv.after() != ca::sv::str{"36"})
+		return 2;
+
+	int words = 0;
+	for (const ca::sv::str word : ca::sv::str{"  the quick\tbrown \n fox "}.split()) {
+		if (word.empty())
+			return 3;
+		++words;
+	}
+	if (words != 4)
+		return 4;
+
+	int lines = 0;
+	for (const ca::sv::str l : ca::sv::str{"a\r\nb\nc"}.split_lines())
+		lines += static_cast<int>(l.size());
+	return lines == 3 ? 0 : 5;
+}
+```
+
+`ca::collect` (layer 5) turns a split into a `dynamic_array` when the pieces must be kept.
+
+### Names that differ from Python
+
+The method set is Python's str where it fits, renamed to snake_case words: `lstrip` and
+`rstrip` are `strip_start` and `strip_end`, `removeprefix` and `removesuffix` are
+`strip_prefix` and `strip_suffix`, `rfind` is `find_last`, `rpartition` is `partition_last`,
+`splitlines` is `split_lines`, and each `isX` is `is_X`. `find` returns an optional index
+instead of -1. The allocating methods (`upper`, `replace`, `center`, `join`, ...) are on
+`ca::basic_str`, since a view cannot hold their result.
+
+Character classes (`is_alpha`, `is_space`, ...) and white space are decided per code point by
+the tables of `ca::unicode`, so `split()` also cuts on non-ASCII spaces. `compare` orders by
+unsigned code unit, which is code point order for UTF-8 and UTF-32. `operator[]` traps out of
+range in every build; `get(i)` returns an optional.

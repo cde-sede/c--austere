@@ -1,0 +1,4 @@
+Internals of `bit/`. `is_bit_unsigned<T>` is the constraint of the counting and rounding
+functions: an unsigned integer that is neither `bool` nor a character type, after removing
+cv-qualifiers. It is the std rule, kept in one concept so every function of `bit/` refuses
+the same types with the same diagnostic.

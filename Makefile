@@ -1,14 +1,17 @@
 # ca - build.
 #
 #   make                 build build/<cxx>-<mode>/libca.a (clang++, debug)
-#   make test            build, then run tests/*.cpp (see tooling/test.sh)
+#   make test            build, then run tests/*.cpp, each its own target (-j runs them in
+#                        parallel; see tooling/test.sh), then count them (tooling/test_summary.sh)
 #   make test T=NAME     run only tests/NAME.cpp; globs and several names work:
 #                        T='optional_self_assign dynamic_array_*'
 #   make includes        regenerate the src/lib/ca/ include facade (`#include "ca/print.hpp"`;
 #                        see tooling/gen_includes.py); every build runs it
 #   make leaks           no system/std header reachable from a header, no symbol
 #                        outside ca in the library (see tooling/leaks.sh)
-#   make matrix          facade check, leaks + test with clang++ and g++, debug and release (T too)
+#   make matrix          facade check, leaks + test with clang++ and g++, debug and release (T too);
+#                        the four are independent (matrix-g++-release, ...), so -j runs them and
+#                        their tests at once, lines tagged with the configuration
 #   make bench           benchmarks against std (see bench/run.sh); B=path (or ring, ...) picks
 #                        bench/path.cpp instead of bench/dynamic_array.cpp
 #   make bench-doc       run every benchmark a header quotes (--BENCH blocks) with clang++ and
@@ -71,12 +74,20 @@ SRCS  := $(shell find src -type f -name '*.cpp')
 OBJS  := $(SRCS:%.cpp=$(BUILD)/%.o)
 DEPS  := $(OBJS:.o=.d)
 
-.PHONY: all includes test leaks matrix bench bench-doc syscalls unicode gen clean fclean
+TEST_MATCHES := $(foreach p,$(or $(T),*),$(or $(wildcard tests/$(p).cpp),$(error no test matches '$(p)')))
+TEST_NAMES   := $(sort $(basename $(notdir $(TEST_MATCHES))))
+TEST_RESULTS := $(TEST_NAMES:%=$(BUILD)/tests/%.result)
+
+CONFIGS := clang++-debug clang++-release g++-debug g++-release
+
+.PHONY: all includes test leaks matrix matrix-includes $(CONFIGS:%=matrix-%) bench bench-doc syscalls unicode gen clean fclean FORCE
 
 all: includes $(LIB)
 
 includes:
+ifeq ($(MATRIX),)
 	@python3 tooling/gen_includes.py
+endif
 
 $(LIB): $(OBJS)
 	@mkdir -p $(@D)
@@ -87,22 +98,26 @@ $(BUILD)/%.o: %.cpp
 	@mkdir -p $(@D)
 	$(CXX) $(CPPFLAGS) $(CXXFLAGS) -c $< -o $@
 
-test: includes $(LIB)
+test: $(TEST_RESULTS)
+	@CXX='$(CXX)' MODE='$(MODE)' BUILD='$(BUILD)' tooling/test_summary.sh $(TEST_NAMES)
+
+$(BUILD)/tests/%.result: tests/%.cpp $(LIB) FORCE | includes
 	@CXX='$(CXX)' MODE='$(MODE)' CXXFLAGS='$(CPPFLAGS) $(CXXFLAGS)' LDFLAGS='$(LDFLAGS)' \
-		LIB='$(LIB)' BUILD='$(BUILD)' T='$(T)' tooling/test.sh
+		LIB='$(LIB)' BUILD='$(BUILD)' TAG='$(TAG)' tooling/test.sh $<
+
+FORCE:
 
 leaks: $(LIB)
 	@CXX='$(CXX)' CXXFLAGS='$(CPPFLAGS) $(CXXFLAGS)' LIB='$(LIB)' tooling/leaks.sh
 
-matrix:
+matrix: $(CONFIGS:%=matrix-%)
+
+matrix-includes:
 	@python3 tooling/gen_includes.py --check
-	@for c in clang++ g++; do \
-		for m in debug release; do \
-			echo "== $$c $$m"; \
-			$(MAKE) --no-print-directory CXX=$$c MODE=$$m leaks || exit 1; \
-			$(MAKE) --no-print-directory CXX=$$c MODE=$$m T='$(T)' test || exit 1; \
-		done; \
-	done
+
+$(CONFIGS:%=matrix-%): matrix-%: matrix-includes
+	@$(MAKE) --no-print-directory MATRIX=1 CXX=$(word 1,$(subst -, ,$*)) MODE=$(word 2,$(subst -, ,$*)) \
+		TAG='$(subst -, ,$*)' T='$(T)' leaks test
 
 bench:
 	@bench/run.sh -c $(CXX) -b $(or $(B),dynamic_array)

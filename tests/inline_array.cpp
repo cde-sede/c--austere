@@ -54,9 +54,9 @@ static auto owning(void) noexcept -> int {
 	if (!lists.empty() || moved.size() != 3U || moved[0].data() != block)
 		return 13;
 	auto first = moved.pop(0U);
-	if (!first || (*first)[0] != 0 || moved[0][0] != 1 || !first->destroy())
+	if (!first || (*first)[0] != 0 || moved[0][0] != 1 || !first->cleanup())
 		return 14;
-	return moved.destroy() && copy->destroy() && moved.empty() ? 0 : 15;
+	return moved.cleanup() && copy->cleanup() && moved.empty() ? 0 : 15;
 }
 
 auto main(void) -> int {

@@ -43,10 +43,10 @@ auto main(void) -> int {
 	ca::arena arena = ca::move(*made);
 	{
 		auto in_arena = ca::make_in<ca::slice<int>>(arena, 16U, 1);
-		if (!in_arena || in_arena->size() != 16U || in_arena->count(1) != 16U || !in_arena->destroy())
+		if (!in_arena || in_arena->size() != 16U || in_arena->count(1) != 16U || !in_arena->cleanup())
 			return 10;
 	}
-	if (!arena.destroy())
+	if (!arena.cleanup())
 		return 11;
-	return sevens->destroy() && zeros->destroy() && copy->destroy() && twin->destroy() && fixed.destroy() && fixed.empty() ? 0 : 12;
+	return sevens->cleanup() && zeros->cleanup() && copy->cleanup() && twin->cleanup() && fixed.cleanup() && fixed.empty() ? 0 : 12;
 }

@@ -45,5 +45,5 @@ auto main(void) -> int {
 		return 10;
 	auto view = r.fill();
 	auto unbuffered = ca::io::reader::unbuffered(ends->read_end());
-	return view && view->empty() && !unbuffered.fill() && line.destroy() && ca::sys::close(ends->read_end()) ? 0 : 11;
+	return view && view->empty() && !unbuffered.fill() && line.cleanup() && ca::sys::close(ends->read_end()) ? 0 : 11;
 }

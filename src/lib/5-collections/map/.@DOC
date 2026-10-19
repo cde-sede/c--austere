@@ -1,0 +1,120 @@
+Maps and sets with Python's dict and set API.
+
+| Type | Structure | Order | Counterpart |
+|---|---|---|---|
+| `hashmap<K, V, A>` | Swiss table, open addressing | none | dict, `std::unordered_map` |
+| `map<K, V, A>` | B-tree of order 12 | sorted by key | `std::map`, with floor and ceiling |
+| `set<K, A>` | the Swiss table over keys | none | set |
+
+Both maps satisfy `ca::is_map`, the dict contract as ca spells it:
+
+| Python | ca |
+|---|---|
+| `d[k]` | `m[k]`: traps when k is absent |
+| `d.get(k)` | `m.get(k)`: an `optional<V&>` |
+| `d[k] = v` | `m.set(k, v)`: a `result`, since it may allocate |
+| `k in d` | `m.contains(k)` |
+| `d.setdefault(k, v)` | `m.setdefault(k, v)`: a pointer to the value, existing or new |
+| `d.pop(k)`, `d.popitem()` | optionals |
+| `d.keys()`, `d.values()`, `d.items()` | the same; iteration yields `item<const K&, V&>` |
+| `{k: v for ... if ...}` in place | `m.retain(predicate)` |
+
+```c++
+#include "ca/hashmap.hpp"
+#include "ca/str.hpp"
+#include "ca/sv.hpp"
+
+auto main(void) -> int {
+	ca::hashmap<ca::str, int> ages{};
+	if (!ages.set("ada", 36) || !ages.set("alan", 41) || !ages.set("ada", 37))
+		return 1;
+	if (ages.size() != 2U || ages["ada"] != 37 || ages.get("grace"))
+		return 2;
+
+	auto count = ages.setdefault("grace", 0);
+	if (!count)
+		return 3;
+	**count += 85;
+
+	int total = 0;
+	for (auto [name, age] : ages.items())
+		total += name.starts_with("a") ? age : 0;
+	if (total != 78 || ages["grace"] != 85)
+		return 4;
+
+	if (!ages.retain([](const ca::str& name, int&) noexcept { return name != ca::sv::str{"alan"}; }))
+		return 5;
+	auto gone = ages.pop("ada");
+	if (!gone || *gone != 37 || ages.size() != 1U)
+		return 6;
+	return ages.cleanup() ? 0 : 7;
+}
+```
+
+### Keys
+
+Keys are looked up through `lookup_of<K>`: `K::view_type` when K has one, so a `hashmap<ca::str, V>`
+is searched with an `sv::str` (or a literal) and never builds a string to look one up. `set` and
+`setdefault` build the key only when it is absent, converting a literal or a view with `K::from`
+when needed. `ca::hash` hashes integers and enums by value, pointers, text by its code units (so
+a `str` hashes as its view) and any type with a `hash() const -> u64` member; `ca::is_hashable`
+lists them.
+
+```c++
+#include "ca/hash.hpp"
+#include "ca/hashmap.hpp"
+#include "ca/integers.hpp"
+#include "ca/is_hashable.hpp"
+
+struct cell final {
+	int x;
+	int y;
+	[[nodiscard]] auto hash(void) const noexcept -> ca::u64 {
+		return ca::hash_word(static_cast<ca::u64>(static_cast<ca::u32>(x)) << 32U | static_cast<ca::u32>(y));
+	}
+	[[nodiscard]] auto operator==(const cell&) const noexcept -> bool = default;
+};
+
+static_assert(ca::is_hashable<cell>);
+
+auto main(void) -> int {
+	ca::hashmap<cell, char> board{};
+	if (!board.set(cell{0, 0}, 'x') || !board.set(cell{1, 2}, 'o'))
+		return 1;
+	return board[cell{1, 2}] == 'o' && !board.contains(cell{2, 1}) && board.cleanup() ? 0 : 2;
+}
+```
+
+### Sorted maps and sets
+
+`map` iterates in key order and adds `first`, `last`, `pop_first`, `floor(k)` (the greatest key not
+above k) and `ceiling(k)`. `set` has Python's set API: `add`, `discard`, `remove`, `pop`, the
+operations `union_with` (`union` is a keyword), `intersection`, `difference`,
+`symmetric_difference` and their `_update` forms, and `is_subset`, `is_superset`, `is_disjoint`.
+
+```c++
+#include "ca/array.hpp"
+#include "ca/map.hpp"
+#include "ca/set.hpp"
+
+auto main(void) -> int {
+	ca::map<int, const char*> grades{};
+	if (!grades.set(90, "A") || !grades.set(80, "B") || !grades.set(70, "C"))
+		return 1;
+	auto grade = grades.floor(85);
+	if (!grade || grade->key != 80 || grades.first().value_or(*grade).key != 70)
+		return 2;
+
+	auto a = ca::set<int>::from(ca::array{1, 2, 3, 4});
+	auto b = ca::set<int>::from(ca::array{3, 4, 5});
+	if (!a || !b)
+		return 3;
+	auto common = a->intersection(*b);
+	if (!common || common->size() != 2U || !common->is_subset(*a) || !common->contains(3))
+		return 4;
+	return grades.cleanup() && a->cleanup() && b->cleanup() && common->cleanup() ? 0 : 5;
+}
+```
+
+Values and keys that are cleanable are cleaned by the map's `cleanup()`; an `item` popped out owns
+its key and value and has its own `cleanup()`.

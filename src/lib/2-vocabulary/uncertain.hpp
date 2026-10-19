@@ -3,6 +3,7 @@
 
 #include "1-primitives/config/debug.hpp"
 #include "1-primitives/debug/is_constant_folded.hpp"
+#include "1-primitives/debug/unreachable.hpp"
 #include "1-primitives/traits/add_pointer.hpp"
 #include "1-primitives/traits/is_constant_evaluated.hpp"
 #include "1-primitives/traits/is_same.hpp"
@@ -27,7 +28,9 @@ namespace ca {
 	   unchecked. An observer (holds, bool, ok, has_value) checks it and makes it a realized value;
 	   any change of contents unchecks it. In debug builds (ca_debug) unchecked access fails: at
 	   compile time when the optimizer proves it (-O1 and up) or in constant evaluation, otherwise
-	   by a trap. Release builds keep no flag.
+	   by a trap. Release builds keep no flag. Accessing an absent value traps in every build;
+	   inside a context (ca::context_manager) that fails the context, with the error when it
+	   is a ca::error.
 
 	   D derives uncertain<D, T>, befriends it, and privately provides: _realizable() const -> bool;
 	   _realized_ref() &, const&, && -> realized<T>&, const&, &&; _absent(F& f) -> f(what stands in
@@ -68,55 +71,55 @@ namespace ca {
 			/* @DOC A checked container is a realized value. */
 			constexpr operator ca::realized<T>&(void) & noexcept requires self::_has_value_access {
 
-				this->_expect_access();
+				this->_expect_value();
 				return this->_self()._realized_ref();
 			}
 
 			constexpr operator const ca::realized<T>&(void) const& noexcept requires self::_has_value_access {
 
-				this->_expect_access();
+				this->_expect_value();
 				return this->_self()._realized_ref();
 			}
 
 			constexpr operator ca::realized<T>&&(void) && noexcept requires self::_has_value_access {
 
-				this->_expect_access();
+				this->_expect_value();
 				return ca::move(*this)._self()._realized_ref();
 			}
 
 			[[nodiscard]] constexpr auto operator->(void) noexcept -> ca::add_pointer<T> requires self::_has_value_access {
 
-				this->_expect_access();
+				this->_expect_value();
 				return this->_self()._realized_ref().operator->();
 			}
 
 			[[nodiscard]] constexpr auto operator->(void) const noexcept -> ca::add_pointer<const T>
 			requires self::_has_value_access {
 
-				this->_expect_access();
+				this->_expect_value();
 				return this->_self()._realized_ref().operator->();
 			}
 
-			/* @DOC The value. Needs a check (debug). */
+			/* @DOC The value. Needs a check (debug); traps when absent. */
 			[[nodiscard]] constexpr auto operator*(void) & noexcept -> T& requires self::_has_value_access {
 
-				this->_expect_access();
+				this->_expect_value();
 				return *this->_self()._realized_ref();
 			}
 
 			[[nodiscard]] constexpr auto operator*(void) const& noexcept -> const T& requires self::_has_value_access {
 
-				this->_expect_access();
+				this->_expect_value();
 				return *this->_self()._realized_ref();
 			}
 
 			[[nodiscard]] constexpr auto operator*(void) && noexcept -> T&& requires self::_has_value_access {
 
-				this->_expect_access();
+				this->_expect_value();
 				return *ca::move(*this)._self()._realized_ref();
 			}
 
-			/* @DOC The value. Needs a check (debug); traps when absent in every build. */
+			/* @DOC The value, as `*`. */
 			[[nodiscard]] constexpr auto value(void) & noexcept -> T& requires self::_has_value_access {
 
 				this->_expect_value();
@@ -218,20 +221,16 @@ namespace ca {
 				return static_cast<D&&>(*this);
 			}
 
-			constexpr auto _expect_access(void) const noexcept -> void {
-
-#if ca_debug
-				this->_expect_checked();
-				if (!this->_self()._realizable())
-					ca::impl::value_accessed_while_absent();
-#endif
-			}
-
 			constexpr auto _expect_value(void) const noexcept -> void {
 
 				this->_expect_checked();
-				if (!this->_self()._realizable())
-					ca::impl::value_accessed_while_absent();
+				if (!this->_self()._realizable()) [[unlikely]] {
+					auto absent = [](const auto&... stand_in) noexcept -> void {
+						ca::impl::value_accessed_while_absent(stand_in...);
+					};
+					this->_self()._absent(absent);
+					ca::unreachable();
+				}
 			}
 
 			template <typename S, typename R, typename O>

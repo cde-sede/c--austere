@@ -19,5 +19,5 @@ auto main(void) -> int {
 		if (opened || opened.error() != ca::errc::not_supported)
 			return 5;
 	}
-	return d->destroy() ? 0 : 6;
+	return d->cleanup() ? 0 : 6;
 }

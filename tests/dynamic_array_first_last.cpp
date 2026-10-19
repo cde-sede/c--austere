@@ -12,5 +12,5 @@ auto main(void) -> int {
 	if (!f || !l || *f != 1 || *l != 3)
 		return 3;
 	*l = 7;
-	return a[2] == 7 && a.destroy() ? 0 : 4;
+	return a[2] == 7 && a.cleanup() ? 0 : 4;
 }

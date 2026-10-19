@@ -1,0 +1,40 @@
+Internals of the vocabulary types.
+
+- `access.hpp`: what happens when an uncertain container is misused. `value_accessed_while_absent`
+  and `error_raised` are the cold, out-of-line trap paths of `*r` on a failure and of
+  `result::raise`; before trapping, `leave_error` hands the error to the innermost context so
+  it fails with that error (and its trace) instead of a bare reason. A `ca::error`, or anything
+  with an `error()` member, goes as its code and trace number; any other error type is offered
+  whole to the context, moved when it cannot be copied.
+- `unit.hpp`: the empty value type standing for `void` in `result<void, E>`, so one
+  implementation serves both.
+- `view_rules.hpp`: the rules every view constructor shares. `is_viewable` allows a view of a
+  temporary only when the elements are const or the temporary is itself a view (it declares
+  `static constexpr bool BORROWED = true`); `is_const_text` names arrays of const code units,
+  which spans and slices refuse because a literal's NUL would come along.
+
+A type of your own that refers to memory it does not own opts into the borrowed rule the same
+way the views do:
+
+```c++
+#include "ca/integers.hpp"
+#include "ca/span.hpp"
+
+struct window final {
+	static constexpr bool BORROWED = true;
+	int* _data;
+	ca::usz _size;
+	[[nodiscard]] auto data(void) const noexcept -> int* {
+		return _data;
+	}
+	[[nodiscard]] auto size(void) const noexcept -> ca::usz {
+		return _size;
+	}
+};
+
+auto main(void) -> int {
+	int values[] = {1, 2, 3};
+	const ca::span<int> view{window{values, 3U}};
+	return view.size() == 3U && view[2] == 3 ? 0 : 1;
+}
+```

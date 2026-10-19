@@ -16,7 +16,7 @@
    | reserve | O(n) | on the heap, trivially relocatable T: ca::reallocate |
    | shrink | O(n) | back into the inline room when size() <= N |
    | move construction, move assignment | O(1) on the heap, O(size) inline | inline elements are relocated: one memcpy for trivially relocatable T |
-   | clear, destroy, clone | O(n) | |
+   | clear, cleanup, clone | O(n) | |
    | find, count, contains, compare, == | O(n) | memchr/memcmp for code units, element loops otherwise |
 
    Space: N * sizeof(T) more than dynamic_array, always; growth past N doubles from N, the
@@ -72,6 +72,7 @@
 #include "1-primitives/traits/is_copy_constructible.hpp"
 #include "1-primitives/traits/is_move_constructible.hpp"
 #include "1-primitives/traits/is_object.hpp"
+#include "1-primitives/traits/is_trivially_destructible.hpp"
 #include "1-primitives/utility/forward.hpp"
 #include "1-primitives/utility/move.hpp"
 #include "2-vocabulary/borrowed_slice.hpp"
@@ -106,7 +107,7 @@ namespace ca {
 	   memory from A: LLVM's SmallVector. Short instances never allocate; long ones behave as a
 	   dynamic_array. reserve, append, extend, emplace, insert, resize and clone acquire memory
 	   once past N and can fail, changing nothing then. Has the sequence methods (cut, find,
-	   compare, fill, reverse) of ca::impl::slice_methods. Clean up with destroy(); the destructor
+	   compare, fill, reverse) of ca::impl::slice_methods. Clean up with cleanup(); the destructor
 	   is a failsafe that frees silently. operator[] traps out of range; get allows the doubt. A
 	   stateful A has no default construction and moves with the elements. */
 	template <typename T, ca::usz N, ca::is_allocator A = ca::heap>
@@ -180,10 +181,15 @@ namespace ca {
 				this->_take(other);
 			}
 
-			/* @DOC Failsafe for a skipped destroy(): destroys the elements and frees, silently. */
+			~small_array(void) noexcept requires ca::is_trivially_destructible<T> = default;
+
 			~small_array(void) noexcept {
-				this->_release();
 			}
+
+			// Failsafe for a skipped cleanup(): destroys the elements and frees, silently.
+			// ~small_array(void) noexcept {
+			// 	this->_release();
+			// }
 
 
 			// -- assignment operators ---------------------------------------
@@ -191,7 +197,7 @@ namespace ca {
 			auto operator=(const self&) -> self& = delete;
 
 			/* @DOC Takes other's contents and allocator; the previous contents are released as by the
-			   destructor. Traps when T is cleanable and elements remain: clear() or destroy() first. */
+			   destructor. Traps when T is cleanable and elements remain: clear() or cleanup() first. */
 			auto operator=(self&& other) noexcept -> self& requires ca::is_move_constructible<T> {
 
 				if (this == &other)
@@ -502,9 +508,9 @@ namespace ca {
 				return this->_truncate(0U);
 			}
 
-			/* @DOC Cleans up every element (destroy() when T has one), then frees the block: empty and
+			/* @DOC Cleans up every element (cleanup() when T has one), then frees the block: empty and
 			   inline. Returns the first cleanup error; everything is released regardless. */
-			[[nodiscard]] auto destroy(void) noexcept -> ca::result<void> {
+			[[nodiscard]] auto cleanup(void) noexcept -> ca::result<void> {
 
 				auto cleaned = this->_truncate(0U);
 				this->_release();
@@ -543,7 +549,7 @@ namespace ca {
 					for (const T& element : *this) {
 						auto cloned = element.clone();
 						if (!cloned) {
-							static_cast<void>(copy.destroy());
+							static_cast<void>(copy.cleanup());
 							return cloned.propagate();
 						}
 						ca::construct_at(copy._end, ca::move(*cloned));
@@ -647,7 +653,7 @@ namespace ca {
 				if constexpr (ca::is_cleanable<T>) {
 					ca::error first{};
 					for (T* element = tail; element != _end; ++element) {
-						element->destroy().match([] {
+						element->cleanup().match([] {
 						}, [&first](const ca::error& error) {
 							if (first.ok())
 								first = error;

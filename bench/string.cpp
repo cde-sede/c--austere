@@ -154,7 +154,7 @@ NI static auto construct_short(void) -> void {
 	for (int i = 0; i < COUNT; ++i) {
 		auto s = ca::str::from("ten chars!");
 		sum += s->size() + static_cast<unsigned char>((*s)[static_cast<ca::usz>(i % 10)]);
-		static_cast<void>(s->destroy());
+		static_cast<void>(s->cleanup());
 	}
 	sink = sum;
 }
@@ -164,7 +164,7 @@ NI static auto construct_medium(void) -> void {
 	for (int i = 0; i < COUNT; ++i) {
 		auto s = ca::str::from("twenty-two characters!");
 		sum += s->size() + static_cast<unsigned char>((*s)[static_cast<ca::usz>(i % 22)]);
-		static_cast<void>(s->destroy());
+		static_cast<void>(s->cleanup());
 	}
 	sink = sum;
 }
@@ -174,7 +174,7 @@ NI static auto push(void) -> void {
 	for (int i = 0; i < 10 * COUNT; ++i)
 		static_cast<void>(s.push(static_cast<char>('a' + i % 26)));
 	sink = s.size();
-	static_cast<void>(s.destroy());
+	static_cast<void>(s.cleanup());
 }
 
 NI static auto append(void) -> void {
@@ -182,7 +182,7 @@ NI static auto append(void) -> void {
 	for (int i = 0; i < COUNT; ++i)
 		static_cast<void>(s.append(ca::sv::str{"word, ", 6U}));
 	sink = s.size();
-	static_cast<void>(s.destroy());
+	static_cast<void>(s.cleanup());
 }
 
 NI static auto format(void) -> void {
@@ -190,7 +190,7 @@ NI static auto format(void) -> void {
 	for (int i = 0; i < COUNT; ++i) {
 		auto s = ca::format("{}={:04}", "key", i);
 		sum += s->size();
-		static_cast<void>(s->destroy());
+		static_cast<void>(s->cleanup());
 	}
 	sink = sum;
 }
@@ -202,7 +202,7 @@ NI static auto array_of_strings(void) -> void {
 		static_cast<void>(list.append(static_cast<ca::str&&>(*s)));
 	}
 	sink = list.size();
-	static_cast<void>(list.destroy());
+	static_cast<void>(list.cleanup());
 }
 
 NI static auto find(void) -> void {
@@ -213,7 +213,7 @@ NI static auto find(void) -> void {
 		sum += at ? *at : ~size_t{0};
 	}
 	sink = sum;
-	static_cast<void>(haystack->destroy());
+	static_cast<void>(haystack->cleanup());
 }
 
 NI static auto count_points(void) -> void {
@@ -245,9 +245,9 @@ NI static auto upper(void) -> void {
 	for (int i = 0; i < 20; ++i) {
 		auto out = text->upper();
 		sum += out->size() + static_cast<unsigned char>((*out)[7]);
-		static_cast<void>(out->destroy());
+		static_cast<void>(out->cleanup());
 	}
-	static_cast<void>(text->destroy());
+	static_cast<void>(text->cleanup());
 	sink = sum;
 }
 

@@ -1,0 +1,35 @@
+`ca::is_character<T>`: the code unit types strings are made of, and the encoding each one
+carries throughout ca.
+
+| Type | Encoding |
+|---|---|
+| `char` | UTF-8 by convention |
+| `char8_t` | UTF-8 |
+| `char16_t` | UTF-16 |
+| `char32_t` | UTF-32: one unit per code point |
+| `wchar_t` | UTF-32 where it has 4 bytes (Linux, macOS), UTF-16 where it has 2 (Windows) |
+
+The concept constrains every string type and view (`sv::basic<C>`, `basic_str<C, A>`) and the
+unicode functions, which pick their decoder by the size of the unit. Sizes and indices always
+count code units; code points are counted only by `ca::unicode` and the formatter's width.
+
+```c++
+#include "ca/text.hpp"
+
+template <ca::is_character C>
+[[nodiscard]] constexpr auto units_of(const C* text) noexcept -> unsigned {
+	unsigned n = 0U;
+	while (text[n] != C{})
+		++n;
+	return n;
+}
+
+static_assert(units_of(u8"é") == 2U);
+static_assert(units_of(u"é") == 1U);
+static_assert(units_of(U"\U0001F600") == 1U);
+static_assert(units_of(u"\U0001F600") == 2U);
+static_assert(!ca::is_character<signed char> && !ca::is_character<unsigned char>);
+```
+
+`signed char` and `unsigned char` are not characters: they are small integers, and
+`unsigned char` is `ca::byte`, raw memory.

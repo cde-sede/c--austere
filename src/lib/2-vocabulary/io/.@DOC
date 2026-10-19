@@ -1,0 +1,116 @@
+The I/O contracts, as concepts: what a byte sink and a byte source must offer. They live here,
+below every implementation, so formatting (layer 5) targets any writer without knowing about
+file descriptors, and the descriptor-backed writers (layer 6) need nothing from formatting.
+
+| Concept | Members |
+|---|---|
+| `io::is_writer` | `write(span<const byte>) -> result<void>`, `flush() -> result<void>`, `error() const -> error`, `clear_error()` |
+| `io::is_windowed_writer` | a writer that also lends its buffer: `window()`, `drain(at)`, `settle(at)` |
+| `io::is_reader` | `read(span<byte>) -> result<usz>`, 0 only at end of input |
+| `io::is_buffered_reader` | a reader that lends its buffer: `fill() -> result<sv::str>`, `consume(n)` |
+| `io::is_stream` | both a reader and a writer |
+
+### Writers report errors twice
+
+Each `write` returns its own result, so a loop can stop as soon as output is impossible. The
+writer also keeps the first error since it was last checked, sticky: code that writes in many
+places (a formatter, a logger) can ignore the per-call results and check once. `error()` peeks
+at the sticky error, `clear_error()` forgets it once handled, and `flush()` writes out what is
+pending, then returns the sticky error and clears it.
+
+A writer is a plain class with those four members; nothing to derive from. Text passes as bytes,
+since a `span<const byte>` views char memory:
+
+```c++
+#include "ca/error.hpp"
+#include "ca/format_to.hpp"
+#include "ca/io.hpp"
+#include "ca/ok.hpp"
+#include "ca/result.hpp"
+#include "ca/span.hpp"
+#include "ca/sv.hpp"
+#include "ca/utility.hpp"
+
+class counting_writer final {
+	private:
+		ca::usz _bytes{0U};
+		ca::error _error{};
+
+	public:
+		auto write(const ca::span<const ca::byte> bytes) noexcept -> ca::result<void> {
+			_bytes += bytes.size();
+			return {};
+		}
+
+		auto flush(void) noexcept -> ca::result<void> {
+			const ca::error e = ca::exchange(_error, ca::ok);
+			if (!e.ok())
+				return ca::failure{e};
+			return {};
+		}
+
+		[[nodiscard]] auto error(void) const noexcept -> ca::error {
+			return _error;
+		}
+
+		auto clear_error(void) noexcept -> void {
+			_error = ca::ok;
+		}
+
+		[[nodiscard]] auto bytes(void) const noexcept -> ca::usz {
+			return _bytes;
+		}
+};
+
+static_assert(ca::io::is_writer<counting_writer>);
+static_assert(!ca::io::is_windowed_writer<counting_writer>);
+
+auto main(void) -> int {
+	counting_writer w;
+	if (!w.write(ca::sv::str{"hello"}))
+		return 1;
+	auto written = ca::format_to(w, "{} + {} = {}", 2, 2, 4);
+	if (!written || *written != 9U || w.bytes() != 14U)
+		return 2;
+	return w.flush() ? 0 : 3;
+}
+```
+
+### Windowed writers write in place
+
+A plain writer receives each piece of formatted text as a copy. A windowed writer instead lends
+its own free buffer space: the formatter writes straight into it, and asks for more space with
+`drain(at)` when the window fills. `settle(at)` then ends the message at `at`, which applies the
+writer's buffering policy (line buffering on a terminal, for instance). A failed drain ends the
+message and rolls back what of it had not left the writer. `fd` writers, `string_writer` and
+`memory_writer` are windowed; `ca::text_writer` (layer 5) is the cursor that drives one.
+
+### Readers
+
+`read(buffer)` fills up to `buffer.size()` bytes and returns how many, 0 only at the end of
+input. Read errors come back per call; nothing is sticky. A buffered reader lends its buffer
+instead: `fill()` returns the bytes buffered and not yet consumed, reading more only when there
+are none, and `consume(n)` marks the first n as read, so a parser works in place.
+
+```c++
+#include "ca/io.hpp"
+#include "ca/memory_reader.hpp"
+#include "ca/sv.hpp"
+
+template <ca::io::is_buffered_reader R>
+[[nodiscard]] static auto count_lines(R& reader) noexcept -> ca::usz {
+	ca::usz lines = 0U;
+	for (;;) {
+		auto chunk = reader.fill();
+		if (!chunk || chunk->empty())
+			return lines;
+		lines += chunk->count('\n');
+		reader.consume(chunk->size());
+	}
+}
+
+auto main(void) -> int {
+	ca::io::memory_reader reader{ca::sv::str{"one\ntwo\nthree\n"}};
+	return count_lines(reader) == 3U ? 0 : 1;
+}
+```

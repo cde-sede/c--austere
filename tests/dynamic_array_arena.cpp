@@ -33,7 +33,7 @@ auto main(void) -> int {
 	auto heap_copy = ca::dynamic_array<int>{}.clone();
 	if (!heap_copy)
 		return 7;
-	if (!a.destroy() || !moved.destroy())
+	if (!a.cleanup() || !moved.cleanup())
 		return 8;
-	return arena.destroy() ? 0 : 9;
+	return arena.cleanup() ? 0 : 9;
 }

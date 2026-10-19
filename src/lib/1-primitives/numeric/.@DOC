@@ -1,0 +1,54 @@
+Small arithmetic that is easy to get wrong by hand.
+
+The overflow functions compute into an out parameter and return true when the exact result did
+not fit; the out parameter then holds the wrapped value. They take any integer types, mixed,
+and any number of operands, and compile to the add, sub or mul followed by one branch on the
+flags (`__builtin_*_overflow`). Every size computation before an allocation in ca goes through
+them: `count * sizeof(T) + header` either fits or the allocation fails cleanly.
+
+```c++
+#include "ca/integers.hpp"
+#include "ca/limits.hpp"
+#include "ca/numeric.hpp"
+
+[[nodiscard]] constexpr auto bytes_for(const ca::usz count, const ca::usz size, ca::usz& out) noexcept -> bool {
+	return !ca::mul_overflow(out, count, size) && !ca::add_overflow(out, out, 16U);
+}
+
+static_assert([] {
+	ca::usz n = 0U;
+	return bytes_for(10U, 8U, n) && n == 96U;
+}());
+
+static_assert([] {
+	ca::usz n = 0U;
+	return !bytes_for(ca::limits<ca::usz>::max() / 2U, 4U, n);
+}());
+
+static_assert([] {
+	ca::u8 out = 0U;
+	return ca::add_overflow(out, 200, 100) && out == 44U;
+}());
+
+static_assert([] {
+	int out = 0;
+	return !ca::sub_overflow(out, 10, 3, 2) && out == 5;
+}());
+```
+
+`align_up(value, alignment)` rounds value up to a multiple of a power of two, in place, and
+returns true on overflow, leaving value unchanged. `ca::min` and `ca::max` return a reference
+to the lesser or greater argument, the first when they are equal; both arguments have the same
+type, so `ca::min(n, 4U)` needs n to be unsigned.
+
+```c++
+#include "ca/integers.hpp"
+#include "ca/numeric.hpp"
+
+static_assert([] {
+	ca::usz offset = 13U;
+	return !ca::align_up(offset, 8U) && offset == 16U;
+}());
+
+static_assert(ca::max(3, 7) == 7 && ca::min(ca::usz{3U}, ca::usz{7U}) == 3U);
+```

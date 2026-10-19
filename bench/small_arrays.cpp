@@ -15,7 +15,7 @@ struct fixed {
 	auto pop(void) -> T { T x = std::move(v.back()); v.pop_back(); return x; }
 	auto operator[](const size_t i) -> T& { return v[i]; }
 	auto size(void) const -> size_t { return v.size(); }
-	auto destroy(void) -> bool { std::vector<T>{}.swap(v); return true; }
+	auto cleanup(void) -> bool { std::vector<T>{}.swap(v); return true; }
 };
 
 template <typename T, unsigned N>
@@ -31,7 +31,7 @@ struct fixed {
 	auto pop(void) -> T { auto x = v.pop(); if (!x) __builtin_trap(); return ca::move(*x); }
 	auto operator[](const size_t i) -> T& { return v[i]; }
 	auto size(void) const -> size_t { return v.size(); }
-	auto destroy(void) -> bool { return static_cast<bool>(v.destroy()); }
+	auto cleanup(void) -> bool { return static_cast<bool>(v.cleanup()); }
 };
 
 template <typename T, unsigned N>
@@ -41,7 +41,7 @@ struct small {
 	auto pop(void) -> T { auto x = v.pop(); if (!x) __builtin_trap(); return ca::move(*x); }
 	auto operator[](const size_t i) -> T& { return v[i]; }
 	auto size(void) const -> size_t { return v.size(); }
-	auto destroy(void) -> bool { return static_cast<bool>(v.destroy()); }
+	auto cleanup(void) -> bool { return static_cast<bool>(v.cleanup()); }
 };
 #endif
 
@@ -60,7 +60,7 @@ NI static auto build_drop(const int count) -> void {
 		for (int k = 0; k < count; ++k)
 			CHECK(a.append(i + k));
 		sum += static_cast<uint64_t>(a[a.size() - 1]);
-		CHECK(a.destroy());
+		CHECK(a.cleanup());
 	}
 	sink = sum;
 }
@@ -76,7 +76,7 @@ NI static auto churn(void) -> void {
 				sum += static_cast<uint64_t>(a.pop());
 	}
 	sink = sum;
-	CHECK(a.destroy());
+	CHECK(a.cleanup());
 }
 
 

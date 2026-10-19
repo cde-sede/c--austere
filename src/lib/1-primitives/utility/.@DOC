@@ -1,0 +1,67 @@
+The `<utility>` basics, without the standard library:
+
+| Name | Does |
+|---|---|
+| `ca::move(x)` | casts to an rvalue: the callee may take x's resources |
+| `ca::forward<T>(x)` | passes x on with the value category it was given |
+| `ca::exchange(obj, v)` | stores v in obj, returns the old value |
+| `ca::swap(a, b)` | exchanges by move; arrays element by element |
+| `ca::addressof(x)` | the address of x, ignoring an overloaded `operator&` |
+| `ca::declval<T>()` | a T&& in unevaluated contexts (decltype, requires) |
+| `ca::initializer_list<E>` | what a braced list `{1, 2, 3}` binds to |
+
+`ca::exchange` is the idiom of every move constructor in ca: take the other object's members
+and leave it empty in one expression.
+
+```c++
+#include "ca/integers.hpp"
+#include "ca/utility.hpp"
+
+class handle final {
+	private:
+		int _fd;
+
+	public:
+		explicit handle(const int fd) noexcept
+		: _fd{fd} {
+		}
+
+		handle(handle&& other) noexcept
+		: _fd{ca::exchange(other._fd, -1)} {
+		}
+
+		[[nodiscard]] auto fd(void) const noexcept -> int {
+			return _fd;
+		}
+};
+
+template <typename... Args>
+[[nodiscard]] auto make_handle(Args&&... args) noexcept -> handle {
+	return handle{ca::forward<Args>(args)...};
+}
+
+[[nodiscard]] constexpr auto total(const ca::initializer_list<int> values) noexcept -> int {
+	int sum = 0;
+	for (const int v : values)
+		sum += v;
+	return sum;
+}
+
+static_assert(total({1, 2, 3}) == 6);
+
+auto main(void) -> int {
+	handle a = make_handle(3);
+	handle b{ca::move(a)};
+	int x = 1;
+	int y = 2;
+	ca::swap(x, y);
+	return a.fd() == -1 && b.fd() == 3 && x == 2 && y == 1 ? 0 : 1;
+}
+```
+
+`initializer_list` is the one name ca defines in namespace std: the compiler looks up
+`std::initializer_list` by that exact name when it sees a braced list, so it is laid out as
+libstdc++ and libc++ lay it out, and used as `ca::initializer_list`.
+
+`type_key.hpp` gives `ca::impl::type_key<T>`, an address unique to T in the whole program:
+type identity without RTTI, used where a context must recognize the error type it is given.

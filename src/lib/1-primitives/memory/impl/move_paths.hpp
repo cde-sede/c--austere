@@ -91,6 +91,7 @@ namespace ca {
 
 		/* @DOC 0 - 64 bytes with 16-byte vectors: what the C memcpy and memmove do in place. */
 		[[gnu::always_inline]] inline auto move_few(char* const to, const char* const from, const ca::usz count) noexcept -> void {
+
 			if (count < 16U) [[unlikely]] {
 				ca::impl::move_ladder(to, from, count);
 				return;

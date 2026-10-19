@@ -53,7 +53,7 @@ static auto growth(void) noexcept -> int {
 	s.clear();
 	if (!s.empty() || !is(s, ""))
 		return 12;
-	return s.destroy() ? 0 : 13;
+	return s.cleanup() ? 0 : 13;
 }
 
 static auto ownership(void) noexcept -> int {
@@ -84,7 +84,7 @@ static auto ownership(void) noexcept -> int {
 	}
 	if (list[99] != ca::sv::str{"a longer string, allocated"} || list[98] != ca::sv::str{"short"})
 		return 27;
-	return list.destroy() && copy->destroy() && moved.destroy() ? 0 : 28;
+	return list.cleanup() && copy->cleanup() && moved.cleanup() ? 0 : 28;
 }
 
 static auto encodings(void) noexcept -> int {
@@ -101,7 +101,7 @@ static auto encodings(void) noexcept -> int {
 	auto l = ca::wstr::from(L"wide");
 	if (!e || e->size() != 2U || !l || l->view().find(L'd') != 2U)
 		return 33;
-	return w.destroy() && u->destroy() && e->destroy() && l->destroy() ? 0 : 34;
+	return w.cleanup() && u->cleanup() && e->cleanup() && l->cleanup() ? 0 : 34;
 }
 
 static auto arena(void) noexcept -> int {
@@ -115,7 +115,7 @@ static auto arena(void) noexcept -> int {
 		return 41;
 	if (!s->append(" and more") || *s != ca::sv::str{"in the arena, past the inline capacity and more"})
 		return 42;
-	return s->destroy() && arena.destroy() ? 0 : 43;
+	return s->cleanup() && arena.cleanup() ? 0 : 43;
 }
 
 auto main(void) -> int {

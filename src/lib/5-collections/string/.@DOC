@@ -1,0 +1,101 @@
+Owned strings with Python's str API.
+
+| Type | Storage | Units |
+|---|---|---|
+| `ca::str` | short text inline, longer from `ca::heap` | char, UTF-8 by convention |
+| `ca::u8str`, `u16str`, `u32str`, `wstr` | the same | char8_t, char16_t, char32_t, wchar_t |
+| `basic_str<C, A>` | the same, any allocator | any code unit |
+| `inline_str<N, C>` | inline, at most N units, never allocates | any code unit |
+
+A `str` is 24 bytes (three words) and holds up to 23 chars inline (11 UTF-16 units, 5 UTF-32),
+so most short strings never allocate. It is always NUL-terminated, so `c_str()` costs nothing.
+`inline_str<N>` has the same API over fixed storage, is constexpr and trivially copyable, and
+fails with `errc::no_space` where a `str` would grow.
+
+Every string converts to its view (`sv::str` for `str`), and has every read-only method of the
+views: `strip`, `split`, `find`, `partition`, `starts_with`, `is_alpha`, ... The methods that
+produce new text return a new string in a `result`: `upper`, `lower`, `title`, `capitalize`,
+`swap_case`, `case_fold`, `replace`, `center`, `justify_left`, `justify_right`, `zero_fill`,
+`expand_tabs`, `repeat`. The modifying ones work in place: `append`, `push`, `insert`, `remove`,
+`assign`, `resize`, `pop`, `clear`, `append_code_point`.
+
+```c++
+#include "ca/str.hpp"
+#include "ca/sv.hpp"
+#include "ca/u16str.hpp"
+
+auto main(void) -> int {
+	auto s = ca::str::from("  Hello, World  ");
+	if (!s)
+		return 1;
+	ca::str& text = *s;
+	if (text.strip() != ca::sv::str{"Hello, World"} || !text.contains("World"))
+		return 2;
+
+	auto shout = text.upper();
+	auto swapped = text.replace("World", "ca");
+	auto boxed = ca::str::from("ok");
+	if (!shout || *shout != ca::sv::str{"  HELLO, WORLD  "})
+		return 3;
+	if (!swapped || swapped->strip() != ca::sv::str{"Hello, ca"})
+		return 4;
+	if (!boxed)
+		return 5;
+	auto centered = boxed->center(6U, U'*');
+	if (!centered || *centered != ca::sv::str{"**ok**"})
+		return 6;
+
+	if (!text.assign(text.strip()) || !text.append("!") || !text.insert(0U, ">> "))
+		return 7;
+	if (text != ca::sv::str{">> Hello, World!"} || text.c_str()[text.size()] != '\0')
+		return 8;
+
+	auto wide = ca::u16str::from(ca::sv::str{"café"});
+	if (!wide || wide->size() != 4U || (*wide)[3] != u'é')
+		return 9;
+	return text.cleanup() && shout->cleanup() && swapped->cleanup() && boxed->cleanup() && centered->cleanup()
+		&& wide->cleanup() ? 0 : 10;
+}
+```
+
+`from` builds a string from a view of the same unit type, or transcodes from another encoding
+(`u16str::from(sv::str{...})`), invalid sequences becoming U+FFFD. Case mappings are the full
+Unicode ones, so `upper()` of "straße" is "STRASSE", and `case_fold()` is the right key for
+caseless comparison.
+
+### join and collect
+
+`ca::join(separator, items)` is Python's `sep.join(items)`: items is any range of things that
+convert to a view (views, strings, C strings, the pieces of a split), measured first so the result
+is allocated once at its exact size. `ca::collect` (in `array/`) gathers a range into a
+`dynamic_array`.
+
+```c++
+#include "ca/collect.hpp"
+#include "ca/inline_str.hpp"
+#include "ca/join.hpp"
+#include "ca/sv.hpp"
+
+constexpr auto tag(void) noexcept -> ca::inline_str<8> {
+	ca::inline_str<8> t;
+	static_cast<void>(t.append("v"));
+	static_cast<void>(t.push('2'));
+	return t;
+}
+
+static_assert(tag() == ca::sv::str{"v2"});
+
+auto main(void) -> int {
+	const char* const names[] = {"ann", "bob", "cy"};
+	auto joined = ca::join(", ", names);
+	if (!joined || *joined != ca::sv::str{"ann, bob, cy"})
+		return 1;
+	auto fields = ca::collect(ca::sv::str{"a,b,,c"}.split(","));
+	if (!fields || fields->size() != 4U)
+		return 2;
+	auto back = ca::join(ca::sv::str{"-"}, *fields);
+	if (!back || *back != ca::sv::str{"a-b--c"})
+		return 3;
+	return joined->cleanup() && fields->cleanup() && back->cleanup() ? 0 : 4;
+}
+```

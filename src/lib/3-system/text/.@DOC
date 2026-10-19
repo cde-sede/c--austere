@@ -1,0 +1,35 @@
+Floating point to text: the one piece of formatting that still goes through the C library
+(snprintf and strtod), kept here so the formatter of layer 5 needs no libc of its own.
+
+- `sys::format_float(buffer, value, conversion, precision, alternate)` writes value as printf's
+  `%f`, `%e`, `%g` or `%a` (and their capitals) would, with a precision when it is not negative
+  and the `#` flag when alternate is set. Width and sign flags are the formatter's job.
+- `sys::format_float_shortest(buffer, value)` writes the fewest `%g` digits that read back as the
+  same value: `0.1` gives "0.1", not "0.10000000000000001". The `f32` overload round-trips as an
+  `f32`, so `0.1F` also gives "0.1". This is what `{}` prints for a float.
+
+Both write into a char span, NUL-terminate it (it must not be empty) and return the length,
+at most `buffer.size() - 1`.
+
+```c++
+#include "ca/floats.hpp"
+#include "ca/sv.hpp"
+#include "ca/text.hpp"
+
+auto main(void) -> int {
+	char buffer[32];
+	ca::usz n = ca::sys::format_float_shortest(buffer, 0.1);
+	if (ca::sv::str{buffer, n} != ca::sv::str{"0.1"})
+		return 1;
+	n = ca::sys::format_float_shortest(buffer, ca::f32{0.1F});
+	if (ca::sv::str{buffer, n} != ca::sv::str{"0.1"})
+		return 2;
+	n = ca::sys::format_float(buffer, 3.14159, 'f', 2, false);
+	if (ca::sv::str{buffer, n} != ca::sv::str{"3.14"})
+		return 3;
+	n = ca::sys::format_float(buffer, 1500.0, 'e', -1, false);
+	return ca::sv::str{buffer, n} == ca::sv::str{"1.500000e+03"} ? 0 : 4;
+}
+```
+
+The C locale applies unless the program called setlocale, so the decimal point is '.'.

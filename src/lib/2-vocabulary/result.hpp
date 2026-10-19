@@ -1,6 +1,7 @@
 #ifndef ca_vocabulary_result_hpp
 #define ca_vocabulary_result_hpp
 
+#include "1-primitives/debug/source_location.hpp"
 #include "1-primitives/memory/construct_at.hpp"
 #include "1-primitives/memory/destroy_at.hpp"
 #include "1-primitives/traits/conditional.hpp"
@@ -12,6 +13,7 @@
 #include "1-primitives/traits/is_nothrow_move_constructible.hpp"
 #include "1-primitives/traits/is_reference.hpp"
 #include "1-primitives/traits/is_same.hpp"
+#include "1-primitives/traits/is_trivially_destructible.hpp"
 #include "1-primitives/traits/is_void.hpp"
 #include "1-primitives/traits/remove_cvref.hpp"
 #include "1-primitives/utility/addressof.hpp"
@@ -89,6 +91,8 @@ namespace ca {
 			static constexpr bool _movable         = ca::is_move_constructible<value_storage> && ca::is_move_constructible<E>;
 			static constexpr bool _nothrow_movable = ca::is_nothrow_move_constructible<value_storage>
 				&& ca::is_nothrow_move_constructible<E>;
+			static constexpr bool _trivially_destructible = ca::is_trivially_destructible<ca::realized<value_storage>>
+				&& ca::is_trivially_destructible<ca::realized<E>>;
 
 
 		public:
@@ -160,6 +164,8 @@ namespace ca {
 				else
 					this->_construct_error(*ca::move(other._error));
 			}
+
+			constexpr ~result(void) noexcept requires self::_trivially_destructible = default;
 
 			constexpr ~result(void) noexcept {
 				this->_destroy();
@@ -239,6 +245,59 @@ namespace ca {
 
 
 			// -- methods ----------------------------------------------------
+
+			/* @DOC Traps on a failure, at once: inside a context (ca::context_manager) the context
+			   fails with the error, its trace extended with "error raised". With on_error, traps
+			   with the error of on_error(error) instead, a ca::failure: `r.raise([](ca::error e) {
+			   return ca::trace::context(e, "opening config"); })`. Counts as a check, and returns
+			   the result: `use(*r.raise());`, `d.cleanup().raise();`. */
+			constexpr auto raise(const ca::source_location where = ca::source_location::current()) & noexcept -> self& {
+
+				if (!this->_observe(_ok)) [[unlikely]]
+					ca::impl::error_raised(*_error, where, false);
+				return *this;
+			}
+
+			constexpr auto raise(const ca::source_location where = ca::source_location::current()) const& noexcept -> const self& {
+
+				if (!this->_observe(_ok)) [[unlikely]]
+					ca::impl::error_raised(*_error, where, false);
+				return *this;
+			}
+
+			constexpr auto raise(const ca::source_location where = ca::source_location::current()) && noexcept -> self&& {
+
+				if (!this->_observe(_ok)) [[unlikely]]
+					ca::impl::error_raised(*_error, where, false);
+				return ca::move(*this);
+			}
+
+			template <typename F>
+			requires (!ca::is_same<ca::remove_cvref<F>, ca::source_location>)
+			constexpr auto raise(F&& on_error, const ca::source_location where = ca::source_location::current()) & noexcept -> self& {
+
+				if (!this->_observe(_ok)) [[unlikely]]
+					self::_raise_with(on_error, *_error, where);
+				return *this;
+			}
+
+			template <typename F>
+			requires (!ca::is_same<ca::remove_cvref<F>, ca::source_location>)
+			constexpr auto raise(F&& on_error, const ca::source_location where = ca::source_location::current()) const& noexcept -> const self& {
+
+				if (!this->_observe(_ok)) [[unlikely]]
+					self::_raise_with(on_error, *_error, where);
+				return *this;
+			}
+
+			template <typename F>
+			requires (!ca::is_same<ca::remove_cvref<F>, ca::source_location>)
+			constexpr auto raise(F&& on_error, const ca::source_location where = ca::source_location::current()) && noexcept -> self&& {
+
+				if (!this->_observe(_ok)) [[unlikely]]
+					self::_raise_with(on_error, *ca::move(_error), where);
+				return ca::move(*this);
+			}
 
 			/* @DOC The error, convertible to any result<U, E>: `if (!r) return r.propagate();`.
 			   Needs a check; traps on success. */
@@ -380,6 +439,14 @@ namespace ca {
 				this->_expect_checked();
 				if (_ok)
 					ca::impl::error_accessed_on_a_success();
+			}
+
+			template <typename F, typename G>
+			[[noreturn, gnu::cold]] static auto _raise_with(F& on_error, G&& error, const ca::source_location where) noexcept -> void {
+
+				auto raised = on_error(ca::forward<G>(error));
+				static_assert(ca::impl::is_failure<decltype(raised)>, "ca::result::raise: on_error must return a ca::failure");
+				ca::impl::error_raised(raised.error(), where, true);
 			}
 
 			template <typename... Args>

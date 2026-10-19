@@ -22,7 +22,7 @@ auto main(void) -> int {
 		return 3;
 	if (a.pop(4))
 		return 4;
-	if (!a.destroy())
+	if (!a.cleanup())
 		return 5;
 
 	{
@@ -37,6 +37,8 @@ auto main(void) -> int {
 		auto last = t.pop(2);
 		if (!last || last->value != 3 || t.size() != 2)
 			return 8;
+		if (!t.cleanup())
+			return 10;
 	}
 	return tracked::alive == 0 ? 0 : 9;
 }

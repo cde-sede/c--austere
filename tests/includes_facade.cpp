@@ -17,5 +17,5 @@ auto main(void) -> int {
 	auto printed = ca::print("{}\n", m.view());
 	if (!formatted || !printed || *printed != 2U)
 		return 4;
-	return values.destroy() && ca::flush() && m.view() == ca::sv::str{"7"} ? 0 : 3;
+	return values.cleanup() && ca::flush() && m.view() == ca::sv::str{"7"} ? 0 : 3;
 }

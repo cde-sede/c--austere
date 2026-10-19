@@ -1,0 +1,113 @@
+I/O in memory: readers and writers over buffers and strings, a ring buffer stream, and the
+line and whole-input readers that work over any buffered reader, a file or a string alike.
+
+| Type | Role |
+|---|---|
+| `io::memory_writer` | writes into fixed memory the caller provides: the snprintf of `format_to` |
+| `io::string_writer<S>` | appends to a `ca::str` or `inline_str`, formatting in place in its spare capacity |
+| `io::memory_reader` | a buffered reader over text it does not own: parse a string like a file |
+| `io::ring_buffer<A>` | an in-memory byte stream (FIFO) over a power-of-two ring |
+| `io::read_line(reader, line)` | the next line, without its `'\n'`, into a string or char array |
+| `io::read_to_end(reader, out)` | the rest of the input appended to a string or char array |
+
+All writers here are windowed (`io::is_windowed_writer`): `format_to` writes straight into their
+memory. A message that does not fit is dropped whole, never cut, and the call fails with
+`errc::no_space` (or out of memory for a growable string), also kept sticky until `flush()`.
+
+```c++
+#include "ca/error.hpp"
+#include "ca/format_to.hpp"
+#include "ca/inline_str.hpp"
+#include "ca/memory_writer.hpp"
+#include "ca/str.hpp"
+#include "ca/string_writer.hpp"
+
+auto main(void) -> int {
+	char buffer[16];
+	ca::io::memory_writer m{buffer};
+	if (!ca::format_to(m, "{}+{}", 2, 3) || m.view() != ca::sv::str{"2+3"})
+		return 1;
+	auto overflow = ca::format_to(m, "{:>20}", "x");
+	if (overflow || overflow.error() != ca::errc::no_space || m.view() != ca::sv::str{"2+3"})
+		return 2;
+	m.clear();
+
+	ca::str log{};
+	ca::io::string_writer<ca::str> out{log};
+	for (int i = 0; i < 3; ++i)
+		if (!ca::format_to(out, "[{}]", i))
+			return 3;
+	if (!out.flush() || log != ca::sv::str{"[0][1][2]"})
+		return 4;
+
+	ca::inline_str<4> tag;
+	ca::io::string_writer<ca::inline_str<4>> bounded{tag};
+	auto too_long = ca::format_to(bounded, "{}", 123456);
+	return !too_long && tag.empty() && log.cleanup() ? 0 : 5;
+}
+```
+
+### Reading lines
+
+`read_line` and `read_to_end` take any `io::is_buffered_reader`: a `memory_reader` here, an
+`io::reader` over a file or stdin in layer 6. Chunks are copied straight from the reader's buffer
+into the line, whatever its length. `read_line` drops the `'\n'` but keeps a `'\r'` before it (strip
+it with `strip_end()` for CRLF input), and returns false at the end of input when nothing was left.
+For a line that fits
+the reader's buffer, `reader.read_until('\n')` returns a view of it without any copy.
+
+```c++
+#include "ca/dynamic_array.hpp"
+#include "ca/memory_reader.hpp"
+#include "ca/read_line.hpp"
+#include "ca/read_to_end.hpp"
+#include "ca/str.hpp"
+
+auto main(void) -> int {
+	ca::io::memory_reader reader{"name=ada\nlang=c++\n\nrest of the file"};
+	ca::str line{};
+	int fields = 0;
+	for (;;) {
+		auto got = ca::io::read_line(reader, line);
+		if (!got)
+			return 1;
+		if (!*got || line.empty())
+			break;
+		fields += line.partition("=").found() ? 1 : 0;
+	}
+	if (fields != 2)
+		return 2;
+	ca::dynamic_array<char> rest{};
+	auto n = ca::io::read_to_end(reader, rest);
+	if (!n || *n != 16U || !reader.at_end())
+		return 3;
+	return line.cleanup() && rest.cleanup() ? 0 : 4;
+}
+```
+
+### Ring buffer
+
+`ring_buffer<A>` is a stream (`io::is_stream`) over a ring of bytes from A, its capacity rounded up
+to a power of two (`make(capacity)`). Writes append, reads take from the front; it is also a
+buffered reader (`fill`, `consume`) and a windowed writer, so text can be formatted into it and
+parsed out of it in place. A write that does not fit is refused whole.
+
+```c++
+#include "ca/format_to.hpp"
+#include "ca/ring_buffer.hpp"
+#include "ca/sv.hpp"
+
+auto main(void) -> int {
+	auto made = ca::io::ring_buffer<>::make(12U);
+	if (!made || made->capacity() != 16U)
+		return 1;
+	ca::io::ring_buffer<>& ring = *made;
+	if (!ring.write(ca::sv::str{"hello "}) || !ca::format_to(ring, "{}!", 42))
+		return 2;
+	char out[16];
+	auto got = ring.read(out);
+	if (!got || ca::sv::str{out, *got} != ca::sv::str{"hello 42!"} || !ring.empty())
+		return 3;
+	return ring.cleanup() ? 0 : 4;
+}
+```

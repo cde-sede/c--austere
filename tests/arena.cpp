@@ -48,5 +48,5 @@ auto main(void) -> int {
 	auto after_reset = allocator.allocate(16U, 16U);
 	if (!after_reset)
 		return 10;
-	return other.destroy() && !other.holds() ? 0 : 11;
+	return other.cleanup() && !other.holds() ? 0 : 11;
 }

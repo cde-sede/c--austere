@@ -222,7 +222,7 @@ namespace ca {
 		   filesystem; the others make the system calls their names say. Building a path allocates
 		   and can fail; so there is no operator/, use join. Every path, array and buffer a path
 		   builds comes from its allocator. Embedded NULs are rejected (errc::invalid_argument).
-		   Clean up with destroy(); the destructor is a failsafe. */
+		   Clean up with cleanup(); the destructor is a failsafe. */
 		template <ca::is_allocator A = ca::heap>
 		class basic_path final {
 
@@ -287,10 +287,10 @@ namespace ca {
 				: _data{ca::exchange(other._data, nullptr)}, _size{ca::exchange(other._size, 0U)}, _allocator{other._allocator} {
 				}
 
-				/* @DOC Failsafe for a skipped destroy(): frees silently. */
-				~basic_path(void) noexcept {
-					this->_release();
-				}
+				// Failsafe for a skipped cleanup(): frees silently.
+				// ~basic_path(void) noexcept {
+				// 	this->_release();
+				// }
 
 				/* @DOC text, normalized, in memory from allocator. */
 				[[nodiscard]] static auto from(const A& allocator, const ca::sv::str text) noexcept -> ca::result<self> {
@@ -512,7 +512,7 @@ namespace ca {
 				}
 
 				/* @DOC Frees the text, leaving ".". Never fails. */
-				[[nodiscard]] auto destroy(void) noexcept -> ca::result<void> {
+				[[nodiscard]] auto cleanup(void) noexcept -> ca::result<void> {
 
 					this->_release();
 					_data = nullptr;
@@ -529,7 +529,7 @@ namespace ca {
 					if (!base)
 						return base.propagate();
 					auto joined = base->join(*this);
-					static_cast<void>(base->destroy());
+					static_cast<void>(base->cleanup());
 					return joined;
 				}
 
@@ -555,7 +555,7 @@ namespace ca {
 					if (!home)
 						return home.propagate();
 					auto joined = home->join(text.without_prefix(2U));
-					static_cast<void>(home->destroy());
+					static_cast<void>(home->cleanup());
 					return joined;
 				}
 
@@ -611,7 +611,7 @@ namespace ca {
 							return up.propagate();
 						const bool top = *up == *this;
 						auto parents = top ? ca::result<void>{} : up->mkdirs(mode);
-						static_cast<void>(up->destroy());
+						static_cast<void>(up->cleanup());
 						if (top)
 							return made;
 						if (!parents)
@@ -742,7 +742,7 @@ namespace ca {
 					if (failed.ok() && !closed)
 						failed = closed.error();
 					if (!failed.ok()) {
-						static_cast<void>(entries.destroy());
+						static_cast<void>(entries.cleanup());
 						return ca::failure{failed};
 					}
 					return entries;
@@ -837,7 +837,7 @@ namespace ca {
 					auto read = ca::fs::impl::read_to_end(*fd, contents);
 					auto closed = ca::sys::close(*fd);
 					if (!read || !closed) {
-						static_cast<void>(contents.destroy());
+						static_cast<void>(contents.cleanup());
 						return read ? closed.propagate() : read.propagate();
 					}
 					return contents;
@@ -850,7 +850,7 @@ namespace ca {
 					ca::dynamic_array<self, A> found{_allocator};
 					auto globbed = deep ? self::_glob_deep(*this, pattern, found) : self::_glob_into(*this, pattern, found);
 					if (!globbed) {
-						static_cast<void>(found.destroy());
+						static_cast<void>(found.cleanup());
 						return globbed.propagate();
 					}
 					return found;
@@ -874,7 +874,7 @@ namespace ca {
 							return child.propagate();
 						auto status = child->lstat();
 						auto outcome = status ? self::_glob_into(*child, rest, found) : ca::result<void>{};
-						static_cast<void>(child->destroy());
+						static_cast<void>(child->cleanup());
 						return outcome;
 					}
 					auto entries = base.iterdir();
@@ -888,7 +888,7 @@ namespace ca {
 						if (!outcome)
 							break;
 					}
-					static_cast<void>(entries->destroy());
+					static_cast<void>(entries->cleanup());
 					return outcome;
 				}
 
@@ -909,7 +909,7 @@ namespace ca {
 						if (!outcome)
 							break;
 					}
-					static_cast<void>(entries->destroy());
+					static_cast<void>(entries->cleanup());
 					return outcome;
 				}
 

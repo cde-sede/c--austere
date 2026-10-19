@@ -331,7 +331,7 @@ def split_function(t):
 			t = t[:ex.start()] + 'explicit ' + t[close + 1:].lstrip()
 	m = re.search(r'\boperator\s*\(\s*\)\s*\(', t)
 	open_ = m.end() - 1 if m else t.find('(')
-	if open_ < 0:
+	if open_ < 0 or re.match(r'\s*[*&]', t[open_ + 1:]):
 		return None
 	close = match_close(t, open_, '(', ')')
 	if close < 0:
@@ -1104,6 +1104,10 @@ def parse_function(d, fn):
 
 
 def parse_variable(d, rest):
+	m = re.match(r'([^(]*)\(\s*[*&]\s*([A-Za-z_]\w*)\s*\)\s*\(', rest)
+	if m:
+		d.what, d.name, d.full, d.words = 'variable', m.group(2), m.group(2), tuple(m.group(1).split())
+		return
 	decl = re.split(r'=|\{|\[|(?<!:):(?!:)', rest, maxsplit=1)[0]
 	m = re.search(r'([A-Za-z_]\w*)\s*$', decl)
 	if m:
@@ -1189,7 +1193,8 @@ class Kind:
 def classify(s, t):
 	_, rest = strip_templates(t)
 	rest = strip_attrs(rest)
-	lambda_ = bool(LAMBDA.search(t)) and not re.search(r'\boperator\s*\[\s*\]', t)
+	bare = re.sub(r'\s*\[\[.*?\]\]', '', t)
+	lambda_ = bool(LAMBDA.search(bare)) and not re.search(r'\boperator\s*\[\s*\]', t)
 	if s.in_body:
 		if lambda_:
 			return Kind('block', lambda_=True)
@@ -1200,8 +1205,8 @@ def classify(s, t):
 			return Kind('enum')
 		if re.match(r'switch\b', t):
 			return Kind('switch')
-		if (not t or t.endswith(')') or re.search(r'\b(else|do|try)$', t)
-				or re.search(r'\)\s*(const|noexcept|mutable)$', t)):
+		if (not bare or bare.endswith(')') or re.search(r'\b(else|do|try)$', bare)
+				or re.search(r'\)\s*(const|noexcept|mutable)$', bare)):
 			return Kind('block')
 		return Kind('init')
 	m = re.match(r'(?:inline\s+)?namespace\b\s*([\w:]*)', t)

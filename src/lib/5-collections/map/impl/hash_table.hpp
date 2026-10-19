@@ -142,9 +142,10 @@ namespace ca {
 				  _growth{ca::exchange(other._growth, 0U)}, _allocator{other._allocator} {
 				}
 
-				~hash_table(void) noexcept {
-					this->_release();
-				}
+				// Failsafe for a skipped cleanup(): destroys the slots and frees, silently.
+				// ~hash_table(void) noexcept {
+				// 	this->_release();
+				// }
 
 
 				// -- assignment operators -----------------------------------
@@ -361,7 +362,7 @@ namespace ca {
 				}
 
 				/* @DOC clear(), then frees the storage. */
-				[[nodiscard]] auto destroy(void) noexcept -> ca::result<void> {
+				[[nodiscard]] auto cleanup(void) noexcept -> ca::result<void> {
 
 					auto cleaned = this->clear();
 					this->_release();
@@ -395,7 +396,7 @@ namespace ca {
 							auto cloned = ca::impl::make_clone(_slots[index]);
 							if (!cloned) {
 								ca::fill_bytes(copy._control + index, group::EMPTY, capacity - index);
-								static_cast<void>(copy.destroy());
+								static_cast<void>(copy.cleanup());
 								return cloned.propagate();
 							}
 							ca::construct_at(copy._slots + index, ca::move(*cloned));

@@ -1,0 +1,99 @@
+The two halves of working with raw storage: object lifetime, and byte primitives. Containers
+of layer 5 are built from these; user code rarely needs them except to write a container.
+
+### Object lifetime
+
+| Function | Does |
+|---|---|
+| `construct_at(p, args...)` | constructs a T at p (placement new, without `<new>`) |
+| `destroy_at(p)`, `destroy_n(p, n)` | ends the lifetime of one or n objects, in order |
+| `copy_construct_n(from, n, to)` | copy-constructs n objects into uninitialized storage |
+| `relocate_n(from, n, to)` | moves n objects to uninitialized storage and ends the sources |
+| `relocate_overlapping_n(from, n, to)` | the same within one array, ranges overlapping |
+| `launder(p)` | a pointer to the object now living where p points |
+
+Relocation is the operation a growing array needs: move-construct each element at its new
+place, then destroy the old one. For a trivially relocatable type the pair is a single
+memcpy. `ca::is_trivially_relocatable<T>` holds for trivially copyable types and for types that
+opt in with `static constexpr bool TRIVIALLY_RELOCATABLE = true`; a type may opt in when
+nothing points into it and nothing registers its address, which is true of most owning types
+(strings, arrays, unique pointers).
+
+```c++
+#include "ca/integers.hpp"
+#include "ca/memory.hpp"
+
+struct buffer final {
+	static constexpr bool TRIVIALLY_RELOCATABLE = true;
+	int* data;
+	ca::usz size;
+	explicit buffer(const ca::usz n) noexcept : data{nullptr}, size{n} {
+	}
+	buffer(buffer&& other) noexcept : data{other.data}, size{other.size} {
+		other.data = nullptr;
+	}
+	~buffer(void) noexcept {
+	}
+};
+
+static_assert(ca::is_trivially_relocatable<buffer>);
+static_assert(ca::is_trivially_relocatable<int>);
+
+auto main(void) -> int {
+	alignas(buffer) ca::byte from[2U * sizeof(buffer)];
+	alignas(buffer) ca::byte to[2U * sizeof(buffer)];
+	buffer* const src = reinterpret_cast<buffer*>(from);
+	buffer* const dst = reinterpret_cast<buffer*>(to);
+	ca::construct_at(src, 3U);
+	ca::construct_at(src + 1, 5U);
+	ca::relocate_n(src, 2U, dst);
+	const bool moved = dst[0].size == 3U && dst[1].size == 5U;
+	ca::destroy_n(dst, 2U);
+	return moved ? 0 : 1;
+}
+```
+
+`placement_new.hpp` declares the only placement `operator new` ca uses, tagged with a private
+type so it never collides with the one of `<new>` when both are visible; call `construct_at`
+rather than writing `new` directly.
+
+### Bytes and code units
+
+| Function | C equivalent |
+|---|---|
+| `copy_bytes(to, from, n)` | memcpy |
+| `move_bytes(to, from, n)` | memmove |
+| `fill_bytes(to, value, n)` | memset |
+| `compare_bytes(a, b, n)` | memcmp, constexpr |
+| `find_byte(p, c, n)` | memchr |
+| `string_length(s)` | strlen, any code unit type, constexpr |
+| `compare_units`, `equal_units`, `find_unit` | memcmp, memchr over char16_t and char32_t too |
+
+Each takes a count of 0 with any pointer, null included, unlike the C functions. `copy_bytes`
+and `move_bytes` are the compiler's builtins, so small constant copies become a few moves; the
+calls left over reach the memcpy and memmove that ca itself defines on x86-64 (see
+`memory/impl/`), so no libc is needed for them.
+
+```c++
+#include "ca/integers.hpp"
+#include "ca/memory.hpp"
+
+static_assert(ca::string_length("hello") == 5U);
+static_assert(ca::string_length(u"wide") == 4U);
+static_assert(ca::compare_bytes("abc", "abd", 3U) < 0);
+
+auto main(void) -> int {
+	char line[16] = "key=value";
+	const char* const eq = ca::find_byte(line, '=', ca::string_length(line));
+	if (eq == nullptr || eq - line != 3)
+		return 1;
+	ca::move_bytes(line + 1, line, 3U);
+	ca::fill_bytes(line, ca::u8{'_'}, 1U);
+	char copy[16];
+	ca::copy_bytes(copy, line, sizeof(line));
+	return ca::compare_bytes(copy, "_keyvalue", 10U) == 0 ? 0 : 2;
+}
+```
+
+`max_alignment` is the alignment `malloc` and `operator new` guarantee, `alignof(max_align_t)`,
+taken from the compiler and checked against `<stddef.h>` when the library builds.

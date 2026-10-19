@@ -49,7 +49,7 @@ static auto queue(void) noexcept -> int {
 	auto copy = d.clone();
 	if (!copy || !in_order(*copy, 992) || copy->capacity() != 16U)
 		return 11;
-	return d.clear() && d.empty() && d.capacity() == 128U && d.destroy() && copy->destroy() && d.capacity() == 0U ? 0 : 12;
+	return d.clear() && d.empty() && d.capacity() == 128U && d.cleanup() && copy->cleanup() && d.capacity() == 0U ? 0 : 12;
 }
 
 static auto wrapped_growth(void) noexcept -> int {
@@ -61,7 +61,7 @@ static auto wrapped_growth(void) noexcept -> int {
 			return 20;
 		if (i % 7 == 6) {
 			auto front = d.pop_front();
-			if (!front || !front->destroy())
+			if (!front || !front->cleanup())
 				return 21;
 		}
 	}
@@ -90,12 +90,12 @@ static auto wrapped_growth(void) noexcept -> int {
 		else
 			++backs;
 	}
-	if (backs != 20U || pinned[99][0] != 95 || pinned[0][0] != 99 || !pinned.destroy())
+	if (backs != 20U || pinned[99][0] != 95 || pinned[0][0] != 99 || !pinned.cleanup())
 		return 28;
 	ca::deque<int> full;
 	if (!full.extend({1, 2, 3, 4}) || full.size() != full.capacity() || !full.append(full[0]) || full.last().value_or(0) != 1)
 		return 24;
-	return d.destroy() && copy->destroy() && full.destroy() ? 0 : 25;
+	return d.cleanup() && copy->cleanup() && full.cleanup() ? 0 : 25;
 }
 
 static auto arena(void) noexcept -> int {
@@ -111,10 +111,10 @@ static auto arena(void) noexcept -> int {
 		for (int i = 0; i < 100; ++i)
 			if (!d->prepend(99 - i))
 				return 32;
-		if (!in_order(*d, 0) || !d->destroy())
+		if (!in_order(*d, 0) || !d->cleanup())
 			return 33;
 	}
-	return arena.destroy() ? 0 : 34;
+	return arena.cleanup() ? 0 : 34;
 }
 
 auto main(void) -> int {

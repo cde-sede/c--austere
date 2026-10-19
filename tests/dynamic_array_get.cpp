@@ -19,5 +19,5 @@ auto main(void) -> int {
 	auto c = constant.get(0);
 	if (!c || *c != 50)
 		return 6;
-	return a.destroy() ? 0 : 7;
+	return a.cleanup() ? 0 : 7;
 }

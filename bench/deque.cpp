@@ -17,7 +17,7 @@ struct dq {
 	auto size(void) const -> size_t { return d.size(); }
 	auto begin(void) { return d.begin(); }
 	auto end(void) { return d.end(); }
-	auto destroy(void) -> bool { std::deque<T>{}.swap(d); return true; }
+	auto cleanup(void) -> bool { std::deque<T>{}.swap(d); return true; }
 };
 #else
 #include "5-collections/array/deque.hpp"
@@ -33,7 +33,7 @@ struct dq {
 	auto size(void) const -> size_t { return d.size(); }
 	auto begin(void) { return d.begin(); }
 	auto end(void) { return d.end(); }
-	auto destroy(void) -> bool { return static_cast<bool>(d.destroy()); }
+	auto cleanup(void) -> bool { return static_cast<bool>(d.cleanup()); }
 };
 #endif
 
@@ -49,7 +49,7 @@ NI static auto append_int(void) -> void {
 	for (int i = 0; i < N; ++i)
 		CHECK(d.append(i));
 	sink = static_cast<uint64_t>(d[N - 1]);
-	CHECK(d.destroy());
+	CHECK(d.cleanup());
 }
 
 NI static auto prepend_int(void) -> void {
@@ -57,7 +57,7 @@ NI static auto prepend_int(void) -> void {
 	for (int i = 0; i < N; ++i)
 		CHECK(d.prepend(i));
 	sink = static_cast<uint64_t>(d[N - 1]);
-	CHECK(d.destroy());
+	CHECK(d.cleanup());
 }
 
 NI static auto fifo_int(void) -> void {
@@ -70,7 +70,7 @@ NI static auto fifo_int(void) -> void {
 		sum += static_cast<uint64_t>(d.take_front());
 	}
 	sink = sum;
-	CHECK(d.destroy());
+	CHECK(d.cleanup());
 }
 
 NI static auto both_ends_u64(void) -> void {
@@ -89,7 +89,7 @@ NI static auto both_ends_u64(void) -> void {
 		}
 	}
 	sink = sum;
-	CHECK(d.destroy());
+	CHECK(d.cleanup());
 }
 
 NI static auto index_sum(dq<int>& d) -> void {
@@ -123,6 +123,6 @@ auto main(void) -> int {
 		CHECK(i & 1 ? d.append(i) : d.prepend(i));
 	bench("operator[] sum, 1e6 ints x 10", "one mask per index; std: a block lookup", [&d] { index_sum(d); });
 	bench("range-for sum, 1e6 ints x 10", [&d] { range_sum(d); });
-	CHECK(d.destroy());
+	CHECK(d.cleanup());
 	return 0;
 }

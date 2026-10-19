@@ -1,0 +1,64 @@
+Memory from the system: page mappings, and the C allocator for code that must interoperate
+with it. The allocators of layer 4 (`ca::heap`, `page_allocator`, `libc_allocator`) are built on
+these; application code normally uses those instead.
+
+### Mappings
+
+| Function | Does |
+|---|---|
+| `sys::page_size()` | the size of a page |
+| `sys::mmap_anonymous(size, protection)` | fresh zeroed pages, private to the process |
+| `sys::mmap_file(fd, offset, size, protection, sharing)` | a file's pages, `shared` or `copy_on_write` |
+| `sys::mremap(mapping, size, remapping)` | grows or shrinks a mapping, `in_place` or `may_move` |
+| `sys::mprotect(region, protection)` | changes the protection of pages |
+| `sys::madvise(region, advice)` | `normal`, `random`, `sequential`, `will_need`, `dont_need` |
+| `sys::msync(mapping)` | writes a shared file mapping back and waits |
+| `sys::munmap(mapping)` | unmaps a mapping, or some pages of one |
+
+A mapping is a `span<byte>`: functions return one and take one, so the size always travels with
+the address. Regions must be page-aligned; an unaligned one fails with
+`errc::invalid_argument`. `protection` holds the bits `read`, `write`, `execute` and `none`.
+On Linux x86-64 the calls go straight to the kernel through `ca::syscall`, without libc.
+
+```c++
+#include "ca/error.hpp"
+#include "ca/integers.hpp"
+#include "ca/memory.hpp"
+#include "ca/span.hpp"
+
+auto main(void) -> int {
+	const ca::usz page = ca::sys::page_size();
+	auto block = ca::sys::mmap_anonymous(4U * page, ca::sys::protection::read | ca::sys::protection::write);
+	if (!block)
+		return 1;
+	ca::span<ca::byte> pages = *block;
+	if (pages[page] != 0U)
+		return 2;
+	pages[page] = 42U;
+
+	auto grown = ca::sys::mremap(pages, 8U * page, ca::sys::remapping::may_move);
+	if (!grown || grown->size() != 8U * page || (*grown)[page] != 42U)
+		return 3;
+	pages = *grown;
+
+	if (!ca::sys::madvise(pages.suffix(4U * page), ca::sys::advice::dont_need))
+		return 4;
+	if (!ca::sys::mprotect(pages, ca::sys::protection::read))
+		return 5;
+	auto unaligned = ca::sys::mprotect(pages.sub(1U, page), ca::sys::protection::read);
+	if (unaligned || unaligned.error() != ca::errc::invalid_argument)
+		return 6;
+	return ca::sys::munmap(pages) ? 0 : 7;
+}
+```
+
+### The C allocator
+
+`sys::mallocarray(count, size)` and `sys::reallocarray(block, count, size)` allocate with the
+multiplication checked for overflow, aligned to `malloc_alignment`; `sys::free` releases
+(nullptr does nothing). They exist for blocks that cross into C code, `realpath`'s result for
+instance.
+
+`move_paths.hpp` exposes the strategies ca's memcpy and memmove take, one function per size class
+and instruction set (`ca::move_paths::bytes_0_to_15`, `forward`, `stream`, ...), each checking that
+the size is in its range; benchmarks and tests call them to measure or verify one path alone.

@@ -1,0 +1,92 @@
+`ca::fs::path`: a POSIX path after Python's `pathlib.Path`, owning its text (a NUL-terminated
+block from the allocator, `basic_path<A>`, A = `ca::heap` for `fs::path`).
+
+A path is kept normalized from the moment it is built: no repeated slash, no trailing slash, no
+"." component ("..", whose meaning depends on symlinks, stays). The empty path is "." and owns no
+memory. Building or changing a path allocates and returns a `result`; reading its parts returns
+views into it and cannot fail.
+
+### Lexical operations
+
+These never touch the file system: `name()`, `stem()`, `suffix()`, `parent()`, `root()`,
+`components()`, `is_absolute()`, `join(other)` (an absolute other replaces the path, as pathlib's
+`/` does), `push(other)` in place, `with_name`, `with_stem`, `with_suffix`, `relative_to`,
+`is_relative_to` and `match(pattern)`, a glob matched from the right.
+
+```c++
+#include "ca/path.hpp"
+#include "ca/sv.hpp"
+
+auto main(void) -> int {
+	auto p = ca::fs::path::from("//usr/./lib//archive.tar.gz/");
+	if (!p || p->view() != ca::sv::str{"/usr/lib/archive.tar.gz"})
+		return 1;
+	if (p->name() != ca::sv::str{"archive.tar.gz"} || p->stem() != ca::sv::str{"archive.tar"})
+		return 2;
+	if (p->suffix() != ca::sv::str{".gz"} || p->parent() != ca::sv::str{"/usr/lib"})
+		return 3;
+
+	auto zip = p->with_suffix(".zip");
+	auto up = p->join("../share");
+	if (!zip || zip->view() != ca::sv::str{"/usr/lib/archive.tar.zip"})
+		return 4;
+	if (!up || up->view() != ca::sv::str{"/usr/lib/archive.tar.gz/../share"})
+		return 5;
+	if (!p->match("*.tar.*") || !p->match("/usr/*/archive.*") || p->match("/lib/*"))
+		return 6;
+
+	int parts = 0;
+	for (const ca::sv::str part : p->components())
+		parts += part.empty() ? 100 : 1;
+	if (parts != 4)
+		return 7;
+	return p->cleanup() && zip->cleanup() && up->cleanup() ? 0 : 8;
+}
+```
+
+### File system operations
+
+The others make the system calls their names say: `exists`, `is_file`, `is_directory`,
+`is_symlink`, `stat`, `lstat`, `mkdir`, `mkdirs` (with parents, existing ones accepted), `rmdir`,
+`touch`, `unlink`, `rename`, `chmod`, `symlink_to`, `hardlink_to`, `readlink`, `resolve`,
+`absolute`, `expand_user`, `read_text`, `read_bytes`, `write_text`, `write_bytes`, `iterdir`,
+`glob` and `rglob` (with `**`). `path::cwd()` and `path::home()` build the working and home
+directories.
+
+```c++
+#include "ca/dynamic_array.hpp"
+#include "ca/path.hpp"
+#include "ca/sv.hpp"
+
+auto main(void) -> int {
+	auto root = ca::fs::path::from("path_example");
+	if (!root)
+		return 1;
+	auto deep = root->join("a/b");
+	if (!deep || !deep->mkdirs())
+		return 2;
+	auto file = deep->join("notes.txt");
+	if (!file || !file->write_text("hello\n"))
+		return 3;
+
+	auto text = file->read_text();
+	if (!text || text->size() != 6U)
+		return 4;
+	auto found = root->rglob("*.txt");
+	if (!found || found->size() != 1U || (*found)[0].name() != ca::sv::str{"notes.txt"})
+		return 5;
+	auto is_dir = deep->is_directory();
+	if (!is_dir || !*is_dir)
+		return 6;
+
+	auto a = root->join("a");
+	if (!file->unlink() || !deep->rmdir() || !a || !a->rmdir() || !root->rmdir())
+		return 7;
+	return text->cleanup() && found->cleanup() && file->cleanup() && deep->cleanup() && a->cleanup()
+		&& root->cleanup() ? 0 : 8;
+}
+```
+
+A path converts to `sv::str` (`view()`) and gives `c_str()` for system calls; it prints with `{}`
+and is hashable, by its text, so it can key a `hashmap` (looked up by another path). `glob` and
+`iterdir` return a `dynamic_array` of paths, whose `cleanup()` cleans every path in it.

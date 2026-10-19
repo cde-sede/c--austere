@@ -27,6 +27,8 @@ auto main(void) -> int {
 			return 5;
 		if (!a.emplace(7))
 			return 6;
+		if (!a.cleanup())
+			return 8;
 	}
 	return tracked::alive == 0 ? 0 : 7;
 }

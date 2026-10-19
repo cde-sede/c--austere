@@ -54,8 +54,8 @@ auto main(void) -> int {
 		if (!(heap_path == arena_path{allocator}) || !made->is_relative_to(*root))
 			return 11;
 
-		if (!entries->destroy() || !array->destroy())
+		if (!entries->cleanup() || !array->cleanup())
 			return 12;
 	}
-	return arena.destroy() ? 0 : 13;
+	return arena.cleanup() ? 0 : 13;
 }

@@ -106,7 +106,7 @@ namespace ca {
 
 	/* @DOC Growable, NUL-terminated string of code units C, in memory from A, short ones kept
 	   inline (see INLINE_CAPACITY). Sizes count code units. Construction allocates nothing;
-	   growing can fail and then changes nothing. Clean up with destroy(); the destructor is a
+	   growing can fail and then changes nothing. Clean up with cleanup(); the destructor is a
 	   failsafe that frees silently. Converts to sv::basic<C>. Python's str API: the
 	   read-only methods (find, count, strip, split, partition, is_alpha, ...) return views
 	   (sv::impl::methods); upper, lower, title, replace, center, ... return a new string
@@ -208,10 +208,10 @@ namespace ca {
 				other._reset();
 			}
 
-			/* @DOC Failsafe for a skipped destroy(): frees silently. */
-			~basic_str(void) noexcept {
-				this->_release();
-			}
+			// Failsafe for a skipped cleanup(): frees silently.
+			// ~basic_str(void) noexcept {
+			// 	this->_release();
+			// }
 
 			/* @DOC A copy of text, in memory from allocator (none when it fits inline). */
 			[[nodiscard]] static auto from(const A& allocator, const view_type text) noexcept -> ca::result<self> {
@@ -571,7 +571,7 @@ namespace ca {
 			}
 
 			/* @DOC Frees the storage: empty, inline. Cannot fail. */
-			[[nodiscard]] auto destroy(void) noexcept -> ca::result<void> {
+			[[nodiscard]] auto cleanup(void) noexcept -> ca::result<void> {
 
 				this->_release();
 				this->_reset();

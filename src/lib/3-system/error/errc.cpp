@@ -22,3 +22,4 @@ static_assert(ca::errc::not_empty.code() == ENOTEMPTY);
 static_assert(ca::errc::symlink_loop.code() == ELOOP);
 static_assert(ca::errc::not_supported.code() == ENOTSUP);
 static_assert(ca::errc::not_implemented.code() == ENOSYS);
+static_assert(ca::errc::not_recoverable.code() == ENOTRECOVERABLE);

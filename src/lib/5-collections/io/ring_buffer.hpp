@@ -67,7 +67,7 @@ namespace ca {
 		   write that does not fit is dropped whole: it fails with errc::no_space, also kept
 		   sticky; writes then fail until flush() or clear_error() clears it, so the bytes read
 		   are always a prefix of whole messages. Build with make / make_in(allocator, capacity), or
-		   ca::make_in<ring_buffer<>>(arena, capacity). Cleanup is destroy(); the destructor is a
+		   ca::make_in<ring_buffer<>>(arena, capacity). Cleanup is cleanup(); the destructor is a
 		   failsafe doing the same. Not thread-safe. */
 		template <ca::is_allocator A = ca::heap>
 		class ring_buffer final {
@@ -119,10 +119,10 @@ namespace ca {
 				: _data{ca::exchange(other._data, nullptr)}, _capacity{ca::exchange(other._capacity, 0U)}, _head{ca::exchange(other._head, 0U)}, _tail{ca::exchange(other._tail, 0U)}, _pending{ca::exchange(other._pending, 0U)}, _error{other._error}, _allocator{other._allocator} {
 				}
 
-				/* @DOC Failsafe for a skipped destroy(): frees the ring. */
-				~ring_buffer(void) noexcept {
-					self::_free(_allocator, _data, _capacity);
-				}
+				// Failsafe for a skipped cleanup(): frees the ring.
+				// ~ring_buffer(void) noexcept {
+				// 	self::_free(_allocator, _data, _capacity);
+				// }
 
 				/* @DOC A ring of at least capacity bytes (> 0), rounded up to a power of two, from
 				   allocator. */
@@ -281,7 +281,7 @@ namespace ca {
 				}
 
 				/* @DOC Frees the ring; afterwards capacity 0, every write dropped. */
-				[[nodiscard]] auto destroy(void) noexcept -> ca::result<void> {
+				[[nodiscard]] auto cleanup(void) noexcept -> ca::result<void> {
 
 					self::_free(_allocator, _data, _capacity);
 					    _data = nullptr;

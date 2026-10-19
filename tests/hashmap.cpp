@@ -51,7 +51,7 @@ static auto basics(void) noexcept -> int {
 	auto item = m.popitem();
 	if (!item || item->key != 3 || item->value != 300 || !m.empty())
 		return 11;
-	return m.destroy() && m.capacity() == 0U ? 0 : 12;
+	return m.cleanup() && m.capacity() == 0U ? 0 : 12;
 }
 
 static auto many(void) noexcept -> int {
@@ -115,7 +115,7 @@ static auto many(void) noexcept -> int {
 		return 32;
 	if (!m.clear() || !m.empty() || m.capacity() == 0U || m.contains(0))
 		return 33;
-	return m.destroy() && copy->destroy() ? 0 : 34;
+	return m.cleanup() && copy->cleanup() ? 0 : 34;
 }
 
 static auto from_keys(void) noexcept -> int {
@@ -123,7 +123,7 @@ static auto from_keys(void) noexcept -> int {
 	auto made = ca::hashmap<int, int>::from_keys(ca::array{3, 1, 3, 2}, 7);
 	if (!made || made->size() != 3U || (*made)[1] != 7 || (*made)[2] != 7 || (*made)[3] != 7)
 		return 40;
-	return made->destroy() ? 0 : 41;
+	return made->cleanup() ? 0 : 41;
 }
 
 static int cleanups = 0;
@@ -131,7 +131,7 @@ static int clones = 0;
 
 struct tracked {
 	int code;
-	auto destroy(void) noexcept -> ca::result<void> {
+	auto cleanup(void) noexcept -> ca::result<void> {
 		++cleanups;
 		if (code != 0)
 			return ca::fail(code);
@@ -169,7 +169,7 @@ static auto cleanup(void) noexcept -> int {
 	auto cloned = nested.clone();
 	if (!cloned || (*cloned)[4][0] != 1)
 		return 56;
-	return m.destroy() && nested.destroy() && cloned->destroy() ? 0 : 57;
+	return m.cleanup() && nested.cleanup() && cloned->cleanup() ? 0 : 57;
 }
 
 static auto arena(void) noexcept -> int {
@@ -185,10 +185,10 @@ static auto arena(void) noexcept -> int {
 		for (int i = 0; i < 1000; ++i)
 			if (!m->set(i, -i))
 				return 62;
-		if (m->size() != 1000U || (*m)[999] != -999 || !m->destroy())
+		if (m->size() != 1000U || (*m)[999] != -999 || !m->cleanup())
 			return 63;
 	}
-	return arena.destroy() ? 0 : 64;
+	return arena.cleanup() ? 0 : 64;
 }
 
 auto main(void) -> int {

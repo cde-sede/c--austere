@@ -17,7 +17,7 @@
    | retain(test) | O(n) | |
    | reverse | O(n) | swaps the links, elements stay in place |
    | sort | O(n log n) | stable merge sort on the links: no allocation, elements never move |
-   | clear, destroy, clone | O(n) | |
+   | clear, cleanup, clone | O(n) | |
 
    Space: 16 bytes of links per element plus the allocator's rounding; an arena allocator makes
    nodes as dense as an array of nodes.
@@ -47,7 +47,7 @@
 
    | Case | clang 18 | gcc 13 | Notes |
    |---|---|---|---|
-   | append 1e6, then destroy | 0.33x | 0.36x | |
+   | append 1e6, then cleanup | 0.33x | 0.36x | |
    | prepend twice, pop_front once, 1e6 times | 0.53x | 0.29x | |
    | walk 1e6 nodes 10 times | 0.54x | 0.60x | the heap packs nodes of one size class together |
    | sort 1e6 scrambled ints | 0.99x | 0.84x | |
@@ -235,7 +235,7 @@ namespace ca {
 	   pointers and iterators to one stay valid until it is removed. append, prepend and insert
 	   at a held position in O(1), each acquiring a node and failing with nothing changed;
 	   splice moves another list's nodes in O(1); sort is a stable merge on the links.
-	   Construction allocates nothing. Clean up with destroy(); the destructor is a failsafe that
+	   Construction allocates nothing. Clean up with cleanup(); the destructor is a failsafe that
 	   frees silently. first and last allow the doubt; dereferencing end() traps. A stateful A has
 	   no default construction and moves with the elements. */
 	template <typename T, ca::is_allocator A = ca::heap>
@@ -305,10 +305,10 @@ namespace ca {
 			  _allocator{other._allocator} {
 			}
 
-			/* @DOC Failsafe for a skipped destroy(): destroys the elements and frees, silently. */
-			~list(void) noexcept {
-				this->_release();
-			}
+			// Failsafe for a skipped cleanup(): destroys the elements and frees, silently.
+			// ~list(void) noexcept {
+			// 	this->_release();
+			// }
 
 
 			// -- assignment operators ---------------------------------------
@@ -316,7 +316,7 @@ namespace ca {
 			auto operator=(const self&) -> self& = delete;
 
 			/* @DOC Takes other's nodes and allocator; the previous contents are released as by the
-			   destructor. Traps when T is cleanable and elements remain: destroy() first. */
+			   destructor. Traps when T is cleanable and elements remain: cleanup() first. */
 			auto operator=(self&& other) noexcept -> self& {
 
 				if (this == &other)
@@ -592,7 +592,7 @@ namespace ca {
 			}
 
 			/* @DOC clear(): a list keeps no memory beyond its nodes. */
-			[[nodiscard]] auto destroy(void) noexcept -> ca::result<void> {
+			[[nodiscard]] auto cleanup(void) noexcept -> ca::result<void> {
 				return this->clear();
 			}
 
@@ -646,20 +646,20 @@ namespace ca {
 					if constexpr (ca::is_clonable<T>) {
 						auto cloned = at->_value.clone();
 						if (!cloned) {
-							static_cast<void>(copy.destroy());
+							static_cast<void>(copy.cleanup());
 							return cloned.propagate();
 						}
 						auto added = copy.emplace(ca::move(*cloned));
 						if (!added) {
-							static_cast<void>(cloned->destroy());
-							static_cast<void>(copy.destroy());
+							static_cast<void>(cloned->cleanup());
+							static_cast<void>(copy.cleanup());
 							return added.propagate();
 						}
 					}
 					else {
 						auto added = copy.emplace(at->_value);
 						if (!added) {
-							static_cast<void>(copy.destroy());
+							static_cast<void>(copy.cleanup());
 							return added.propagate();
 						}
 					}
@@ -697,7 +697,7 @@ namespace ca {
 
 			static auto _clean(node* const at, ca::error& first) noexcept -> void {
 				if constexpr (ca::is_cleanable<T>) {
-					at->_value.destroy().match([] {
+					at->_value.cleanup().match([] {
 					}, [&first](const ca::error& error) {
 						if (first.ok())
 							first = error;

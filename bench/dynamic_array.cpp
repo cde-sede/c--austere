@@ -23,7 +23,7 @@ struct arr {
 	auto shrink(void) -> bool { v.shrink_to_fit(); return true; }
 	auto resize(const size_t n) -> bool { v.resize(n); return true; }
 	auto clone(void) const -> arr { return arr{v}; }
-	auto destroy(void) -> bool { std::vector<T>{}.swap(v); return true; }
+	auto cleanup(void) -> bool { std::vector<T>{}.swap(v); return true; }
 	auto begin(void) -> T* { return v.data(); }
 	auto end(void) -> T* { return v.data() + v.size(); }
 };
@@ -57,7 +57,7 @@ NI static auto append_int(void) -> void {
 	for (int i = 0; i < N; ++i)
 		CHECK(a.append(i));
 	sink = static_cast<uint64_t>(a[N - 1]);
-	CHECK(a.destroy());
+	CHECK(a.cleanup());
 }
 
 NI static auto append_u64_reserved(void) -> void {
@@ -66,7 +66,7 @@ NI static auto append_u64_reserved(void) -> void {
 	for (int i = 0; i < N; ++i)
 		CHECK(a.append(static_cast<uint64_t>(i)));
 	sink = a[N - 1];
-	CHECK(a.destroy());
+	CHECK(a.cleanup());
 }
 
 NI static auto append_nested(void) -> void {
@@ -77,7 +77,7 @@ NI static auto append_nested(void) -> void {
 		CHECK(a.append(MOVE(in)));
 	}
 	sink = static_cast<uint64_t>(a[N / 10 - 1][0]);
-	CHECK(a.destroy());
+	CHECK(a.cleanup());
 }
 
 NI static auto write_u64(arr<uint64_t>& a) -> void {
@@ -109,17 +109,17 @@ NI static auto write_int(arr<int>& a) -> void {
 NI static auto clone_int(arr<int>& a) -> void {
 	auto c = CLONE(a);
 	sink = static_cast<uint64_t>(c[7]);
-	CHECK(c.destroy());
+	CHECK(c.cleanup());
 }
 
 NI static auto clone_nested(arr<arr<int>>& a) -> void {
 	auto c = a.clone();
 #ifdef USE_STD
 	sink = static_cast<uint64_t>(c[7][0]);
-	CHECK(c.destroy());
+	CHECK(c.cleanup());
 #else
 	sink = static_cast<uint64_t>((*c)[7][0]);
-	CHECK(c->destroy());
+	CHECK(c->cleanup());
 #endif
 }
 
@@ -128,14 +128,14 @@ NI static auto insert_front_int(void) -> void {
 	for (int i = 0; i < 20000; ++i)
 		CHECK(a.insert(0, i));
 	sink = static_cast<uint64_t>(a[0]);
-	CHECK(a.destroy());
+	CHECK(a.cleanup());
 }
 
 NI static auto insert_front_nested(void) -> void {
 	arr<arr<int>> a;
 	for (int i = 0; i < 5000; ++i)
 		CHECK(a.insert(0, arr<int>{}));
-	CHECK(a.destroy());
+	CHECK(a.cleanup());
 }
 
 NI static auto pop_front_int(void) -> void {
@@ -144,7 +144,7 @@ NI static auto pop_front_int(void) -> void {
 		CHECK(a.append(i));
 	for (int i = 0; i < 20000; ++i)
 		CHECK(a.pop(0));
-	CHECK(a.destroy());
+	CHECK(a.cleanup());
 }
 
 NI static auto churn_int(void) -> void {
@@ -155,7 +155,7 @@ NI static auto churn_int(void) -> void {
 		for (int i = 0; i < 100000; ++i)
 			CHECK(a.pop());
 	}
-	CHECK(a.destroy());
+	CHECK(a.cleanup());
 }
 
 NI static auto tiny_arrays(void) -> void {
@@ -164,7 +164,7 @@ NI static auto tiny_arrays(void) -> void {
 		for (int j = 0; j < 3; ++j)
 			CHECK(t.append(j));
 		sink = static_cast<uint64_t>(t[2]);
-		CHECK(t.destroy());
+		CHECK(t.cleanup());
 	}
 }
 
@@ -172,7 +172,7 @@ NI static auto resize_int(void) -> void {
 	arr<int> a;
 	CHECK(a.resize(N));
 	sink = static_cast<uint64_t>(a[N - 1]);
-	CHECK(a.destroy());
+	CHECK(a.cleanup());
 }
 
 
@@ -193,7 +193,7 @@ auto main(void) -> int {
 		bench("index write, 1e7 u64", [&] { write_u64(a); });
 		bench("index sum, 1e7 u64", "the bound check folds into the loop bound", [&] { sum_u64(a); });
 		bench("range-for sum, 1e7 u64", [&] { range_sum_u64(a); });
-		CHECK(a.destroy());
+		CHECK(a.cleanup());
 	}
 	{
 		arr<int> a;
@@ -201,7 +201,7 @@ auto main(void) -> int {
 			CHECK(a.append(i));
 		bench("index write, 1e7 ints", [&] { write_int(a); });
 		bench("clone 1e7 ints", "one memcpy", [&] { clone_int(a); });
-		CHECK(a.destroy());
+		CHECK(a.cleanup());
 	}
 	{
 		arr<arr<int>> a;
@@ -211,7 +211,7 @@ auto main(void) -> int {
 			CHECK(a.append(MOVE(in)));
 		}
 		bench("clone 1e6 nested arrays", [&] { clone_nested(a); });
-		CHECK(a.destroy());
+		CHECK(a.cleanup());
 	}
 	bench("insert 2e4 ints at the front", insert_front_int);
 	bench("insert 5e3 nested arrays at the front", "relocation by memmove, no move constructor", insert_front_nested);

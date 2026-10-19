@@ -1,0 +1,104 @@
+Allocators: where every allocating type of ca gets its memory. Each container, string and
+owner is templated on its allocator (`A = ca::heap`), so the same code runs on the general heap, in
+an arena, or on fresh pages.
+
+| Allocator | Kind | Use |
+|---|---|---|
+| `ca::heap` | stateless | the default: per-thread size classes, no lock on a thread's own blocks |
+| `ca::page_allocator` | stateless | whole pages per block, zeroed, grown by remapping without copying |
+| `ca::libc_allocator` | stateless | malloc, realloc and free: the baseline benchmarks compare with |
+| `ca::arena_allocator` | stateful | blocks of a `ca::arena`, released all at once |
+
+### The allocator contract
+
+An allocator (`ca::is_allocator`) is a cheap value, copied without failing, with two members:
+
+- `allocate(size, alignment) const -> result<allocation>`: a block of at least size bytes; the
+  `allocation` returned carries the address and the usable size, which may be larger.
+- `deallocate(block, alignment) const -> void`: hands a block back; never fails.
+
+Optionally `expand` (resize in place), `reallocate` (resize, moving if needed) and
+`allocate_zeroed`. The free functions `ca::expand`, `ca::reallocate` and `ca::allocate_zeroed`
+use them when present and fall back to allocate, copy and deallocate otherwise, so a minimal
+allocator works everywhere. The `_n` forms (`allocate_n<T>`, `reallocate_n<T>`, `expand_n<T>`,
+`deallocate_n<T>`) count in objects and check the multiplication for overflow.
+
+An allocator that declares `static constexpr bool STATELESS = true` is stateless: every instance
+is interchangeable, and allocator-aware types store it in no space. Others are stateful: memory
+goes back through the allocator it came from, and the types holding one have no default
+constructor.
+
+```c++
+#include "ca/integers.hpp"
+#include "ca/memory.hpp"
+#include "ca/optional.hpp"
+
+auto main(void) -> int {
+	const ca::heap heap{};
+	auto block = ca::allocate_n<int>(heap, 10U);
+	if (!block || block->size() < 10U * sizeof(int))
+		return 1;
+	int* const values = static_cast<int*>(block->data());
+	for (int i = 0; i < 10; ++i)
+		values[i] = i;
+
+	auto grown = ca::reallocate_n<int>(heap, *block, 1000U);
+	if (!grown || static_cast<int*>(grown->data())[9] != 9)
+		return 2;
+	ca::deallocate_n<int>(heap, *grown);
+
+	auto zeroed = ca::allocate_zeroed(ca::page_allocator{}, 10000U, 64U);
+	if (!zeroed || zeroed->size() < 10000U || static_cast<ca::byte*>(zeroed->data())[9999] != 0U)
+		return 3;
+	ca::page_allocator{}.deallocate(*zeroed, 64U);
+	return 0;
+}
+```
+
+### Arenas
+
+`ca::arena` owns chunks of pages and hands out blocks by bumping a pointer: allocation is a few
+instructions, and `cleanup()` releases everything at once, or `reset()` empties it for reuse. It is
+an allocator resource (`ca::is_allocator_resource`): not an allocator itself, it gives out
+`arena_allocator`s, one pointer wide, which must not outlive it. Deallocating only gives memory
+back when the block is the newest one. Arenas are not thread-safe.
+
+```c++
+#include "ca/dynamic_array.hpp"
+#include "ca/make_in.hpp"
+#include "ca/memory.hpp"
+
+auto main(void) -> int {
+	auto made = ca::arena::make();
+	if (!made)
+		return 1;
+	ca::arena& arena = *made;
+
+	ca::dynamic_array<int, ca::arena_allocator> squares{arena.allocator()};
+	for (int i = 0; i < 1000; ++i)
+		if (!squares.append(i * i))
+			return 2;
+
+	auto other = ca::make_in<ca::dynamic_array<int>>(arena);
+	if (!other || !other->append(42))
+		return 3;
+
+	const bool ok = squares[999] == 999 * 999 && (*other)[0] == 42;
+	if (!squares.cleanup() || !other->cleanup())
+		return 4;
+	arena.reset();
+	return ok && arena.cleanup() ? 0 : 5;
+}
+```
+
+`ca::allocator_of<R>`, `ca::as_allocator(source)` and `ca::is_allocator_source` unify the two
+kinds of source, so `make_in` takes either an allocator or a resource.
+
+### The heap
+
+`ca::heap` serves sizes up to 128 KiB from 48 size classes (16 to 128 bytes by 16, then four per
+doubling, so at most 25% above the size asked for), each thread from its own 1 MiB spans with no
+lock and no atomic. A block finds its span by masking its address, so there is no per-block
+header. Any thread may free any block; one freed away from its owner goes back with a single
+atomic operation. Larger sizes are mapped pages, and growing them remaps without copying. The
+performance notes of `heap.hpp` give the costs per operation.

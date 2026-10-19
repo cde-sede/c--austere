@@ -1,0 +1,118 @@
+Processes and signals: starting programs, waiting for them, identities, resource limits and
+usage, and signal handling.
+
+### Starting and waiting
+
+| Function | Does |
+|---|---|
+| `sys::posix_spawn(path, argv, envp, actions)` | starts a program as a child, returns its pid |
+| `sys::posix_spawnp(file, argv, envp, actions)` | the same, looking file up in PATH |
+| `sys::fork()` | duplicates the process: the child's pid in the parent, 0 in the child |
+| `sys::execve`, `sys::execvp` | replace the process image |
+| `sys::waitpid(pid)` | waits for a child and reaps it: a `wait_status` |
+| `sys::try_waitpid(pid)` | the same without blocking: nothing while the child runs |
+| `sys::exit(status)`, `sys::exit_immediately(status)` | end the process, with or without atexit handlers |
+
+`argv` and `envp` are null-terminated arrays of mutable C strings, as POSIX takes them; a null
+`envp` passes the current environment. A `wait_status` tells how the child ended:
+`exit_code()` and `signal()` are optionals, `succeeded()` means exit code 0.
+
+`spawn_actions` lists descriptor changes the child applies before running the program (dup2,
+close, open), so a child's standard streams can be redirected without fork. It follows ca's
+explicit lifecycle: `init()` before use, `cleanup()` after, and it is neither copyable nor
+movable.
+
+```c++
+#include "ca/file.hpp"
+#include "ca/fs.hpp"
+#include "ca/integers.hpp"
+#include "ca/io.hpp"
+#include "ca/process.hpp"
+#include "ca/span.hpp"
+#include "ca/sv.hpp"
+
+auto main(void) -> int {
+	char sh[] = "sh";
+	char dash_c[] = "-c";
+	char script[] = "printf hello; exit 3";
+	char* const argv[]{sh, dash_c, script, nullptr};
+
+	auto ends = ca::sys::pipe(ca::fs::cloexec_t::OPEN_VALUE);
+	if (!ends)
+		return 1;
+	ca::sys::spawn_actions actions;
+	if (!actions.init() || !actions.add_dup2(ends->write_end(), 1))
+		return 2;
+	auto child = ca::sys::posix_spawnp("sh", argv, nullptr, &actions);
+	if (!child || !actions.cleanup() || !ca::sys::close(ends->write_end()))
+		return 3;
+
+	char out[16]{};
+	ca::usz total = 0U;
+	for (;;) {
+		auto got = ca::sys::read(ends->read_end(), ca::span<char>{out}.without_prefix(total));
+		if (!got)
+			return 4;
+		if (*got == 0U)
+			break;
+		total += *got;
+	}
+	auto status = ca::sys::waitpid(*child);
+	if (!status || status->exit_code() != 3 || status->succeeded())
+		return 5;
+	return ca::sv::str{out, total} == ca::sv::str{"hello"} && ca::sys::close(ends->read_end()) ? 0 : 6;
+}
+```
+
+A forked child calls `exit_immediately`, which runs no handler and flushes nothing: the parent's
+buffered output would otherwise be written twice.
+
+### Signals
+
+`sys::signals` names the signal numbers without `<signal.h>` (`interrupt`, `terminate`, `kill`,
+`child`, `pipe`, `user1`, ...). `sys::sigaction(signal, handler)` installs a handler with
+interrupted calls restarted, or a `signal_disposition` (`default_action`, `ignore`).
+`signal_set` is a constexpr set of signal numbers for `sigprocmask` (`block`, `unblock`,
+`replace`) and `sigwait`, which takes a blocked signal synchronously: the safe way to handle
+signals without running code inside a handler.
+
+```c++
+#include "ca/process.hpp"
+
+auto main(void) -> int {
+	ca::sys::signal_set set;
+	set.add(ca::sys::signals::user1);
+	auto previous = ca::sys::sigprocmask(ca::sys::mask_change::block, set);
+	if (!previous)
+		return 1;
+	if (!ca::sys::kill(ca::sys::getpid(), ca::sys::signals::user1))
+		return 2;
+	auto taken = ca::sys::sigwait(set);
+	if (!taken || *taken != ca::sys::signals::user1)
+		return 3;
+	return ca::sys::sigprocmask(ca::sys::mask_change::replace, *previous) ? 0 : 4;
+}
+```
+
+### Identity and resources
+
+`getpid`, `getppid`, `getuid`, `geteuid`, `getgid`, `getegid`, `getpgid`, `setpgid` and
+`setsid` cover process identity and groups. `getrlimit` and `setrlimit` read and set a
+`resource_limit` (soft `current()` and hard `maximum()`, `UNLIMITED` for none) of a `resource`
+(`open_files`, `stack_size`, `address_space`, ...). `getrusage` reports a `resource_usage` of the
+process or of its waited-for children: CPU times in nanoseconds, peak resident memory, page
+faults and context switches.
+
+```c++
+#include "ca/process.hpp"
+
+auto main(void) -> int {
+	auto files = ca::sys::getrlimit(ca::sys::resource::open_files);
+	if (!files || files->current() == 0U)
+		return 1;
+	if (!ca::sys::setrlimit(ca::sys::resource::open_files, *files))
+		return 2;
+	auto usage = ca::sys::getrusage(ca::sys::usage_target::process);
+	return usage && usage->max_resident() > 0U ? 0 : 3;
+}
+```

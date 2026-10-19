@@ -1,0 +1,58 @@
+Descriptor plumbing beyond plain reads and writes: pipes, waiting on several descriptors,
+scatter and gather I/O, terminals.
+
+| Function | Does |
+|---|---|
+| `sys::pipe(flags)` | a new pipe, as `pipe_ends` (`read_end()`, `write_end()`); flags from `ca::fs` |
+| `sys::dup2(fd, target)` | makes target a copy of fd (the copy is not close-on-exec) |
+| `sys::poll(entries, timeout_ms)` | waits for events on `poll_entry`s; -1 waits forever, 0 not at all |
+| `sys::readv(fd, buffers)`, `sys::writev(fd, buffers)` | one call over several `io_buffer`s |
+| `sys::isatty(fd)` | whether fd is a terminal |
+| `sys::get_terminal_size(fd)` | rows and columns of the terminal fd is attached to |
+
+`poll_events` holds the event bits without `<poll.h>`: `readable`, `writable`, `urgent`, and the
+reported-only `error`, `hangup` and `invalid`. A `poll_entry` records the events asked for and,
+after the call, those that occurred (`reported()`, `has(bits)`).
+
+```c++
+#include "ca/error.hpp"
+#include "ca/file.hpp"
+#include "ca/fs.hpp"
+#include "ca/io.hpp"
+#include "ca/sv.hpp"
+
+auto main(void) -> int {
+	auto ends = ca::sys::pipe(ca::fs::cloexec_t::OPEN_VALUE | ca::fs::nonblock_t::OPEN_VALUE);
+	if (!ends)
+		return 1;
+
+	ca::sys::poll_entry watch[1] = {ca::sys::poll_entry{ends->read_end(), ca::sys::poll_events::readable}};
+	auto idle = ca::sys::poll(watch, 0);
+	if (!idle || *idle != 0U)
+		return 2;
+
+	const ca::sys::io_buffer parts[] = {ca::sv::str{"hello, "}, ca::sv::str{"world"}};
+	auto sent = ca::sys::writev(ends->write_end(), parts);
+	if (!sent || *sent != 12U)
+		return 3;
+
+	auto ready = ca::sys::poll(watch, 1000);
+	if (!ready || *ready != 1U || !watch[0].has(ca::sys::poll_events::readable))
+		return 4;
+	char got[16]{};
+	auto read = ca::sys::read(ends->read_end(), got);
+	if (!read || ca::sv::str{got, *read} != ca::sv::str{"hello, world"})
+		return 5;
+
+	auto empty = ca::sys::read(ends->read_end(), got);
+	if (empty || empty.error() != ca::errc::try_again)
+		return 6;
+	if (ca::sys::isatty(ends->read_end()))
+		return 7;
+	return ca::sys::close(ends->read_end()) && ca::sys::close(ends->write_end()) ? 0 : 8;
+}
+```
+
+An `io_buffer` has the layout of `struct iovec`, so an array of them goes to the kernel as is,
+and it converts from anything a byte span is made from: text, char arrays, strings. The caller
+closes both ends of a pipe.

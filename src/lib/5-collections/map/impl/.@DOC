@@ -1,0 +1,29 @@
+The two structures under the maps, and what they share.
+
+### Swiss table (`hashmap`, `set`)
+
+- `control_group.hpp`: eight control bytes, one per slot, matched together in a 64-bit word (SWAR:
+  portable, no vector unit needed). A full slot holds the low 7 bits of its key's hash; EMPTY and
+  DELETED have the high bit set. `match(tag)` returns the slots whose tag is equal, so a lookup
+  compares a key only on a tag hit, about 1 in 128 misses. `empty_control` is one shared group of
+  EMPTY bytes that every table without storage points at, so lookups need no branch for the
+  empty case.
+- `hash_table.hpp`: the table itself, over slots of any type: one block holding the control bytes
+  then the slots, power-of-two capacity, at most 7/8 full, triangular probing over aligned groups.
+  `hashmap` stores `item<K, V>` in the slots, `set` stores K.
+
+### B-tree (`map`)
+
+`btree_node.hpp`: nodes of up to 12 sorted keys and their values in two separate arrays, so a scan
+inside a node touches keys only, plus the parent and the index in it; one spare slot lets an
+insertion overflow a full node before it splits. `btree_branch` adds the children: child i holds
+the keys between keys i - 1 and i. `btree_iterator` walks in key order through parent links,
+showing each entry through a projection (`item<const K&, V&>`, a key, or a value).
+
+### Shared
+
+- `key.hpp`: `lookup_of<K>`, the type keys are looked up by (`K::view_type` when K has one, else
+  `const K&`); `key_order` (`compare()` when available, else `<`); `make_from`, which builds a key
+  only when an insertion needs one, by constructor, `clone()` or `K::from`; `clean`, which runs a
+  key's or value's `cleanup()` keeping the first error.
+- `range.hpp`: a begin and an end for range-for, what `keys()`, `values()` and `items()` return.

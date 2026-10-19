@@ -21,7 +21,7 @@
    | swap_pop(i) | O(1) | the last element relocates into the hole; order not kept |
    | reserve, shrink | O(n) | trivially relocatable T: ca::reallocate (heap: in place within a size class, page remap past 128 KiB, no copy); others try expand first |
    | resize(n) | O(abs(n - size)) | plus the growth step |
-   | clear, destroy | O(n) | O(1) for trivially destructible T without destroy() |
+   | clear, cleanup | O(n) | O(1) for trivially destructible T without cleanup() |
    | clone | O(n) | one memcpy for trivially copyable T |
    | view, prefix, suffix, sub | O(1) | borrowed_slice: two words, no allocation |
    | find, count, contains, compare, == | O(n) | memchr/memcmp for code units, element loops otherwise |
@@ -58,7 +58,7 @@
    address-taken, its members stay in registers. Inlining the heap's fast path there instead
    cost 5x on append/pop churn with gcc.
 
-   Cleanup: destroy() and clear() run each element's destroy() and destructor in one pass.
+   Cleanup: cleanup() and clear() run each element's cleanup() and destructor in one pass.
 
    Baseline std::vector (std::allocator over glibc malloc); ca over ca::heap (heap) and over
    glibc malloc through ca::libc_allocator (libc), which isolates the container from the
@@ -143,7 +143,7 @@ namespace ca {
 
 	/* @DOC Contiguous, growable array of T in memory from A: Python's list. Construction allocates
 	   nothing; reserve, append, extend, emplace, insert, resize, shrink and clone acquire memory
-	   and can fail. Clean up with destroy(); the destructor is a failsafe that frees silently.
+	   and can fail. Clean up with cleanup(); the destructor is a failsafe that frees silently.
 	   operator[] traps out of range; get allows the doubt. The sequence methods (cut, find, compare, fill, reverse) come
 	   from ca::impl::slice_methods and return borrowed_slices into it; into_slice fixes the
 	   length. T may be incomplete until a member is used. A stateful A has no default
@@ -224,10 +224,10 @@ namespace ca {
 			  _allocator{other._allocator} {
 			}
 
-			/* @DOC Failsafe for a skipped destroy(): destroys the elements and frees, silently. */
-			~dynamic_array(void) noexcept {
-				this->_release();
-			}
+			// Failsafe for a skipped cleanup(): destroys the elements and frees, silently.
+			// ~dynamic_array(void) noexcept {
+			// 	this->_release();
+			// }
 
 
 			// -- assignment operators ---------------------------------------
@@ -235,7 +235,7 @@ namespace ca {
 			auto operator=(const self&) -> self& = delete;
 
 			/* @DOC Takes other's contents and allocator; the previous contents are released as by the
-			   destructor. Traps when T is cleanable and elements remain: clear() or destroy() first. */
+			   destructor. Traps when T is cleanable and elements remain: clear() or cleanup() first. */
 			auto operator=(self&& other) noexcept -> self& {
 
 				if (this == &other)
@@ -554,9 +554,9 @@ namespace ca {
 				return this->_truncate(0U);
 			}
 
-			/* @DOC Cleans up every element (destroy() when T has one), then frees the storage: empty,
+			/* @DOC Cleans up every element (cleanup() when T has one), then frees the storage: empty,
 			   no capacity. Returns the first cleanup error; everything is released regardless. */
-			[[nodiscard]] auto destroy(void) noexcept -> ca::result<void> {
+			[[nodiscard]] auto cleanup(void) noexcept -> ca::result<void> {
 
 				auto cleaned = this->_truncate(0U);
 				this->_release();
@@ -609,7 +609,7 @@ namespace ca {
 					for (const T& element : *this) {
 						auto cloned = element.clone();
 						if (!cloned) {
-							static_cast<void>(copy.destroy());
+							static_cast<void>(copy.cleanup());
 							return cloned.propagate();
 						}
 						ca::construct_at(copy._end, ca::move(*cloned));
@@ -731,7 +731,7 @@ namespace ca {
 				if constexpr (ca::is_cleanable<T>) {
 					ca::error first{};
 					for (T* element = tail; element != _end; ++element) {
-						element->destroy().match([] {
+						element->cleanup().match([] {
 						}, [&first](const ca::error& error) {
 							if (first.ok())
 								first = error;

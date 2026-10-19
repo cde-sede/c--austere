@@ -17,5 +17,5 @@ auto main(void) -> int {
 	if (!outer.clear())
 		return 4;
 	outer = ca::move(other);
-	return outer.size() == 1 && outer.destroy() ? 0 : 5;
+	return outer.size() == 1 && outer.cleanup() ? 0 : 5;
 }

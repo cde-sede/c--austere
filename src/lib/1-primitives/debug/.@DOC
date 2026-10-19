@@ -1,0 +1,99 @@
+How code says that something cannot or must not happen, and where it is written.
+
+| Name | Use |
+|---|---|
+| `ca::trap(reason)` | stop here: a broken invariant, an out-of-bounds index, an absent value read |
+| `ca::assume(cond)` | promise the optimizer cond holds; undefined if it does not |
+| `ca::unreachable()` | promise this point is never reached; undefined if it is |
+| `ca::is_constant_folded(v)` | whether the optimizer proved v constant at this call site |
+| `ca::source_location` | file, function and line of a call, for error traces |
+
+### Traps and contexts
+
+ca has no exceptions. An operation that cannot fail in a correct program (operators,
+`operator[]`, reading an optional that holds nothing) traps instead of returning an error. A
+trap outside every context ends the program with an illegal instruction, so a debugger stops
+right on it. Inside a context (`ca::with`, `ca::context_manager`, layer 4) it unwinds to the
+context instead, which then fails with the reason as its error message: a server can turn a
+bug in one request into a failed request.
+
+```c++
+#include "ca/debug.hpp"
+#include "ca/trace.hpp"
+#include "ca/with.hpp"
+
+[[gnu::noinline]] static auto check_positive(const int value) noexcept -> int {
+	if (value <= 0)
+		ca::trap("value must be positive");
+	return value;
+}
+
+auto main(void) -> int {
+	int seen = 0;
+	auto done = ca::with([&seen](void) noexcept { seen = check_positive(-1); },
+		[](const ca::error*) noexcept {});
+	if (done || seen != 0)
+		return 1;
+	return ca::trace::of(done.error()).frames()[0].message() == ca::sv::str{"value must be positive"} ? 0 : 2;
+}
+```
+
+The reason must outlive the context, so it is a string literal. The frames between the trap and
+the context are left without running destructors: what they owned leaks. Traps are for bugs,
+not for expected failures, which return `ca::result`.
+
+The machinery is `recovery.hpp`: each context pushes an `impl::recovery` point (a
+`__builtin_setjmp` buffer) on a per-thread list, and `ca::trap` jumps to the innermost one.
+Nothing below layer 4 manipulates the list.
+
+### Optimizer hints
+
+`assume` and `unreachable` let the compiler drop checks it cannot prove useless. They are
+promises, not checks: when they are wrong the behavior is undefined, so they belong where a
+preceding check or an invariant makes them true.
+
+```c++
+#include "ca/debug.hpp"
+
+enum class shape { circle, square };
+
+[[nodiscard]] constexpr auto corners(const shape s) noexcept -> int {
+	switch (s) {
+		case shape::circle:
+			return 0;
+		case shape::square:
+			return 4;
+	}
+	ca::unreachable();
+}
+
+[[nodiscard]] inline auto halve(const unsigned value) noexcept -> unsigned {
+	ca::assume(value % 2U == 0U);
+	return value / 2U;
+}
+
+static_assert(corners(shape::square) == 4);
+```
+
+`is_constant_folded(v)` is `__builtin_constant_p`, forced inline so the answer belongs to the
+caller after inlining: a function can pick a branch-free path for a constant argument and a
+general one otherwise. It is always false at -O0.
+
+### Source locations
+
+A `ca::source_location` parameter defaulted to `current()` records where the function was
+called, not where it is declared, with no macro. The strings are literals of static storage.
+
+```c++
+#include "ca/debug.hpp"
+#include "ca/integers.hpp"
+
+static auto called_from(const ca::source_location where = ca::source_location::current()) noexcept -> ca::u32 {
+	return where.line();
+}
+
+auto main(void) -> int {
+	const ca::u32 here = __LINE__;
+	return called_from() == here + 1U ? 0 : 1;
+}
+```

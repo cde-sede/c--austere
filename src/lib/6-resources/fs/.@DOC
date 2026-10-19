@@ -1,0 +1,69 @@
+`ca::fs::descriptor`: an owned POSIX file descriptor whose flags are typed options (the
+`ca::fs` options of layer 3), combined and checked at compile time.
+
+```c++
+#include "ca/descriptor.hpp"
+#include "ca/error.hpp"
+#include "ca/file.hpp"
+#include "ca/fs.hpp"
+#include "ca/sv.hpp"
+
+auto main(void) -> int {
+	constexpr auto rw = ca::fs::readable | ca::fs::writable | ca::fs::create | ca::fs::truncate | ca::fs::cloexec;
+	auto d = ca::fs::descriptor::open("descriptor_example.tmp", rw, 0600U);
+	if (!d || !d->write_all(ca::sv::str{"hello, world"}))
+		return 1;
+
+	auto at = d->seek(7);
+	auto rest = d->read_all();
+	if (!at || !rest || rest->size() != 5U || (*rest)[0] != 'w')
+		return 2;
+	char head[5];
+	auto got = d->read_at(head, 0U);
+	if (!got || ca::sv::str{head, *got} != ca::sv::str{"hello"})
+		return 3;
+
+	*d |= ca::fs::nonblock;
+	auto on = d->test(ca::fs::nonblock | ca::fs::cloexec);
+	if (!on || !*on)
+		return 4;
+	*d &= ~ca::fs::nonblock;
+
+	auto status = d->stat();
+	if (!status || status->size() != 12U)
+		return 5;
+	auto again = ca::fs::descriptor::open("descriptor_example.tmp", ca::fs::writable | ca::fs::create | ca::fs::exclusive);
+	if (again || again.error() != ca::errc::exists)
+		return 6;
+	return rest->cleanup() && d->cleanup() && ca::sys::unlink("descriptor_example.tmp") ? 0 : 7;
+}
+```
+
+### Options
+
+`open(path, options, mode)` takes an option set: readable when no access option is given, `mode`
+applying with `create`. Contradictions fail to compile (`exclusive` without `create`, `truncate`
+on a read-only file), and an option the platform lacks (`clofork` on Linux) fails with
+`errc::not_supported` before anything happens.
+
+After opening, `d |= options` turns options on, `d &= ~options` off, and `test(options)` checks
+them. Each option knows its domain, so only the fcntl calls the domains need are made: one
+F_SETFD for `cloexec`, one F_SETFL for `nonblock` and `append`. `set` and `clear` are the fallible
+forms, all or nothing (an earlier domain rolls back when a later one fails), and report an
+unsupported option as `errc::not_supported`; the operators trap on failure and refuse an
+unsupported option at compile time. Open-time options (`create`, `truncate`) cannot change
+afterwards, and `d &= options` without the `~` is deleted, since it would clear every other flag:
+both are compile errors.
+
+### Ownership
+
+A descriptor is one int and relocates with a memcpy. `cleanup()` closes it (the descriptor is gone
+even when close fails, and a closed one succeeds); the destructor closes silently as a failsafe;
+assigning over an open one traps. `adopt(fd)` takes ownership of a raw descriptor, `release()`
+gives it up, `native()` reads it without giving it up, and `duplicate(options)` opens a second
+descriptor on the same open file, sharing offset and status flags.
+
+The I/O methods mirror `ca::sys`: `read`, `read_all`, `write`, `write_all`, `read_at`, `write_at`,
+`seek`, `sync`, `sync_data`, `resize`, `allocate`, `chmod`, `chown`, `stat`. For buffered
+I/O, wrap it in an `io::reader` or `io::writer` (borrowed) or a `buffered_reader` /
+`buffered_writer` (adopted).

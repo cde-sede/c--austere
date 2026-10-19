@@ -1,0 +1,71 @@
+ca is a C++ library written without the standard library, without exceptions and without
+RTTI, for programs that want every cost visible: no hidden allocation, no hidden failure, no libc
+or std name reaching the user. Errors are values (`ca::result`), resources are released
+explicitly (`cleanup()`), memory comes from an allocator each type names, and whatever cannot fail
+in a correct program traps instead of throwing.
+
+### Layers
+
+The library is built in six ordered layers. A layer depends only on the layers below it, which
+the include paths make visible (`#include "3-system/file/open.hpp"`), and each layer page of this
+reference opens with what its layer is for.
+
+| Layer | Contents |
+|---|---|
+| 1-primitives | the language and the compiler: traits, integers, bits, atomics, hashing, memory primitives, traps |
+| 2-vocabulary | value types: `result`, `optional`, `error`, views (`span`, `borrowed_slice`, `sv`), unicode, I/O contracts |
+| 3-system | the OS boundary: `ca::sys` wrappers, `ca::syscall`, `errc`, error traces |
+| 4-lifecycle | creation and destruction: allocators, arena, heap, `make`, `unique`, contexts |
+| 5-collections | containers, strings, maps, lists, paths, formatting, in-memory I/O, reports |
+| 6-resources | descriptors, buffered I/O, stdout and stderr, `print` |
+
+Programs include the facade instead of the layer paths: `#include "ca/print.hpp"`, or
+`"ca/all.hpp"` for everything.
+
+### A first program
+
+```c++
+#include "ca/dynamic_array.hpp"
+#include "ca/error.hpp"
+#include "ca/flush.hpp"
+#include "ca/hashmap.hpp"
+#include "ca/print.hpp"
+#include "ca/str.hpp"
+#include "ca/sv.hpp"
+
+[[nodiscard]] static auto count_words(const ca::sv::str text, ca::hashmap<ca::str, int>& counts) noexcept
+	-> ca::result<ca::usz> {
+	ca::usz total = 0U;
+	for (const ca::sv::str word : text.split()) {
+		auto slot = counts.setdefault(word.strip(".,"), 0);
+		if (!slot)
+			return slot.propagate();
+		++**slot;
+		++total;
+	}
+	return total;
+}
+
+auto main(void) -> int {
+	ca::hashmap<ca::str, int> counts{};
+	auto total = count_words("the cat saw the dog. the dog ran.", counts);
+	if (!total)
+		return 1;
+	if (!ca::print("{} words, {} distinct, 'the' x{}\n", *total, counts.size(), counts["the"]))
+		return 2;
+	return counts.cleanup() && ca::flush() ? 0 : 3;
+}
+```
+
+The habits it shows run through the whole library: every allocation is a `result` to check
+(`setdefault` may grow the map), views (`sv::str`) are passed by value and never allocate, map
+lookups by text need no temporary string, formats are checked when the program compiles, and the
+program releases what it owns and checks that its output was written before it exits.
+
+### Building
+
+`make` builds `build/<compiler>-<mode>/libca.a` (clang++ debug by default; `CXX=g++`,
+`MODE=release`), `make test` runs the tests, `make matrix` checks both compilers in both modes,
+and `make gen` regenerates the generated sources and this reference. A program compiles with
+`-std=c++2c` (clang) or `-std=c++23` (gcc), `-nostdinc++ -fno-exceptions -fno-rtti`, `-I src/lib`,
+and links `libca.a`.

@@ -1,0 +1,37 @@
+The flags of an open file as compile-time options (`ca::is_option`, layer 2), in `ca::fs`.
+Each flag is a tag type (`fs::append_t`) and a constant holding the one-element set
+(`fs::append`), so flags combine with the option algebra: `fs::readable | fs::create`.
+
+Each option belongs to a domain, which says where the flag lives and when it can change:
+
+| Domain | Options | Changes after open |
+|---|---|---|
+| `fs::access` | `readable`, `writable` | never |
+| `fs::open_flags` | `create`, `exclusive`, `truncate`, `directory`, `nofollow` | never |
+| `fs::status_flags` | `append`, `nonblock`, `sync` | yes, shared by duplicates (F_SETFL) |
+| `fs::descriptor_flags` | `cloexec`, `clofork` | yes, per descriptor (F_SETFD) |
+
+Every option carries `VALUE` (its bit in the domain), `OPEN_VALUE` (its bit in open's flags, so
+`sys::open` can take them raw) and `SUPPORTED`. `clofork` is `SUPPORTED` only where the platform
+has it (`fs::has_clofork`); asking for it elsewhere is `errc::not_supported`. The values are
+written per platform and checked against `<fcntl.h>` when the library builds.
+
+```c++
+#include "ca/fs.hpp"
+#include "ca/option_set.hpp"
+#include "ca/traits.hpp"
+
+constexpr auto log_file = ca::fs::writable | ca::fs::create | ca::fs::append | ca::fs::cloexec;
+using log_flags = decltype(log_file);
+
+static_assert(log_flags::HAS<ca::fs::append_t> && !log_flags::HAS<ca::fs::truncate_t>);
+static_assert(log_flags::SUPPORTED);
+static_assert(ca::fs::is_fcntl_option<ca::fs::nonblock_t> && !ca::fs::is_fcntl_option<ca::fs::create_t>);
+
+constexpr int raw = ca::fs::access::WRITE_ONLY | ca::fs::create_t::OPEN_VALUE | ca::fs::append_t::OPEN_VALUE;
+static_assert((raw & ca::fs::append_t::OPEN_VALUE) != 0);
+```
+
+`fs::descriptor` (layer 6) takes these sets as template arguments and checks the combination when
+it compiles: `exclusive` without `create`, or `truncate` on a read-only file, are compile errors.
+`fs::is_fcntl_option` selects the options `set()` and `get()` can change on an open descriptor.

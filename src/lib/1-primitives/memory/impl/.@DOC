@@ -1,0 +1,27 @@
+ca's own memcpy and memmove, so copying memory needs no libc.
+
+`move_bytes.hpp` declares `move_bytes_variant`, an atomic function pointer holding the copy
+routine of this CPU. It starts on a resolver: the first call runs cpuid, stores the SSE2 or the
+AVX2 variant and forwards to it, so later calls cost one indirect jump. On x86-64 the library
+defines the C symbols `memcpy` and `memmove` as that jump, which is where the builtins of
+`copy_bytes` and `move_bytes` land when the compiler does not expand them inline.
+
+The variants choose a strategy by size:
+
+| Size | Strategy |
+|---|---|
+| 0 - 15 bytes | two overlapping 8, 4 or 2-byte integers, or one byte (`move_ladder`) |
+| 16 - 31 bytes | two overlapping 16-byte vectors (`move_small`) |
+| up to 8 vectors | two, four or eight vectors loaded from both ends (`move_two`, `move_four`, `move_eight`) |
+| larger | an aligned loop of four vectors |
+| from 8 KiB | `rep movsb` where the CPU has fast strings (ERMS) |
+| from half the last-level cache | non-temporal stores, sparing the cache |
+
+Every path loads all it copies before storing, so overlapping ranges need no separate
+backward loop: the same code serves memcpy and memmove.
+
+`move_paths.hpp` holds those pieces, always inlined; `loose_bytes.hpp` the unaligned,
+aliasing loads and stores they use (`loose<T>(p)`: a T read at any address, through a packed
+`may_alias` struct, since attributes on an alias are lost as template arguments). The
+out-of-line strategies are exposed to layer 3 as `ca::move_paths`, for benchmarks and tests
+that need to call one strategy directly.

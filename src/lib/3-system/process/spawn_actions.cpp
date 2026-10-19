@@ -39,10 +39,10 @@ static auto native(ca::byte* const storage) noexcept -> posix_spawn_file_actions
 	return ca::result<void>{};
 }
 
-ca::sys::spawn_actions::~spawn_actions(void) noexcept {
-	if (_live)
-		static_cast<void>(this->destroy());
-}
+// ca::sys::spawn_actions::~spawn_actions(void) noexcept {
+// 	if (_live)
+// 		static_cast<void>(this->cleanup());
+// }
 
 [[nodiscard]] auto ca::sys::spawn_actions::init(void) noexcept -> ca::result<void> {
 
@@ -74,7 +74,7 @@ ca::sys::spawn_actions::~spawn_actions(void) noexcept {
 	return check(::posix_spawn_file_actions_addopen(native(_storage), fd, path, flags, static_cast<mode_t>(mode)));
 }
 
-[[nodiscard]] auto ca::sys::spawn_actions::destroy(void) noexcept -> ca::result<void> {
+[[nodiscard]] auto ca::sys::spawn_actions::cleanup(void) noexcept -> ca::result<void> {
 
 	if (!_live) [[unlikely]]
 		return ca::failure{ca::errc::invalid_argument};

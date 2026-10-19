@@ -85,6 +85,7 @@ namespace ca {
 			// -- methods ----------------------------------------------------
 
 			auto put(const char c) noexcept -> void {
+
 				if (_at == _end) [[unlikely]] {
 					this->_put_slow(&c, 1U);
 					return;

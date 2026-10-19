@@ -12,7 +12,7 @@ auto main(void) -> int {
 		return 2;
 	if (c->size() != 10 || c->capacity() < 10 || (*c)[9] != 9 || c->data() == a.data())
 		return 3;
-	if (!c->destroy())
+	if (!c->cleanup())
 		return 4;
-	return a.destroy() ? 0 : 5;
+	return a.cleanup() ? 0 : 5;
 }

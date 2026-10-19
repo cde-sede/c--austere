@@ -12,7 +12,7 @@ struct fragile {
 			return ca::fail(7);
 		return fragile{id};
 	}
-	auto destroy(void) noexcept -> ca::result<void> {
+	auto cleanup(void) noexcept -> ca::result<void> {
 		++cleanups;
 		return ca::result<void>{};
 	}
@@ -27,5 +27,5 @@ auto main(void) -> int {
 	auto c = a.clone();
 	if (c || c.error().code() != 7 || cleanups != 2)
 		return 2;
-	return a.destroy() && cleanups == 6 ? 0 : 3;
+	return a.cleanup() && cleanups == 6 ? 0 : 3;
 }

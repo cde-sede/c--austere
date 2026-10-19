@@ -1,0 +1,52 @@
+Layer 3: the boundary with the operating system. Everything ca needs from the kernel and the C
+library passes through here, and only here.
+
+- `ca::sys`: one thin wrapper per POSIX call (files, directories, processes, signals, pipes,
+  memory mappings, time, environment, machine information), each returning a `ca::result`
+  instead of -1 and errno.
+- `ca::syscall`: the raw kernel entry points, from a table generated on the build machine, which
+  `ca::sys` uses instead of libc wherever a table exists.
+- `ca::errc`: the errno codes as `ca::error` constants, with their names and messages.
+- `ca::trace`: the per-thread error trace, so an error can say where it came from.
+- `ca::fs` options: the open flags as compile-time options (see `option_set`, layer 2).
+- text: float formatting, the one piece of formatting that needs the C library.
+
+### Nothing of libc leaks
+
+No header of ca includes a system header, even a freestanding one. The wrappers are declared
+with ca types (`int` descriptors, `ca::span` buffers, `const char*` paths, `ca::sv::str` for text
+coming back) and defined in `.cpp` files, which alone include `<unistd.h>`, `<fcntl.h>` and the
+rest. System constants a header needs at compile time (open flags, errno values, signal numbers,
+struct layouts) are written per platform in the header and checked with `static_assert` against
+the real system header in the sibling `.cpp`, so a mismatch breaks the library build rather
+than a program. `make leaks` checks both rules.
+
+### Errors
+
+Every fallible wrapper returns `ca::result<T>`; the error is a `ca::errc` constant. ca keeps its
+own errno (`sys::last_error()`), written by the syscall table and by libc fallbacks, so a
+successful call in between never clobbers it. Calls that can be interrupted (`read`, `write`,
+`open`, ...) retry on EINTR themselves; `close` treats EINTR as success, since the descriptor is
+gone either way.
+
+```c++
+#include "ca/error.hpp"
+#include "ca/file.hpp"
+#include "ca/fs.hpp"
+#include "ca/sv.hpp"
+
+auto main(void) -> int {
+	auto missing = ca::sys::open("/nonexistent/file", ca::fs::access::READ_ONLY, 0U);
+	if (missing || missing.error() != ca::errc::no_entry)
+		return 1;
+	if (ca::sys::error_name(missing.error()) != ca::sv::str{"no_entry"})
+		return 2;
+	if (ca::sys::error_message(missing.error()) != ca::sv::str{"No such file or directory"})
+		return 3;
+	return ca::sys::last_error() == ca::errc::no_entry ? 0 : 4;
+}
+```
+
+The wrappers are deliberately thin: they own nothing, so a descriptor from `sys::open` must be
+closed with `sys::close`. The owning types built on them are in layer 6: `fs::descriptor`,
+`io::writer`, `io::reader`.

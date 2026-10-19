@@ -1,0 +1,48 @@
+Clocks, sleeping and the calendar. Time is a plain `ca::i64` count: nanoseconds for clocks,
+seconds since the epoch for calendar conversions.
+
+| Function | Does |
+|---|---|
+| `sys::now(clock)` | the time of a clock in nanoseconds; never fails |
+| `sys::resolution(clock)` | the smallest step that clock reports |
+| `sys::sleep_for(ns)` | suspends the thread, resuming after signals until the time is up |
+| `sys::utc_time(seconds)`, `sys::local_time(seconds)` | a `calendar_time` in UTC or the local zone |
+| `sys::utc_seconds(time)` | back from a `calendar_time` read as UTC |
+
+The clocks are `realtime` (since the epoch, may jump when the system clock is set), `monotonic`
+(from an arbitrary point, never goes back: measure durations with it), `process_cpu` and
+`thread_cpu` (CPU time consumed).
+
+```c++
+#include "ca/integers.hpp"
+#include "ca/time.hpp"
+
+auto main(void) -> int {
+	const ca::i64 start = ca::sys::now(ca::sys::clock::monotonic);
+	if (!ca::sys::sleep_for(1'000'000))
+		return 1;
+	const ca::i64 elapsed = ca::sys::now(ca::sys::clock::monotonic) - start;
+	if (elapsed < 1'000'000)
+		return 2;
+
+	auto day = ca::sys::utc_time(951825599);
+	if (!day || day->year() != 2000 || day->month() != 2 || day->day() != 29 || day->weekday() != 2)
+		return 3;
+	auto back = ca::sys::utc_seconds(*day);
+	if (!back || *back != 951825599)
+		return 4;
+
+	const ca::sys::calendar_time thirteenth{2025, 13, 1, 0, 0, 0, 0, 0, 0, false};
+	auto carried = ca::sys::utc_seconds(thirteenth).and_then([](const ca::i64 s) noexcept {
+		return ca::sys::utc_time(s);
+	});
+	return carried && carried->year() == 2026 && carried->month() == 1 ? 0 : 5;
+}
+```
+
+A `calendar_time` has `year()`, `month()` (1 to 12), `day()` (1 to 31), `hour()`, `minute()`,
+`second()`, `weekday()` (0 is Sunday), `year_day()` (1 to 366), `utc_offset()` in seconds and
+`daylight_saving()`. `utc_seconds` reads only year to second, and lets fields out of range carry
+over, so adding 1 to the month or 40 to the day and converting back gives the right date.
+`local_time` follows `TZ`, or `/etc/localtime` when it is unset. Years that do not fit fail with
+`errc::out_of_range`.

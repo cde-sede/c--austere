@@ -67,7 +67,7 @@ static auto basics(void) noexcept -> int {
 	});
 	if (!holds(l, ca::array{200, 100, 9, 7, 5, 1}) || l.pop().value_or(0) != 1 || l.pop_front().value_or(0) != 200)
 		return 12;
-	return l.destroy() && l.empty() && copy->destroy() ? 0 : 13;
+	return l.cleanup() && l.empty() && copy->cleanup() ? 0 : 13;
 }
 
 struct keyed {
@@ -90,14 +90,14 @@ static auto stable_sort(void) noexcept -> int {
 			return 21;
 		previous = k;
 	}
-	return l.size() == 100U && l.destroy() ? 0 : 22;
+	return l.size() == 100U && l.cleanup() ? 0 : 22;
 }
 
 static int cleanups = 0;
 
 struct cleanable {
 	int code;
-	auto destroy(void) noexcept -> ca::result<void> {
+	auto cleanup(void) noexcept -> ca::result<void> {
 		++cleanups;
 		if (code != 0)
 			return ca::fail(code);
@@ -125,7 +125,7 @@ static auto cleanup(void) noexcept -> int {
 	auto first = copy->first();
 	if (!first || (*first)[0] != 1)
 		return 33;
-	return l.destroy() && cleanups == 3 && nested.destroy() && copy->destroy() ? 0 : 34;
+	return l.cleanup() && cleanups == 3 && nested.cleanup() && copy->cleanup() ? 0 : 34;
 }
 
 static auto arena(void) noexcept -> int {
@@ -142,10 +142,10 @@ static auto arena(void) noexcept -> int {
 			if (!l->prepend(i))
 				return 42;
 		l->sort();
-		if (l->first().value_or(-1) != 0 || l->last().value_or(-1) != 999 || !l->destroy())
+		if (l->first().value_or(-1) != 0 || l->last().value_or(-1) != 999 || !l->cleanup())
 			return 43;
 	}
-	return arena.destroy() ? 0 : 44;
+	return arena.cleanup() ? 0 : 44;
 }
 
 auto main(void) -> int {

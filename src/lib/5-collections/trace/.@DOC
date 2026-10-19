@@ -1,0 +1,74 @@
+`ca::report<A>`: an error with its trace, owned, with formatted messages. The thread trace of
+layer 3 is free but limited: literal messages only, and it belongs to the thread, so the next
+failure replaces it. A report copies it into memory of its own, so it survives being stored,
+returned through many layers, or handed to another thread, and its frames can carry formatted
+text such as the path that failed.
+
+A function returns `ca::result<T, ca::report<>>` instead of `ca::result<T>`, and adds frames with
+`ca::context(error, "reading {}", path)`: from a plain `ca::error` it starts a report with a copy
+of the thread trace, from a report it extends it, and in both cases the message is checked at
+compile time like any format.
+
+```c++
+#include "ca/context.hpp"
+#include "ca/error.hpp"
+#include "ca/format.hpp"
+#include "ca/report.hpp"
+#include "ca/result.hpp"
+#include "ca/sv.hpp"
+#include "ca/trace.hpp"
+#include "ca/utility.hpp"
+
+[[nodiscard]] static auto open(const ca::sv::str path) noexcept -> ca::result<int> {
+	if (path.starts_with("/etc/"))
+		return ca::trace::fail(ca::errc::access_denied, "open");
+	return 4;
+}
+
+[[nodiscard]] static auto read_config(const ca::sv::str path) noexcept -> ca::result<int, ca::report<>> {
+	auto file = open(path);
+	if (!file)
+		return ca::context(file.error(), "reading {}", path);
+	return *file;
+}
+
+[[nodiscard]] static auto load(const int attempt) noexcept -> ca::result<int, ca::report<>> {
+	auto config = read_config("/etc/app.conf");
+	if (!config)
+		return ca::context(ca::move(config).error(), "loading settings, attempt {}", attempt);
+	return *config;
+}
+
+auto main(void) -> int {
+	auto r = load(2);
+	if (r)
+		return 1;
+	ca::report<>& report = r.error();
+	if (report.error() != ca::errc::access_denied || report.size() != 3U)
+		return 2;
+	if (report.frame(1).message() != ca::sv::str{"reading /etc/app.conf"})
+		return 3;
+	auto text = ca::format("{}", report);
+	if (!text || !text->view().starts_with("Permission denied\n  at open ("))
+		return 4;
+	return text->cleanup() && report.cleanup() ? 0 : 5;
+}
+```
+
+Printed with `{}` or `ca::print_trace`, a report reads like a thread trace:
+
+```text
+Permission denied
+  at open (config.cpp:12): open
+  at read_config (config.cpp:19): reading /etc/app.conf
+  at load (config.cpp:26): loading settings, attempt 2
+```
+
+A report holds the error, one string with every message end to end, and an array of frames
+(offset, size and source location): two allocations whatever the number of frames, none while
+the messages fit inline. All of it is paid on the failure path only. Frames that cannot be stored
+for lack of memory are counted in `dropped()` rather than failing the error path itself.
+
+`ca::report<>::of(error)` builds one by hand, and `report.context("...", args...)` adds a frame in
+place. A context can fail with a report (`ca::with<ca::report<>>(enter, leave)`), which turns a
+trap into a report carrying the trap's reason. Clean a report up with `cleanup()`.

@@ -30,7 +30,7 @@ auto main(void) -> int {
 	if (m.pop("kiwi").value_or(-1) != 3 || m.contains("kiwi"))
 		return 6;
 	auto top = m.popitem();
-	if (!top || top->key != "quince" || !top->destroy())
+	if (!top || top->key != "quince" || !top->cleanup())
 		return 7;
-	return m.destroy() && copy->destroy() ? 0 : 8;
+	return m.cleanup() && copy->cleanup() ? 0 : 8;
 }

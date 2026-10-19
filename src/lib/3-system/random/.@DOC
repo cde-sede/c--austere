@@ -1,0 +1,30 @@
+`sys::getentropy(buffer)` fills a buffer of any size from the kernel's secure random source,
+fetched 256 bytes at a time (the limit of one getentropy call). It is the right source for keys,
+nonces and hash seeds; it is too slow to call per random number, so seed a fast generator from
+it instead.
+
+```c++
+#include "ca/integers.hpp"
+#include "ca/random.hpp"
+#include "ca/span.hpp"
+
+[[nodiscard]] static auto random_seed(void) noexcept -> ca::u64 {
+	ca::byte bytes[8]{};
+	if (!ca::sys::getentropy(bytes))
+		return 0x9E37'79B9'7F4A'7C15U;
+	ca::u64 seed = 0U;
+	for (const ca::byte b : bytes)
+		seed = seed << 8U | b;
+	return seed;
+}
+
+auto main(void) -> int {
+	ca::byte key[1000]{};
+	if (!ca::sys::getentropy(key))
+		return 1;
+	ca::usz zeros = 0U;
+	for (const ca::byte b : key)
+		zeros += b == 0U ? 1U : 0U;
+	return zeros < 40U && random_seed() != random_seed() ? 0 : 2;
+}
+```

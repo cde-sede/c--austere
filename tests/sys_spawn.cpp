@@ -35,7 +35,7 @@ auto main(void) -> int {
 	char greeting[] = "GREETING=hi there";
 	char* const environment[]{greeting, nullptr};
 	auto printer = ca::sys::posix_spawn("/bin/sh", printing, environment, &actions);
-	if (!printer || !actions.destroy() || actions.is_live() || !ca::sys::close(ends->write_end()))
+	if (!printer || !actions.cleanup() || actions.is_live() || !ca::sys::close(ends->write_end()))
 		return 6;
 	char got[16]{};
 	ca::usz total = 0U;

@@ -115,13 +115,13 @@ namespace ca {
 				: _begin{ca::exchange(other._begin, nullptr)}, _at{ca::exchange(other._at, nullptr)}, _end{ca::exchange(other._end, nullptr)}, _fd{ca::exchange(other._fd, -1)}, _mode{other._mode}, _error{other._error} {
 				}
 
-				/* @DOC Failsafe for a skipped flush(): writes pending bytes out, ignoring errors. */
-				~writer(void) noexcept {
-
-					const char* from = _begin;
-					if (from != _at)
-						static_cast<void>(self::_emit(_fd, from, _at));
-				}
+				// Failsafe for a skipped flush(): writes pending bytes out, ignoring errors.
+				// ~writer(void) noexcept {
+				//
+				// 	const char* from = _begin;
+				// 	if (from != _at)
+				// 		static_cast<void>(self::_emit(_fd, from, _at));
+				// }
 
 
 				// -- assignment operators -----------------------------------

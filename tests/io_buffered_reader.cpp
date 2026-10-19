@@ -27,7 +27,7 @@ auto main(void) -> int {
 	if (borrowed->resize(1U) || !borrowed->resize(32U) || borrowed->available() != 2U)
 		return 5;
 	auto second = borrowed->read_until('\n');
-	if (!second || *second != ca::sv::str{"second line\n"} || !borrowed->destroy() || borrowed->native() != -1)
+	if (!second || *second != ca::sv::str{"second line\n"} || !borrowed->cleanup() || borrowed->native() != -1)
 		return 6;
 
 	auto made = ca::arena::make();
@@ -36,14 +36,14 @@ auto main(void) -> int {
 	ca::arena arena = ca::move(*made);
 	{
 		auto owner = ca::make_in<ca::io::buffered_reader<>>(arena, ca::fs::descriptor::adopt(ends->read_end()), 4U);
-		if (!owner || !owner->owns_descriptor() || !ca::sys::write(write_end.native(), ca::sv::str{"abcdefghij"}) || !write_end.destroy())
+		if (!owner || !owner->owns_descriptor() || !ca::sys::write(write_end.native(), ca::sv::str{"abcdefghij"}) || !write_end.cleanup())
 			return 8;
 		ca::dynamic_array<char> all;
 		auto count = ca::io::read_to_end(*owner, all);
-		if (!count || *count != 10U || ca::sv::str{all.data(), all.size()} != ca::sv::str{"abcdefghij"} || !all.destroy())
+		if (!count || *count != 10U || ca::sv::str{all.data(), all.size()} != ca::sv::str{"abcdefghij"} || !all.cleanup())
 			return 9;
-		if (!owner->destroy())
+		if (!owner->cleanup())
 			return 10;
 	}
-	return arena.destroy() ? 0 : 11;
+	return arena.cleanup() ? 0 : 11;
 }

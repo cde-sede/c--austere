@@ -299,7 +299,7 @@ static auto abandon(void* const raw) noexcept -> void {
 				return chunk.propagate();
 			}
 			pool_next = static_cast<char*>(chunk->data());
-			pool_end = pool_next + chunk->size();
+			 pool_end = pool_next + chunk->size();
 		}
 		heap = ca::construct_at(reinterpret_cast<ca::impl::heap_state*>(pool_next), empty_queues());
 		pool_next += sizeof(ca::impl::heap_state);

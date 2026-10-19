@@ -22,5 +22,5 @@ auto main(void) -> int {
 		return 5;
 	const auto& constant = a;
 	const ca::borrowed_slice<const int> view = constant.view();
-	return view.size() == 6U && a.first().value_or(9) == 0 && a.destroy() && b.destroy() ? 0 : 6;
+	return view.size() == 6U && a.first().value_or(9) == 0 && a.cleanup() && b.cleanup() ? 0 : 6;
 }

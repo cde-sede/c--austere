@@ -62,7 +62,7 @@ static auto basics(void) noexcept -> int {
 	}
 	if (!c->empty())
 		return 14;
-	return a->destroy() && b->destroy() && both->destroy() && common->destroy() && only->destroy() && either->destroy() && c->destroy() ? 0 : 15;
+	return a->cleanup() && b->cleanup() && both->cleanup() && common->cleanup() && only->cleanup() && either->cleanup() && c->cleanup() ? 0 : 15;
 }
 
 static auto many(void) noexcept -> int {
@@ -77,7 +77,7 @@ static auto many(void) noexcept -> int {
 	for (ca::u64 i = 0U; i < 100000U; ++i)
 		if (s.contains(i * 7919U) != (i % 3U != 0U) || s.contains(i * 7919U + 1U))
 			return 22;
-	return s.size() == 66666U && s.destroy() ? 0 : 23;
+	return s.size() == 66666U && s.cleanup() ? 0 : 23;
 }
 
 static auto text(void) noexcept -> int {
@@ -86,9 +86,9 @@ static auto text(void) noexcept -> int {
 	if (!s.add("apple") || !s.add("pear") || !s.add(ca::sv::str{"apple"}) || s.size() != 2U || !s.contains("pear"))
 		return 30;
 	auto taken = s.remove("apple");
-	if (!taken || *taken != "apple" || !taken->destroy() || s.contains("apple"))
+	if (!taken || *taken != "apple" || !taken->cleanup() || s.contains("apple"))
 		return 31;
-	return s.destroy() ? 0 : 32;
+	return s.cleanup() ? 0 : 32;
 }
 
 auto main(void) -> int {

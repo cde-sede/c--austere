@@ -1,0 +1,50 @@
+Every type trait of the C++ standard library, one per header, built on compiler builtins
+(`__is_same`, `__is_trivially_copyable`, ...) instead of `<type_traits>`. The headers are
+written by `tooling/gen_traits.py` and not edited by hand.
+
+The std names map to ca names by one rule each:
+
+| std | ca | Kind |
+|---|---|---|
+| `std::is_x_v<T>` (yes or no) | `ca::is_x<T>` | concept |
+| `std::conjunction_v`, `disjunction_v`, `negation_v` | `ca::conjunction`, ... | concept |
+| `std::x_t<T>` (a type) | `ca::x<T>` | alias |
+| `std::x_v<T>` (a number) | `ca::x<T>` | variable |
+| `std::integral_constant`, `true_type`, ... | same name | class |
+
+Since the predicates are concepts, they constrain templates directly and compose with `&&`,
+`||` and `!` in requires-clauses, with subsumption between overloads:
+
+```c++
+#include "ca/traits.hpp"
+
+template <typename T>
+requires ca::is_integral<T> && (!ca::is_same<T, bool>)
+[[nodiscard]] constexpr auto twice(const T value) noexcept -> T {
+	return static_cast<T>(value * 2);
+}
+
+template <ca::is_floating_point T>
+[[nodiscard]] constexpr auto twice(const T value) noexcept -> T {
+	return value + value;
+}
+
+static_assert(twice(21) == 42);
+static_assert(twice(1.5) == 3.0);
+
+using text = const char (&)[6];
+static_assert(ca::is_same<ca::remove_cvref<text>, char[6]>);
+static_assert(ca::is_same<ca::decay<text>, const char*>);
+static_assert(ca::extent<char[6]> == 6U);
+static_assert(ca::is_same<ca::conditional<(sizeof(long) == 8U), long, long long>, long>);
+static_assert(ca::is_trivially_copyable<int> && !ca::is_trivially_copyable<int&>);
+static_assert(ca::is_constructible<long, int> && !ca::is_convertible<int*, long>);
+```
+
+A predicate used as a value, outside a requires-clause, is a bool expression: `if constexpr
+(ca::is_trivially_destructible<T>)` is the idiom around destructor loops. Code that needs a
+trait as a type uses `ca::bool_constant<ca::is_x<T>>`.
+
+`is_constant_evaluated()` and the C++26 `is_within_lifetime(p)` are here too, as functions;
+`invoke_result` and the `is_invocable` family cover callables, member pointers included.
+The deprecated `aligned_storage`, `aligned_union` and `is_pod` are kept for parity with std.

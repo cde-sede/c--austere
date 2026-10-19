@@ -1,0 +1,9 @@
+The arithmetic shared by `hash_word` and `hash_bytes`:
+
+- `hash_secret`: wyhash's four odd constants with balanced bits, mixed into every round.
+- `hash_multiply(left, right)`: the full 128-bit product in place, low half into left, high half
+  into right (`unsigned __int128`, one `mul` on x86-64).
+- `hash_mix(left, right)`: that product folded to 64 bits, low ^ high: the step that makes every
+  output bit depend on every input bit.
+
+All three are always inlined; a call would cost more than the multiply.

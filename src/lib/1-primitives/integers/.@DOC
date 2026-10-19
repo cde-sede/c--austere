@@ -1,0 +1,44 @@
+Integer types named by what they are, used everywhere in ca instead of the C names:
+
+| Alias | Type |
+|---|---|
+| `i8`, `i16`, `i32`, `i64` | signed, exactly that many bits |
+| `u8`, `u16`, `u32`, `u64` | unsigned, exactly that many bits |
+| `usz` | the type of `sizeof`: sizes, counts, indices |
+| `isz` | the type of a pointer difference |
+| `sint`, `uint` | the native `int` and `unsigned int`, where an API wants exactly those |
+| `byte` | `unsigned char`: raw memory, may alias any object |
+
+The exact-width aliases are selected by bit width (`ca::sint_of<B>`, `ca::uint_of<B>`) among
+the standard integer types instead of being assumed, so they are right on every data model and
+fail to compile on a target lacking one. `ca::bits<T>` counts the bits of any type.
+
+```c++
+#include "ca/integers.hpp"
+
+static_assert(sizeof(ca::u16) == 2U && sizeof(ca::i64) == 8U);
+static_assert(ca::bits<ca::u32> == 32U);
+static_assert(ca::bits<ca::usz> == ca::bits<void*>);
+
+template <unsigned B>
+[[nodiscard]] constexpr auto all_ones(void) noexcept -> ca::uint_of<B> {
+	return static_cast<ca::uint_of<B>>(~ca::uint_of<B>{0U});
+}
+
+static_assert(all_ones<8U>() == 0xFFU);
+static_assert(all_ones<64U>() == 0xFFFF'FFFF'FFFF'FFFFU);
+
+auto main(void) -> int {
+	const int values[] = {3, 1, 4, 1, 5};
+	const ca::usz count = sizeof(values) / sizeof(values[0]);
+	const ca::isz distance = &values[4] - &values[0];
+	const ca::byte* const raw = reinterpret_cast<const ca::byte*>(&values[1]);
+	unsigned sum = 0U;
+	for (ca::usz i = 0U; i < sizeof(int); ++i)
+		sum += raw[i];
+	return count == 5U && distance == 4 && sum == 1U ? 0 : 1;
+}
+```
+
+Literals take a suffix when unsigned (`0U`, `1U`), and sizes are `usz` even where an `int`
+would fit, so arithmetic on them never mixes signedness.

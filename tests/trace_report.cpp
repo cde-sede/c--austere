@@ -56,7 +56,7 @@ auto main(void) -> int {
 	if (plain.size() != 1U || plain.frame(0).where().line() != 55U)
 		return 6;
 
-	auto destroyed = report.destroy();
-	auto plain_destroyed = plain.destroy();
+	auto destroyed = report.cleanup();
+	auto plain_destroyed = plain.cleanup();
 	return destroyed && plain_destroyed ? 0 : 7;
 }

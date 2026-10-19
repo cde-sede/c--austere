@@ -28,5 +28,5 @@ auto main(void) -> int {
 	if (!s.set_buffer(ca::span<char>{}) || s.capacity() != 0U)
 		return 4;
 	auto second = ca::sys::read(ends->read_end(), got);
-	return second && ca::sv::str{got, *second} == ca::sv::str{"cdefgh"} && out.destroy() ? 0 : 5;
+	return second && ca::sv::str{got, *second} == ca::sv::str{"cdefgh"} && out.cleanup() ? 0 : 5;
 }

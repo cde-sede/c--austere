@@ -1,0 +1,37 @@
+The process environment: read, set and remove variables, or take the whole block for
+`execve` and `posix_spawn`.
+
+| Function | Does |
+|---|---|
+| `sys::getenv(name)` | the value as an `sv::str`, or nothing when unset |
+| `sys::setenv(name, value, overwrite)` | sets name; an existing value is kept unless overwrite |
+| `sys::unsetenv(name)` | removes name; removing a missing one succeeds |
+| `sys::environ()` | the null-terminated array of "NAME=value" strings |
+
+```c++
+#include "ca/environment.hpp"
+#include "ca/sv.hpp"
+
+auto main(void) -> int {
+	if (!ca::sys::setenv("APP_MODE", "fast", true) || !ca::sys::setenv("APP_MODE", "slow", false))
+		return 1;
+	const ca::sv::str mode = ca::sys::getenv("APP_MODE").value_or(ca::sv::str{"default"});
+	if (mode != ca::sv::str{"fast"})
+		return 2;
+
+	bool listed = false;
+	for (char* const* entry = ca::sys::environ(); *entry != nullptr; ++entry)
+		listed = listed || ca::sv::str{*entry}.starts_with("APP_MODE=");
+	if (!listed)
+		return 3;
+
+	if (!ca::sys::unsetenv("APP_MODE"))
+		return 4;
+	return ca::sys::getenv("APP_MODE") ? 5 : 0;
+}
+```
+
+The view `getenv` returns points into the environment block and stays valid only until the
+environment changes; copy it into a `ca::str` to keep it. `setenv` and `unsetenv` are not safe
+against a concurrent `getenv` in another thread, as in C: set the environment before starting
+threads.

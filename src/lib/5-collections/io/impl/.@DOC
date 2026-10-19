@@ -1,0 +1,5 @@
+`is_char_buffer.hpp`: what `read_line` and `read_to_end` can write into. `is_char_buffer<L>`
+accepts any container of `char` with a fallible `resize`, and `append_text(buffer, text)` adds text
+at its end through `extend` (`dynamic_array<char, A>`) or `append` (`basic_str<char, A>`,
+`inline_str<N>`), whichever the type has. So the readers serve growable and fixed-capacity
+targets with one implementation, and a fixed one reports `errc::no_space` instead of truncating.

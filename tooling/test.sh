@@ -1,7 +1,11 @@
 #!/bin/sh
-# Runs tests/*.cpp; called by `make test`, which sets CXX, MODE, CXXFLAGS,
-# LDFLAGS, LIB and BUILD. T selects tests by name or glob, space-separated
-# (T='optional_self_assign dynamic_array_*'); empty runs all.
+# Runs one test, tests/NAME.cpp; called by `make test` once per test (in
+# parallel under -j), which sets CXX, MODE, CXXFLAGS, LDFLAGS, LIB, BUILD and,
+# in `make matrix`, TAG (the configuration, put before each line). Prints one
+# line and writes BUILD/tests/NAME.result (pass, fail or skip), which
+# tooling/test_summary.sh counts. Exits 0 unless it cannot run at all.
+#
+#   tooling/test.sh tests/NAME.cpp
 #
 # The first lines of each test say what must happen:
 #
@@ -11,76 +15,57 @@
 #   // mode: debug             only checked in debug builds (or: release)
 
 ulimit -c 0
+test=$1
+name=$(basename "$test" .cpp)
+bin=$BUILD/tests/$name
+result=$BUILD/tests/$name.result
+tag=${TAG:+"[$TAG] "}
 mkdir -p "$BUILD/tests"
-pass=0
-total=0
 
-tests=
-set -f
-for pattern in ${T:-*}; do
-	set +f
-	found=
-	for test in tests/$pattern.cpp; do
-		[ -f "$test" ] || continue
-		tests="$tests $test"
-		found=1
-	done
-	if [ -z "$found" ]; then
-		echo "no test matches '$pattern'"
-		exit 1
-	fi
-	set -f
-done
-set +f
+expect=$(sed -n 's|^// expect: ||p' "$test")
+kind=${expect%% *}
+arg=${expect#"$kind"}
+arg=${arg# }
+mode=$(sed -n 's|^// mode: ||p' "$test")
 
-for test in $tests; do
-	name=$(basename "$test" .cpp)
-	bin=$BUILD/tests/$name
-	expect=$(sed -n 's|^// expect: ||p' "$test")
-	kind=${expect%% *}
-	arg=${expect#"$kind"}
-	arg=${arg# }
-	mode=$(sed -n 's|^// mode: ||p' "$test")
+if [ -n "$mode" ] && [ "$mode" != "$MODE" ]; then
+	printf '  skip  %s%-36s %s builds only\n' "$tag" "$name" "$mode"
+	echo skip > "$result"
+	exit 0
+fi
 
-	if [ -n "$mode" ] && [ "$mode" != "$MODE" ]; then
-		printf '  skip  %-36s %s builds only\n' "$name" "$mode"
-		continue
-	fi
-	total=$((total + 1))
-
-	out=$($CXX $CXXFLAGS "$test" -o "$bin" "$LIB" $LDFLAGS 2>&1)
-	built=$?
-	failure=
-	case $kind in
-	error)
-		if [ $built -eq 0 ]; then
-			failure="built, but must not"
-		elif ! printf '%s\n' "$out" | grep -Eq -- "$arg"; then
-			failure="rejected, but not with /$arg/"
-		fi ;;
-	exit|trap)
-		if [ $built -ne 0 ]; then
-			failure="does not build"
-		else
-			status=$("$bin" >/dev/null 2>&1; echo $?)
-			if [ "$kind" = exit ] && [ "$status" != "$arg" ]; then
-				failure="expected exit $arg, got status $status"
-			elif [ "$kind" = trap ] && [ "$status" != 132 ] && [ "$status" != 133 ]; then
-				failure="expected a trap, got status $status"
-			fi
-		fi ;;
-	*)
-		failure='no "// expect:" line' ;;
-	esac
-
-	if [ -z "$failure" ]; then
-		pass=$((pass + 1))
-		printf '  ok    %s\n' "$name"
+out=$($CXX $CXXFLAGS "$test" -o "$bin" "$LIB" $LDFLAGS 2>&1)
+built=$?
+failure=
+case $kind in
+error)
+	if [ $built -eq 0 ]; then
+		failure="built, but must not"
+	elif ! printf '%s\n' "$out" | grep -Eq -- "$arg"; then
+		failure="rejected, but not with /$arg/"
+	fi ;;
+exit|trap)
+	if [ $built -ne 0 ]; then
+		failure="does not build"
 	else
-		printf '  FAIL  %-36s %s\n' "$name" "$failure"
-		[ $built -ne 0 ] && printf '%s\n' "$out" | grep -m3 'error'
-	fi
-done
+		status=$("$bin" >/dev/null 2>&1; echo $?)
+		if [ "$kind" = exit ] && [ "$status" != "$arg" ]; then
+			failure="expected exit $arg, got status $status"
+		elif [ "$kind" = trap ] && [ "$status" != 132 ] && [ "$status" != 133 ]; then
+			failure="expected a trap, got status $status"
+		fi
+	fi ;;
+*)
+	failure='no "// expect:" line' ;;
+esac
 
-echo "$pass/$total as expected ($CXX, $MODE)"
-[ $pass -eq $total ]
+if [ -z "$failure" ]; then
+	printf '  ok    %s%s\n' "$tag" "$name"
+	echo pass > "$result"
+else
+	report=$(printf '  FAIL  %s%-36s %s' "$tag" "$name" "$failure")
+	[ $built -ne 0 ] && report=$(printf '%s\n%s' "$report" "$(printf '%s\n' "$out" | grep -m3 'error')")
+	printf '%s\n' "$report"
+	echo fail > "$result"
+fi
+exit 0

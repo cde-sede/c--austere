@@ -28,5 +28,5 @@ auto main(void) -> int {
 		return 5;
 	got = ca::io::read_line(r, line);
 	auto end = r.read_until('\n');
-	return got && !*got && end && end->empty() && r.at_end() && line.destroy() && rest.destroy() ? 0 : 6;
+	return got && !*got && end && end->empty() && r.at_end() && line.cleanup() && rest.cleanup() ? 0 : 6;
 }

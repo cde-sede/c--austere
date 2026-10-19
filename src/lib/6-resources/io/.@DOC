@@ -1,0 +1,136 @@
+Buffered I/O over file descriptors, and the process's standard streams.
+
+| Type | Buffer | Descriptor |
+|---|---|---|
+| `io::writer` | borrowed: memory the caller provides | borrowed |
+| `io::reader` | borrowed | borrowed |
+| `io::stream` | two borrowed buffers, a reader tied to a writer | borrowed: a socket, a terminal or a pipe pair |
+| `io::buffered_writer<A>` | owned, from A, resizable | borrowed (`over`) or owned (`adopt`) |
+| `io::buffered_reader<A>` | owned, from A, resizable | borrowed or owned |
+| `io::out()`, `io::err()`, `io::in()` | per-thread stdout, stderr, process stdin | fds 1, 2 and 0 |
+
+### Writers
+
+An `io::writer` is a windowed writer (`io::is_windowed_writer`): `ca::print` and `format_to` format
+straight into its buffer, which is written out according to its `buffering` policy: `full` when
+it fills or on `flush()`, `line` also after every message holding a newline, `none` after every
+message. Each call returns its own error, and the first error since the last check is kept,
+sticky, so code that writes in many places checks once with `flush()`. When writing out fails,
+the unwritten bytes stay pending: `flush()` retries them and `discard()` drops them; nothing is
+retried behind the caller's back.
+
+```c++
+#include "ca/buffering.hpp"
+#include "ca/file.hpp"
+#include "ca/fs.hpp"
+#include "ca/io.hpp"
+#include "ca/print.hpp"
+#include "ca/sv.hpp"
+#include "ca/writer.hpp"
+
+auto main(void) -> int {
+	auto ends = ca::sys::pipe(ca::fs::cloexec_t::OPEN_VALUE);
+	if (!ends)
+		return 1;
+	char buffer[64];
+	ca::io::writer out{ends->write_end(), ca::io::buffering::full, buffer};
+	if (!ca::print(out, "x={} ", 1) || !ca::print(out, "y={}\n", 2) || out.pending() != 8U)
+		return 2;
+	if (!out.flush() || out.pending() != 0U)
+		return 3;
+
+	char got[16];
+	auto n = ca::sys::read(ends->read_end(), got);
+	if (!n || ca::sv::str{got, *n} != ca::sv::str{"x=1 y=2\n"})
+		return 4;
+
+	auto direct = ca::io::writer::unbuffered(ends->write_end());
+	if (!ca::print(direct, "now\n") || !ca::sys::read(ends->read_end(), got))
+		return 5;
+	return ca::sys::close(ends->read_end()) && ca::sys::close(ends->write_end()) ? 0 : 6;
+}
+```
+
+### Readers
+
+An `io::reader` is a buffered reader (`io::is_buffered_reader`): `fill()` and `consume(n)` let a
+parser work inside the buffer, `read_until(delimiter)` returns the next delimited run in place,
+and `read_line` / `read_to_end` (layer 5) copy out of it. A reader can be tied to a writer
+(`tie`), whose pending output is written before each read that may block, so a prompt shows
+before input is awaited; `io::in()` is tied to the calling thread's `io::out()` that way.
+
+`io::stream` pairs a reader and a writer over one descriptor (a socket, a terminal) or two (a pipe
+pair), the reader tied to the writer, so a request is sent before the reply is awaited.
+
+```c++
+#include "ca/buffering.hpp"
+#include "ca/file.hpp"
+#include "ca/format_to.hpp"
+#include "ca/io.hpp"
+#include "ca/stream.hpp"
+#include "ca/sv.hpp"
+
+auto main(void) -> int {
+	auto requests = ca::sys::pipe(0);
+	auto replies = ca::sys::pipe(0);
+	if (!requests || !replies)
+		return 1;
+	char input[32];
+	char output[32];
+	ca::io::stream s{replies->read_end(), requests->write_end(), ca::io::buffering::full, input, output};
+	if (!ca::format_to(s, "ping {}\n", 1) || s.pending() != 7U)
+		return 2;
+	if (!ca::sys::write(replies->write_end(), ca::sv::str{"pong 1\n"}))
+		return 3;
+
+	auto answer = s.read_until('\n');
+	if (!answer || *answer != ca::sv::str{"pong 1\n"} || s.pending() != 0U)
+		return 4;
+	char sent[16];
+	auto n = ca::sys::read(requests->read_end(), sent);
+	if (!n || ca::sv::str{sent, *n} != ca::sv::str{"ping 1\n"})
+		return 5;
+	return ca::sys::close(requests->read_end()) && ca::sys::close(requests->write_end())
+		&& ca::sys::close(replies->read_end()) && ca::sys::close(replies->write_end()) ? 0 : 6;
+}
+```
+
+### Owned buffers
+
+`buffered_writer<A>` and `buffered_reader<A>` own their buffer, from allocator A, and can own their
+descriptor too: `over(fd, ...)` borrows it, `adopt(descriptor, ...)` takes an `fs::descriptor`
+and closes it in `cleanup()`. `resize(capacity)` swaps the buffer (0 makes a writer unbuffered).
+`writer()` and `reader()` give the inner object for code that takes an `io::writer&` or
+`io::reader&`.
+
+```c++
+#include "ca/buffered_writer.hpp"
+#include "ca/buffering.hpp"
+#include "ca/descriptor.hpp"
+#include "ca/file.hpp"
+#include "ca/fs.hpp"
+#include "ca/print.hpp"
+#include "ca/utility.hpp"
+
+auto main(void) -> int {
+	auto file = ca::fs::descriptor::open("log.tmp", ca::fs::writable | ca::fs::create | ca::fs::truncate, 0644U);
+	if (!file)
+		return 1;
+	auto log = ca::io::buffered_writer<>::adopt(ca::move(*file), ca::io::buffering::line, 4096U);
+	if (!log || !log->owns_descriptor())
+		return 2;
+	for (int i = 0; i < 3; ++i)
+		if (!ca::print(log->writer(), "event {}\n", i))
+			return 3;
+	return log->cleanup() && ca::sys::unlink("log.tmp") ? 0 : 4;
+}
+```
+
+### Standard streams
+
+`io::out()` is this thread's standard output: a 4 KiB buffer, line policy on a terminal and full
+otherwise, opened on first use, flushed when the thread exits and, for the thread that calls
+`exit` (returning from `main` included), at exit; `exit_immediately` and crashes drop it. Being per
+thread, it needs no lock, and each message reaches fd 1 whole. `io::err()` is unbuffered: each
+message is one write as it happens. `io::in()` is the process's standard input, one per process,
+so read it from one thread at a time.

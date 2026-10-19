@@ -6,7 +6,7 @@ static auto drop(const char* const name) noexcept -> void {
 	auto path = ca::fs::path::from(name);
 	if (path) {
 		static_cast<void>(path->unlink());
-		static_cast<void>(path->destroy());
+		static_cast<void>(path->cleanup());
 	}
 }
 
@@ -43,7 +43,7 @@ auto main(void) -> int {
 	auto again = link->hardlink_to(*file);
 	if (again || again.error() != ca::errc::exists)
 		return 9;
-	if (!d->destroy() || !link->unlink() || !file->unlink() || !link->destroy() || !file->destroy())
+	if (!d->cleanup() || !link->unlink() || !file->unlink() || !link->cleanup() || !file->cleanup())
 		return 10;
 	return 0;
 }

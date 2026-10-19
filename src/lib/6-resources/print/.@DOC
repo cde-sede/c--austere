@@ -1,0 +1,65 @@
+Printing: the formatting of layer 5 aimed at standard output, standard error or any writer.
+
+| Function | Does |
+|---|---|
+| `ca::print("...", args...)` | `{}` syntax to this thread's stdout (`io::out()`) |
+| `ca::print(writer, "...", args...)` | the same to any writer: `io::err()`, a file, a string |
+| `ca::printf("%...", args...)` | C's `%` syntax, typed and checked at compile time, no varargs |
+| `ca::flush()` | writes out stdout and returns the first error since the last flush |
+| `ca::print_trace(error)` | an error and its trace, to `io::err()` or a given writer |
+
+The format is checked when the program compiles, like every format of ca: a placeholder that does
+not fit its argument, or a missing argument, does not build. Each call returns the size of its
+message in bytes, or its error; the writer also keeps the first error sticky, so a program can
+print freely and check once with `ca::flush()` before it exits.
+
+```c++
+#include "ca/error.hpp"
+#include "ca/flush.hpp"
+#include "ca/memory_writer.hpp"
+#include "ca/print.hpp"
+#include "ca/print_trace.hpp"
+#include "ca/printf.hpp"
+#include "ca/result.hpp"
+#include "ca/sv.hpp"
+#include "ca/trace.hpp"
+
+[[nodiscard]] static auto open_config(void) noexcept -> ca::result<int> {
+	return ca::trace::fail(ca::errc::no_entry, "app.toml");
+}
+
+auto main(void) -> int {
+	const char* const names[] = {"ada", "grace"};
+	const double ratios[] = {0.5, 0.875};
+	for (int i = 0; i < 2; ++i)
+		if (!ca::printf("%-8s|%5.2f\n", names[i], ratios[i]))
+			return 1;
+	if (!ca::print("{} items, {:.0f}% done\n", 2, 50.0))
+		return 2;
+	if (!ca::flush())
+		return 3;
+
+	auto config = open_config();
+	if (config)
+		return 4;
+	char buffer[256];
+	ca::io::memory_writer report{buffer};
+	if (!ca::print_trace(report, config.error()))
+		return 5;
+	return report.view().starts_with("No such file or directory\n  at open_config (") ? 0 : 6;
+}
+```
+
+`ca::print_trace(error)` writes the error's message and, when it carries the thread's current
+trace, one line per frame:
+
+```text
+No such file or directory
+  at open_config (main.cpp:12): app.toml
+```
+
+A `ca::report` (layer 5) prints the same way with `ca::print("{}\n", report)`.
+
+`io::out()` is buffered per thread and flushed at thread exit and at `exit`, but that failsafe
+ignores errors: call `ca::flush()` to learn whether everything was written (a full disk, a closed
+pipe). Printing to `io::err()` writes immediately, unbuffered.

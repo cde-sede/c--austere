@@ -1,0 +1,52 @@
+The std `<bit>` header, one function per file, all constexpr. The counting and rounding
+functions take unsigned integers only: `bool` and the character types are refused, as in
+std, so `popcount('a')` does not compile.
+
+| Function | Answers |
+|---|---|
+| `popcount(x)` | number of 1 bits |
+| `countl_zero(x)`, `countl_one(x)` | run of 0 or 1 bits from the most significant end |
+| `countr_zero(x)`, `countr_one(x)` | run of 0 or 1 bits from the least significant end |
+| `has_single_bit(x)` | whether x is a power of two |
+| `bit_width(x)` | bits needed to write x; 0 for 0 |
+| `bit_floor(x)`, `bit_ceil(x)` | power of two at or below, at or above x |
+| `rotl(x, s)`, `rotr(x, s)` | rotation; a negative s rotates the other way |
+| `byteswap(x)` | x with its bytes reversed, any integer |
+| `bit_cast<To>(x)` | the bytes of x read as a To of the same size |
+
+```c++
+#include "ca/bit.hpp"
+#include "ca/floats.hpp"
+#include "ca/integers.hpp"
+
+static_assert(ca::popcount(0b1011'0000U) == 3);
+static_assert(ca::countr_zero(ca::u32{8U}) == 3);
+static_assert(ca::countl_zero(ca::u8{1U}) == 7);
+static_assert(ca::bit_width(255U) == 8);
+static_assert(ca::bit_ceil(ca::u64{100U}) == 128U);
+static_assert(ca::bit_floor(100U) == 64U);
+static_assert(ca::has_single_bit(4096U) && !ca::has_single_bit(4095U));
+static_assert(ca::rotl(ca::u8{0b1000'0001U}, 1) == 0b0000'0011U);
+static_assert(ca::byteswap(ca::u32{0x11223344U}) == 0x44332211U);
+static_assert(ca::bit_cast<ca::u32>(ca::f32{1.0F}) == 0x3F80'0000U);
+```
+
+`ca::endian` tells the byte order of the target at compile time, for code reading or writing
+binary formats:
+
+```c++
+#include "ca/bit.hpp"
+#include "ca/integers.hpp"
+
+[[nodiscard]] constexpr auto to_big_endian(const ca::u32 value) noexcept -> ca::u32 {
+	if constexpr (ca::endian::native == ca::endian::little)
+		return ca::byteswap(value);
+	else
+		return value;
+}
+
+static_assert(ca::endian::native == ca::endian::little || ca::endian::native == ca::endian::big);
+```
+
+`bit_ceil` of a value whose next power of two does not fit is undefined, as in std; check
+`bit_width(x) < ca::bits<T>` first when x is not trusted.

@@ -1,0 +1,10 @@
+`enter(number, args...)` is the instruction that enters the kernel. On Linux x86-64, aarch64
+and riscv64 it is inline assembly with one overload per argument count, 0 to 6, each binding
+exactly the registers it uses through register variables, so the compiler loads the arguments in
+place and keeps everything else live across the call. Memory is clobbered, since the kernel reads
+and writes through the pointers it is given. It returns the raw kernel value: -errno, between
+-4095 and -1, on failure; `invoke` turns that into a `ca::result`.
+
+`inline_entry` tells whether `enter` is the inlined instruction (true on those three CPUs) or a
+call to libc's `syscall(2)`. Functions that must not return, such as `exit`, are generated as
+`[[noreturn]]` and end in `ca::unreachable()` after the instruction.

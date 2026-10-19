@@ -49,7 +49,7 @@ static auto check(void) noexcept -> int {
 	if (static_cast<int>(a[1]) != 7 || static_cast<int>(a[2]) != 9 || static_cast<int>(a[1 + room]) != 9 || static_cast<int>(a[2 + room]) != 8
 		|| static_cast<int>(a[7 + room]) != 3)
 		return 12;
-	return a.destroy() && b.destroy() && c.destroy() ? 0 : 13;
+	return a.cleanup() && b.cleanup() && c.cleanup() ? 0 : 13;
 }
 
 struct tracked_int : tracked {

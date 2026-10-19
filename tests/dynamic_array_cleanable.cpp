@@ -6,7 +6,7 @@ static int cleanups = 0;
 
 struct cleanable {
 	int code;
-	auto destroy(void) noexcept -> ca::result<void> {
+	auto cleanup(void) noexcept -> ca::result<void> {
 		++cleanups;
 		if (code != 0)
 			return ca::fail(code);
@@ -18,7 +18,7 @@ auto main(void) -> int {
 	ca::dynamic_array<cleanable> a;
 	if (!a.append(cleanable{0}) || !a.append(cleanable{5}) || !a.append(cleanable{6}))
 		return 1;
-	auto d = a.destroy();
+	auto d = a.cleanup();
 	if (d)
 		return 2;
 	return d.error().code() == 5 && cleanups == 3 && a.capacity() == 0 ? 0 : 3;

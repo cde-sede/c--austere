@@ -103,11 +103,11 @@ namespace ca {
 				return ca::result<T>{ca::in_place, value};
 		}
 
-		/* @DOC Runs value.destroy() when T has one, keeping the first error in first. */
+		/* @DOC Runs value.cleanup() when T has one, keeping the first error in first. */
 		template <typename T>
 		[[gnu::always_inline]] inline auto clean(T& value, ca::error& first) noexcept -> void {
 			if constexpr (ca::is_cleanable<T>) {
-				value.destroy().match([] {
+				value.cleanup().match([] {
 				}, [&first](const ca::error& error) {
 					if (first.ok())
 						first = error;

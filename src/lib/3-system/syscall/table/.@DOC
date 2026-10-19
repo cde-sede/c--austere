@@ -1,0 +1,20 @@
+The generated syscall tables, one pair of files per platform and CPU (`linux_x86_64.hpp` and
+`.cpp`), written by `tooling/gen_syscalls.py` (`make syscalls`) on the machine they describe. Never
+edit them by hand: regenerate.
+
+The header defines `ca::syscall::number::<name>` and `ca::syscall::<name>(args...)` for every syscall
+the running kernel implements, read from the kernel's build headers and configuration, so
+syscalls configured out of that kernel are left out. Each function takes exactly the kernel's
+parameters, named as in its prototype; syscalls that never return are `[[noreturn]]`. The `.cpp`
+checks every number against `<sys/syscall.h>` when the library builds.
+
+`../syscalls.hpp` includes the table of the build target among those present, and defines
+`has_table`. A target without a table still has `ca::syscall::invoke`, and `ca::sys` falls back
+to libc there.
+
+```c++
+#include "ca/syscall.hpp"
+
+static_assert(!ca::syscall::has_table || ca::syscall::number::read == 0);
+static_assert(!ca::syscall::has_table || ca::syscall::number::write == 1);
+```

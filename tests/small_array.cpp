@@ -42,14 +42,14 @@ static auto ints(void) noexcept -> int {
 		return 11;
 	if (!taken.reserve(100U) || taken.capacity() < 100U || taken.count(9) != 17U)
 		return 12;
-	return taken.destroy() && taken.is_inline() && copy->destroy() && small_copy->destroy() && a.destroy() ? 0 : 13;
+	return taken.cleanup() && taken.is_inline() && copy->cleanup() && small_copy->cleanup() && a.cleanup() ? 0 : 13;
 }
 
 static int cleanups = 0;
 
 struct cleanable {
 	int code;
-	auto destroy(void) noexcept -> ca::result<void> {
+	auto cleanup(void) noexcept -> ca::result<void> {
 		++cleanups;
 		if (code != 0)
 			return ca::fail(code);
@@ -71,10 +71,10 @@ static auto owning(void) noexcept -> int {
 	ca::small_array<cleanable, 2> parts;
 	if (!parts.append(cleanable{0}) || !parts.append(cleanable{6}) || !parts.append(cleanable{7}))
 		return 22;
-	auto cleaned = parts.destroy();
+	auto cleaned = parts.cleanup();
 	if (cleaned || cleaned.error().code() != 6 || cleanups != 3 || !parts.is_inline())
 		return 23;
-	return nested.destroy() && copy->destroy() ? 0 : 24;
+	return nested.cleanup() && copy->cleanup() ? 0 : 24;
 }
 
 static auto arena(void) noexcept -> int {
@@ -90,10 +90,10 @@ static auto arena(void) noexcept -> int {
 		for (int i = 0; i < 100; ++i)
 			if (!a->append(i))
 				return 32;
-		if (a->is_inline() || (*a)[99] != 99 || !a->destroy())
+		if (a->is_inline() || (*a)[99] != 99 || !a->cleanup())
 			return 33;
 	}
-	return arena.destroy() ? 0 : 34;
+	return arena.cleanup() ? 0 : 34;
 }
 
 auto main(void) -> int {

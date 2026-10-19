@@ -1,0 +1,53 @@
+Layer 6: objects backed by the operating system, and the services a program uses through them.
+
+| Folder | Contents |
+|---|---|
+| `fs/` | `fs::descriptor`: an owned file descriptor with typed, compile-time-checked flags |
+| `io/` | buffered `io::writer`, `io::reader`, `io::stream` over descriptors; `io::out()`, `io::err()`, `io::in()` |
+| `print/` | `ca::print`, `ca::printf`, `ca::flush`, `ca::print_trace` |
+
+This is where everything comes together: a descriptor from `fs/` is read through a buffered reader
+from `io/`, lines come out with `read_line` (layer 5), values are formatted by the engine of layer
+5 straight into stdout's buffer, and errors print with their traces.
+
+```c++
+#include "ca/descriptor.hpp"
+#include "ca/file.hpp"
+#include "ca/flush.hpp"
+#include "ca/fs.hpp"
+#include "ca/print.hpp"
+#include "ca/reader.hpp"
+#include "ca/read_line.hpp"
+#include "ca/str.hpp"
+
+auto main(void) -> int {
+	auto file = ca::fs::descriptor::open("notes.txt", ca::fs::writable | ca::fs::create | ca::fs::truncate, 0644U);
+	if (!file || !file->write_all(ca::sv::str{"alpha\nbeta\ngamma\n"}) || !file->cleanup())
+		return 1;
+
+	auto input = ca::fs::descriptor::open("notes.txt", ca::fs::readable);
+	if (!input)
+		return 2;
+	char buffer[64];
+	ca::io::reader reader{*input, buffer};
+	ca::str line{};
+	int count = 0;
+	for (;;) {
+		auto got = ca::io::read_line(reader, line);
+		if (!got)
+			return 3;
+		if (!*got)
+			break;
+		if (!ca::print("{:>2}: {}\n", ++count, line))
+			return 4;
+	}
+	if (!ca::flush() || count != 3)
+		return 5;
+	return line.cleanup() && input->cleanup() && ca::sys::unlink("notes.txt") ? 0 : 6;
+}
+```
+
+Standard output is per thread and buffered (line-buffered on a terminal), so `ca::print` takes no
+lock and each message reaches fd 1 whole. `ca::flush()` is its explicit cleanup: it writes out
+what is pending and reports the first error since the last flush, which a program should check
+before it exits.

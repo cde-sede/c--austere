@@ -1,0 +1,17 @@
+Helpers the traits and the rest of the library share, internal to ca:
+
+- `is_any_of<T, Ts...>`: T is one of Ts, the concept behind every closed list of types
+  (`is_character`, the unsigned types of `bit/`).
+- `copy_cv<From, To>`: To with the const and volatile qualifiers of From, for accessors that
+  return a member with the constness of the object.
+- `is_referenceable<T>`: whether `T&` is a valid type (not void, not an abominable function
+  type), the guard of `add_lvalue_reference` and `add_rvalue_reference`.
+
+```c++
+#include "1-primitives/traits/impl/copy_cv.hpp"
+#include "1-primitives/traits/impl/is_any_of.hpp"
+#include "1-primitives/traits/is_same.hpp"
+
+static_assert(ca::impl::is_any_of<int, char, int, long>);
+static_assert(ca::is_same<ca::impl::copy_cv<const int, long>, const long>);
+```

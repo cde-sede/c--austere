@@ -22,7 +22,7 @@ namespace ca {
 	   - get(key) -> optional<mapped_type&>: the value, allowing the doubt.
 	   - set(key, value) -> result<void>: d[key] = value, inserting or replacing; may allocate.
 	   - pop(key) -> optional<mapped_type>: removes and returns the value.
-	   - clear(), destroy() -> result<void>: cleanup of every entry, then of the storage.
+	   - clear(), cleanup() -> result<void>: cleanup of every entry, then of the storage.
 	   - begin(), end(): every entry once, as item<const key_type&, mapped_type&>. */
 	template <typename M>
 	concept is_map = requires(M& map, const M& view, const typename M::lookup_type key, typename M::mapped_type&& value) {
@@ -38,7 +38,7 @@ namespace ca {
 		{ map.set(key, ca::move(value)) } -> ca::is_same<ca::result<void>>;
 		{ map.pop(key) } -> ca::is_same<ca::optional<typename M::mapped_type>>;
 		{ map.clear() } -> ca::is_same<ca::result<void>>;
-		{ map.destroy() } -> ca::is_same<ca::result<void>>;
+		{ map.cleanup() } -> ca::is_same<ca::result<void>>;
 		map.begin() != map.end();
 		view.begin() != view.end();
 	};

@@ -44,7 +44,7 @@ auto main(void) -> int {
 	auto shown = ca::format_to(m, "{} {p}", *s, ca::sv::u16{});
 	const bool pointer = shown && m.view().starts_with(ca::sv::str{"owned 0x"});
 	m.clear();
-	if (!pointer || !s->destroy())
+	if (!pointer || !s->cleanup())
 		return 9;
 	char small[6];
 	ca::io::memory_writer cut{small};

@@ -49,5 +49,5 @@ auto main(void) -> int {
 		return 6;
 	if (ca::hash(point{1, 2}) == ca::hash(point{2, 1}))
 		return 7;
-	return text->destroy() ? 0 : 8;
+	return text->cleanup() ? 0 : 8;
 }

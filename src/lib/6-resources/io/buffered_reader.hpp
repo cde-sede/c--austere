@@ -41,8 +41,8 @@ namespace ca {
 
 		/* @DOC ca::io::reader whose buffer comes from allocator A, sized by the caller and
 		   resizable; over a borrowed descriptor (an int or a ca::fs::descriptor that outlives it)
-		   or an adopted one (moved in), closed by destroy(). Build with over/adopt, or
-		   make_in<buffered_reader<>>(arena, file, capacity). Cleanup is destroy() (free, close:
+		   or an adopted one (moved in), closed by cleanup(). Build with over/adopt, or
+		   make_in<buffered_reader<>>(arena, file, capacity). Cleanup is cleanup() (free, close:
 		   the close error); the destructor is a failsafe doing the same silently. */
 		template <ca::is_allocator A = ca::heap>
 		class buffered_reader final {
@@ -90,10 +90,10 @@ namespace ca {
 				: _owned{ca::move(other._owned)}, _reader{ca::move(other._reader)}, _allocator{other._allocator} {
 				}
 
-				/* @DOC Failsafe for a skipped destroy(): frees and closes, ignoring errors. */
-				~buffered_reader(void) noexcept {
-					self::_free(_allocator, _reader.buffer());
-				}
+				// Failsafe for a skipped cleanup(): frees and closes, ignoring errors.
+				// ~buffered_reader(void) noexcept {
+				// 	self::_free(_allocator, _reader.buffer());
+				// }
 
 				/* @DOC Over fd, borrowed, with a capacity-byte buffer (> 0) from allocator. */
 				[[nodiscard]] static auto over(const A& allocator, const int fd, const ca::usz capacity) noexcept -> ca::result<self> {
@@ -112,7 +112,7 @@ namespace ca {
 					return self::over(A{}, file, capacity);
 				}
 
-				/* @DOC Takes file, closed by destroy(); on failure file is closed too. */
+				/* @DOC Takes file, closed by cleanup(); on failure file is closed too. */
 				[[nodiscard]] static auto adopt(const A& allocator, ca::fs::descriptor&& file, const ca::usz capacity) noexcept -> ca::result<self> {
 
 					const int fd = file.native();
@@ -156,7 +156,7 @@ namespace ca {
 					return _reader.native();
 				}
 
-				/* @DOC Whether destroy() closes the descriptor. */
+				/* @DOC Whether cleanup() closes the descriptor. */
 				[[nodiscard]] constexpr auto owns_descriptor(void) const noexcept -> bool {
 					return _owned.is_open();
 				}
@@ -215,12 +215,12 @@ namespace ca {
 
 				/* @DOC Frees the buffer, closes an adopted descriptor (its error); the reader is closed
 				   afterwards whatever happened. */
-				[[nodiscard]] auto destroy(void) noexcept -> ca::result<void> {
+				[[nodiscard]] auto cleanup(void) noexcept -> ca::result<void> {
 
 					self::_free(_allocator, _reader.buffer());
 					ca::destroy_at(&_reader);
 					ca::construct_at(&_reader);
-					return _owned.destroy();
+					return _owned.cleanup();
 				}
 
 
@@ -235,12 +235,12 @@ namespace ca {
 				[[nodiscard]] static auto _build(const A& allocator, ca::fs::descriptor&& owned, const int fd, const ca::usz capacity) noexcept -> ca::result<self> {
 
 					if (capacity == 0U) [[unlikely]] {
-						static_cast<void>(owned.destroy());
+						static_cast<void>(owned.cleanup());
 						return ca::failure{ca::errc::invalid_argument};
 					}
 					auto block = allocator.allocate(capacity, ALIGNMENT);
 					if (!block) [[unlikely]] {
-						static_cast<void>(owned.destroy());
+						static_cast<void>(owned.cleanup());
 						return block.propagate();
 					}
 					return self{ca::move(owned), fd, ca::span<char>{static_cast<char*>(block->data()), capacity}, allocator};

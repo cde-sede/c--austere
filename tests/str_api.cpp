@@ -42,7 +42,7 @@ static auto join_and_collect(void) noexcept -> int {
 	auto empty = ca::join(", ", ca::sv::str{""}.split());
 	if (!empty || !empty->empty())
 		return 5;
-	return joined->destroy() && fields->destroy() && back->destroy() && lines->destroy() && empty->destroy() ? 0 : 6;
+	return joined->cleanup() && fields->cleanup() && back->cleanup() && lines->cleanup() && empty->cleanup() ? 0 : 6;
 }
 
 static auto wide(void) noexcept -> int {
@@ -59,7 +59,7 @@ static auto wide(void) noexcept -> int {
 	auto to_utf8 = ca::str::from(ca::sv::u32{U"\x1F600!"});
 	if (!to_utf8 || *to_utf8 != ca::sv::str{"\xf0\x9f\x98\x80!"})
 		return 13;
-	return w->destroy() && upper->destroy() && from_utf8->destroy() && to_utf8->destroy() ? 0 : 14;
+	return w->cleanup() && upper->cleanup() && from_utf8->cleanup() && to_utf8->cleanup() ? 0 : 14;
 }
 
 static auto multibyte(void) noexcept -> int {
@@ -84,7 +84,7 @@ static auto multibyte(void) noexcept -> int {
 	auto bad_upper = bad->upper();
 	if (!bad_upper || *bad_upper != ca::sv::str{"A\xffZ"})
 		return 26;
-	return s->destroy() && upper->destroy() && centered->destroy() && wide_center->destroy() && bad->destroy() && bad_upper->destroy() ? 0 : 27;
+	return s->cleanup() && upper->cleanup() && centered->cleanup() && wide_center->cleanup() && bad->cleanup() && bad_upper->cleanup() ? 0 : 27;
 }
 
 static auto fixed(void) noexcept -> int {

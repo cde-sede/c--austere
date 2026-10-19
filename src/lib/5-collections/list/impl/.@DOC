@@ -1,0 +1,8 @@
+`merge_sort_links.hpp`: the sort shared by `list` and `intrusive_list`. It works on the links
+only, merging as a binary counter: runs of 1, 2, 4, ... nodes wait in 64 slots and each node is
+merged while still in cache (the scheme of libstdc++'s `list::sort`), instead of log n sweeps over
+the whole list. `merge_link_chains` takes the left run first among equals, so the sort is stable,
+and the back links are rebuilt in one final pass. No
+element is moved, copied or compared more than O(n log n) times, no memory is allocated, and an
+element's address stays the same, so pointers into the list survive sorting. `link_run` holds the
+two ends of a chain while it is relinked.

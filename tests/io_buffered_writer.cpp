@@ -34,7 +34,7 @@ auto main(void) -> int {
 	if (!longer || !drained(in, "") || !borrowed->resize(0U) || !drained(in, "longer than eight bytes"))
 		return 5;
 	auto direct = ca::format_to(*borrowed, "{}", "direct");
-	if (!direct || !drained(in, "direct") || !borrowed->destroy())
+	if (!direct || !drained(in, "direct") || !borrowed->cleanup())
 		return 6;
 
 	auto made = ca::arena::make();
@@ -49,10 +49,10 @@ auto main(void) -> int {
 		if (!x || !drained(in, ""))
 			return 9;
 		auto y = ca::format_to(owner->writer(), " y={}\n", 2);
-		if (!y || !drained(in, "x=1 y=2\n") || !owner->destroy() || owner->native() != -1)
+		if (!y || !drained(in, "x=1 y=2\n") || !owner->cleanup() || owner->native() != -1)
 			return 10;
 	}
 	char probe = 0;
 	auto closed = ca::sys::read(in, ca::span{&probe, 1U});
-	return closed && *closed == 0U && arena.destroy() ? 0 : 11;
+	return closed && *closed == 0U && arena.cleanup() ? 0 : 11;
 }

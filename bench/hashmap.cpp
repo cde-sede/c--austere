@@ -15,14 +15,14 @@ struct table {
 	auto pop(const K& k) -> bool { return m.erase(k) != 0; }
 	auto size(void) const -> size_t { return m.size(); }
 	template <typename F> auto each(F f) const -> void { for (const auto& [k, v] : m) f(k, v); }
-	auto destroy(void) -> bool { m.clear(); return true; }
+	auto cleanup(void) -> bool { m.clear(); return true; }
 };
 
 struct text_table {
 	std::unordered_map<std::string, int> m;
 	auto set(const char* k, int v) -> bool { m[k] = v; return true; }
 	auto get(const char* k) const -> const int* { auto it = m.find(k); return it == m.end() ? nullptr : &it->second; }
-	auto destroy(void) -> bool { m.clear(); return true; }
+	auto cleanup(void) -> bool { m.clear(); return true; }
 };
 #else
 #include "5-collections/map/hashmap.hpp"
@@ -36,14 +36,14 @@ struct table {
 	auto pop(const K& k) -> bool { return m.pop(k).has_value(); }
 	auto size(void) const -> size_t { return m.size(); }
 	template <typename F> auto each(F f) const -> void { for (const auto [k, v] : m) f(k, v); }
-	auto destroy(void) -> bool { return static_cast<bool>(m.destroy()); }
+	auto cleanup(void) -> bool { return static_cast<bool>(m.cleanup()); }
 };
 
 struct text_table {
 	ca::hashmap<ca::str, int> m;
 	auto set(const char* k, int v) -> bool { return static_cast<bool>(m.set(k, v)); }
 	auto get(const char* k) const -> const int* { auto r = m.get(k); return r ? &*r : nullptr; }
-	auto destroy(void) -> bool { return static_cast<bool>(m.destroy()); }
+	auto cleanup(void) -> bool { return static_cast<bool>(m.cleanup()); }
 };
 #endif
 
@@ -58,12 +58,12 @@ static auto scrambled(const uint64_t i) -> uint64_t {
 	return (i * 0x9E3779B97F4A7C15U) ^ (i >> 7U);
 }
 
-NI static auto insert_destroy(void) -> void {
+NI static auto insert_cleanup(void) -> void {
 	table<uint64_t, uint64_t> t;
 	for (int i = 0; i < N; ++i)
 		CHECK(t.set(scrambled(static_cast<uint64_t>(i)), static_cast<uint64_t>(i)));
 	sink = t.size();
-	CHECK(t.destroy());
+	CHECK(t.cleanup());
 }
 
 NI static auto lookup_hits(const table<uint64_t, uint64_t>& t) -> void {
@@ -91,7 +91,7 @@ NI static auto churn(void) -> void {
 		CHECK(t.pop(scrambled(static_cast<uint64_t>(i - N / 10))));
 	}
 	sink = t.size();
-	CHECK(t.destroy());
+	CHECK(t.cleanup());
 }
 
 NI static auto walk(const table<uint64_t, uint64_t>& t) -> void {
@@ -109,7 +109,7 @@ NI static auto small_maps(void) -> void {
 			CHECK(t.set(i * 31 + m, i));
 		for (int i = 0; i < 8; ++i)
 			sum += static_cast<uint64_t>(*t.get(i * 31 + m));
-		CHECK(t.destroy());
+		CHECK(t.cleanup());
 	}
 	sink = sum;
 }
@@ -125,7 +125,7 @@ NI static auto text_keys(void) -> void {
 		for (int i = 0; i < N / 10; ++i)
 			sum += static_cast<uint64_t>(*t.get(words[(i * 7919) % (N / 10)]));
 	sink = sum;
-	CHECK(t.destroy());
+	CHECK(t.cleanup());
 }
 
 
@@ -136,14 +136,14 @@ auto main(void) -> int {
 		return 1;
 	for (int i = 0; i < N / 10; ++i)
 		snprintf(words[i], sizeof words[i], "key-%llu", static_cast<unsigned long long>(scrambled(static_cast<uint64_t>(i)) % 100000000000U));
-	bench("insert 1e6 scrambled u64, growing, then destroy", insert_destroy);
+	bench("insert 1e6 scrambled u64, growing, then cleanup", insert_cleanup);
 	table<uint64_t, uint64_t> t;
 	for (int i = 0; i < N; ++i)
 		CHECK(t.set(scrambled(static_cast<uint64_t>(i)), static_cast<uint64_t>(i)));
 	bench("1e7 lookup hits in 1e6 entries", [&t] { lookup_hits(t); });
 	bench("1e7 lookup misses", "misses rarely touch a slot", [&t] { lookup_misses(t); });
 	bench("walk 1e6 entries 10 times", [&t] { walk(t); });
-	CHECK(t.destroy());
+	CHECK(t.cleanup());
 	bench("insert + pop churn, 1e5 live, 5e6 rounds", "DELETED reclaimed by in-place rehash", churn);
 	bench("1e5 maps of 8 ints, built, read, destroyed", small_maps);
 	bench("str keys, 1e5 inserted, 1e6 lookups by literal", "std: std::string keys", text_keys);

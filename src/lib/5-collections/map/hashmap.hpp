@@ -14,7 +14,7 @@
    | popitem | O(capacity / 8) worst | scans control groups from the start |
    | iteration, keys, values, items | O(capacity / 8 + size) | 8 control bytes per step |
    | reserve, shrink, growth | O(capacity) | every slot rehashed and relocated (memcpy for trivially relocatable items) |
-   | clear, destroy | O(capacity / 8 + size) | no walk for trivially destructible items without destroy() |
+   | clear, cleanup | O(capacity / 8 + size) | no walk for trivially destructible items without cleanup() |
    | clone | O(capacity) | same placement, no rehash; one memcpy for trivially copyable items |
    | update | O(other.size) | |
 
@@ -44,7 +44,7 @@
 
    | Case | clang 18 | gcc 13 | Notes |
    |---|---|---|---|
-   | insert 1e6 scrambled u64, growing, then destroy | 0.15x | 0.15x | |
+   | insert 1e6 scrambled u64, growing, then cleanup | 0.15x | 0.15x | |
    | 1e7 lookup hits in 1e6 entries | 0.46x | 0.43x | |
    | 1e7 lookup misses | 0.098x | 0.096x | misses rarely touch a slot |
    | walk 1e6 entries 10 times | 0.20x | 0.21x | |
@@ -152,7 +152,7 @@ namespace ca {
 	   (str keys from literals or views). K is ca::hash-able and compares with == against its
 	   lookup type. Construction allocates nothing; set, setdefault, update, reserve and clone
 	   acquire memory and can fail, changing nothing. Insertions may move every entry: positions
-	   and references do not survive them. Clean up with destroy(); the destructor is a failsafe
+	   and references do not survive them. Clean up with cleanup(); the destructor is a failsafe
 	   that frees silently. A stateful A has no default construction and moves with the
 	   entries. */
 	template <typename K, typename V, ca::is_allocator A = ca::heap>
@@ -223,9 +223,8 @@ namespace ca {
 			: _table{ca::move(other._table)} {
 			}
 
-			/* @DOC Failsafe for a skipped destroy(): destroys the entries and frees, silently. */
-			~hashmap(void) noexcept {
-			}
+			// Failsafe for a skipped cleanup(): destroys the entries and frees, silently.
+			// ~hashmap(void) noexcept = default;
 
 			/* @DOC dict.fromkeys: each key of keys mapped to a copy of value; later duplicates
 			   change nothing. On failure the partial map is destroyed and that error returned. */
@@ -241,7 +240,7 @@ namespace ca {
 						continue;
 					auto added = made.set(key, value);
 					if (!added) {
-						static_cast<void>(made.destroy());
+						static_cast<void>(made.cleanup());
 						return added.propagate();
 					}
 				}
@@ -254,7 +253,7 @@ namespace ca {
 			auto operator=(const self&) -> self& = delete;
 
 			/* @DOC Takes other's entries and allocator; the previous entries are released as by the
-			   destructor. Traps when an entry is cleanable and entries remain: clear() or destroy()
+			   destructor. Traps when an entry is cleanable and entries remain: clear() or cleanup()
 			   first. */
 			auto operator=(self&& other) noexcept -> self& {
 
@@ -498,8 +497,8 @@ namespace ca {
 			}
 
 			/* @DOC clear(), then frees the storage. */
-			[[nodiscard]] auto destroy(void) noexcept -> ca::result<void> {
-				return _table.destroy();
+			[[nodiscard]] auto cleanup(void) noexcept -> ca::result<void> {
+				return _table.cleanup();
 			}
 
 

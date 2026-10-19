@@ -13,5 +13,5 @@ auto main(void) -> int {
 		return 3;
 	if (!a.clear() || !a.shrink() || a.capacity() != 0 || a.data() != nullptr)
 		return 4;
-	return a.destroy() ? 0 : 5;
+	return a.cleanup() ? 0 : 5;
 }

@@ -25,7 +25,7 @@ auto main(void) -> int {
 		return 4;
 	if (a.swap_pop(3))
 		return 5;
-	if (!a.destroy())
+	if (!a.cleanup())
 		return 6;
 
 	{
@@ -40,6 +40,8 @@ auto main(void) -> int {
 		auto last = t.swap_pop(2);
 		if (!last || last->value != 2 || t.size() != 2 || tracked::alive != 4)
 			return 9;
+		if (!t.cleanup())
+			return 11;
 	}
 	return tracked::alive == 0 ? 0 : 10;
 }

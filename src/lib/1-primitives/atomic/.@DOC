@@ -1,0 +1,57 @@
+Atomics over the compiler's `__atomic` builtins: `ca::atomic<T>` for integers and pointers,
+plus thread and signal fences. Only lock-free types are accepted, so nothing links
+libatomic and every operation is async-signal-safe: a signal handler may touch the same
+atomics as the thread it interrupted.
+
+The memory order is a template argument, not a run-time one, so a wrong order is a compile
+error and the call costs exactly the instruction the order needs. Every operation defaults to
+`seq_cst`; spell the weaker order where it is enough.
+
+```c++
+#include "ca/atomic.hpp"
+
+auto main(void) -> int {
+	ca::atomic<int> hits{0};
+	hits.fetch_add<ca::memory_order::relaxed>(3);
+	hits.fetch_sub(1);
+	if (hits.load<ca::memory_order::acquire>() != 2)
+		return 1;
+
+	int expected = 2;
+	if (!hits.compare_exchange_strong(expected, 10) || hits.load() != 10)
+		return 2;
+	expected = 2;
+	if (hits.compare_exchange_strong(expected, 20) || expected != 10)
+		return 3;
+	return 0;
+}
+```
+
+A failed compare-exchange writes the current value into `expected`, so a retry loop needs no
+extra load. `compare_exchange_weak` may fail spuriously and belongs in such loops; its failure
+order defaults from the success order (`acq_rel` fails as `acquire`, `release` as `relaxed`).
+
+```c++
+#include "ca/atomic.hpp"
+
+static auto store_max(ca::atomic<unsigned>& slot, const unsigned value) noexcept -> void {
+	unsigned seen = slot.load<ca::memory_order::relaxed>();
+	while (seen < value && !slot.compare_exchange_weak<ca::memory_order::release>(seen, value)) {
+	}
+}
+
+auto main(void) -> int {
+	ca::atomic<unsigned> peak{};
+	store_max(peak, 7U);
+	store_max(peak, 3U);
+	return peak.load() == 7U ? 0 : 1;
+}
+```
+
+The fetch operations (`fetch_add`, `fetch_sub`, `fetch_and`, `fetch_or`, `fetch_xor`) exist
+for integers other than bool and return the previous value; pointers get `load`, `store`,
+`exchange` and the compare-exchanges. Atomics are neither copyable nor assignable.
+
+`ca::atomic_thread_fence<M>()` orders memory between threads without an atomic object;
+`ca::atomic_signal_fence<M>()` only stops the compiler from reordering across it, which is
+all a thread needs against its own signal handlers.

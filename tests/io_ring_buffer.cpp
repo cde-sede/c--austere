@@ -72,7 +72,7 @@ auto main(void) -> int {
 	if (!read || !*read || ca::sv::str{line.data(), line.size()} != ca::sv::str{"456789"})
 		return 11;
 	read = ca::io::read_line(ring, line);
-	if (!read || !*read || ca::sv::str{line.data(), line.size()} != ca::sv::str{"next"} || !line.destroy())
+	if (!read || !*read || ca::sv::str{line.data(), line.size()} != ca::sv::str{"next"} || !line.cleanup())
 		return 12;
 	read = ca::io::read_line(ring, line);
 	if (!read || *read)
@@ -89,15 +89,15 @@ auto main(void) -> int {
 		auto both = ca::format_to(*in_arena, "{} and {}", 1, 2);
 		ca::dynamic_array<char> all;
 		auto count = ca::io::read_to_end(*in_arena, all);
-		if (!both || !count || ca::sv::str{all.data(), all.size()} != ca::sv::str{"1 and 2"} || !all.destroy())
+		if (!both || !count || ca::sv::str{all.data(), all.size()} != ca::sv::str{"1 and 2"} || !all.cleanup())
 			return 16;
-		if (!in_arena->destroy())
+		if (!in_arena->cleanup())
 			return 17;
 	}
-	if (!arena.destroy())
+	if (!arena.cleanup())
 		return 18;
 
-	if (!ring.destroy() || ring.capacity() != 0U)
+	if (!ring.cleanup() || ring.capacity() != 0U)
 		return 19;
 	auto refused = ring.write(ca::sv::str{"x"});
 	char none[1];

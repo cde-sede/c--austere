@@ -14,7 +14,7 @@
    | find, count, contains, compare, == | O(n) | memchr/memcmp for code units, element loops otherwise |
    | find(other), find_last(other) | O(n * m) | |
    | fill, reverse | O(n) | |
-   | destroy | O(n) | O(1) for trivially destructible T |
+   | cleanup | O(n) | O(1) for trivially destructible T |
 
    Space: the block the allocator returns for n elements (the heap rounds to its size class),
    nothing else. A slice from dynamic_array::into_slice keeps the array's capacity.
@@ -29,7 +29,7 @@
    Inlining: element access and the slice methods are inline; allocation goes through
    ca::allocate_n and the allocator's own fast path.
 
-   Cleanup: destroy() runs each element's destroy() and destructor in one pass, then frees. */
+   Cleanup: cleanup() runs each element's cleanup() and destructor in one pass, then frees. */
 
 #ifndef ca_collections_array_slice_hpp
 #define ca_collections_array_slice_hpp
@@ -74,7 +74,7 @@ namespace ca {
 	   length stops changing (Rust's Box<[T]>). Made by make(n, args...), from(view) or
 	   dynamic_array::into_slice; those acquire memory and can fail. The sequence methods (cut,
 	   find, compare, fill, reverse) come from ca::impl::slice_methods and return
-	   borrowed_slices into it. Clean up with destroy(); the destructor is a failsafe that frees
+	   borrowed_slices into it. Clean up with cleanup(); the destructor is a failsafe that frees
 	   silently. operator[] traps out of range; get allows the doubt. A stateful A has no default
 	   construction and moves with the elements. */
 	template <typename T, ca::is_allocator A = ca::heap>
@@ -150,10 +150,10 @@ namespace ca {
 			  _allocator{other._allocator} {
 			}
 
-			/* @DOC Failsafe for a skipped destroy(): destroys the elements and frees, silently. */
-			~slice(void) noexcept {
-				this->_release();
-			}
+			// Failsafe for a skipped cleanup(): destroys the elements and frees, silently.
+			// ~slice(void) noexcept {
+			// 	this->_release();
+			// }
 
 			/* @DOC count elements, each built from args (value-initialized without), in memory from
 			   allocator. */
@@ -199,7 +199,7 @@ namespace ca {
 					for (const T& element : view) {
 						auto cloned = element.clone();
 						if (!cloned) {
-							static_cast<void>(copy.destroy());
+							static_cast<void>(copy.cleanup());
 							return cloned.propagate();
 						}
 						ca::construct_at(copy._end, ca::move(*cloned));
@@ -224,7 +224,7 @@ namespace ca {
 			auto operator=(const self&) -> self& = delete;
 
 			/* @DOC Takes other's contents and allocator; the previous contents are released as by the
-			   destructor. Traps when T is cleanable and elements remain: destroy() first. */
+			   destructor. Traps when T is cleanable and elements remain: cleanup() first. */
 			auto operator=(self&& other) noexcept -> self& {
 
 				if (this == &other)
@@ -336,14 +336,14 @@ namespace ca {
 				return self::from(allocator, this->view());
 			}
 
-			/* @DOC Cleans up every element (destroy() when T has one), then frees the storage: empty.
+			/* @DOC Cleans up every element (cleanup() when T has one), then frees the storage: empty.
 			   Returns the first cleanup error; everything is released regardless. */
-			[[nodiscard]] auto destroy(void) noexcept -> ca::result<void> {
+			[[nodiscard]] auto cleanup(void) noexcept -> ca::result<void> {
 
 				ca::error first{};
 				if constexpr (ca::is_cleanable<T>) {
 					for (T* element = _data; element != _end; ++element) {
-						element->destroy().match([] {
+						element->cleanup().match([] {
 						}, [&first](const ca::error& error) {
 							if (first.ok())
 								first = error;

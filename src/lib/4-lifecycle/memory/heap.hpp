@@ -95,6 +95,7 @@ namespace ca {
 			// -- methods ----------------------------------------------------
 
 			[[nodiscard, gnu::always_inline]] auto allocate(const ca::usz size, const ca::usz alignment) const noexcept -> ca::result<ca::allocation> {
+
 				if (size - 1U < ca::impl::heap_largest_class && alignment <= self::ALIGNMENT) [[likely]] {
 					ca::impl::heap_span* const span = ca::impl::heap_current->_queues._spans[ca::impl::heap_class_of(size)];
 					void* const block = span->_free;
@@ -108,6 +109,7 @@ namespace ca {
 			}
 
 			[[gnu::always_inline]] auto deallocate(const ca::allocation block, const ca::usz alignment) const noexcept -> void {
+
 				if (block.size() - 1U < ca::impl::heap_largest_class && alignment <= self::ALIGNMENT) [[likely]] {
 					ca::impl::heap_span* const span = ca::impl::heap_span_of(block.data());
 					ca::impl::heap_state* const owner = ca::impl::heap_current;

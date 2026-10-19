@@ -1,0 +1,4 @@
+`status_of(raw)` turns the platform's `struct stat`, passed as an opaque pointer, into a
+`sys::file_status`: the type from the mode bits, permissions, size, ids and the three times in
+nanoseconds. It is declared here and defined in a `.cpp`, so `stat`, `lstat`, `fstat` and
+`fstatat` share one conversion and no header ever names `struct stat`.

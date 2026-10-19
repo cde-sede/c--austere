@@ -90,7 +90,7 @@ namespace ca {
 		   `d |= fs::nonblock`, `d &= ~fs::append`. Each option knows its domain (open-time,
 		   FD_* or file status flags); set/clear/test issue only the fcntl calls their domains
 		   need and keep every unrelated bit. Contradictions (exclusive without create, truncate
-		   without writable, open-time options after open) fail to compile. Close with destroy();
+		   without writable, open-time options after open) fail to compile. Close with cleanup();
 		   the destructor is a failsafe that closes silently. */
 		class descriptor final {
 
@@ -127,11 +127,11 @@ namespace ca {
 				: _fd{ca::exchange(other._fd, -1)} {
 				}
 
-				/* @DOC Failsafe for a skipped destroy(): closes silently. */
-				~descriptor(void) noexcept {
-					if (_fd != -1)
-						static_cast<void>(ca::sys::close(_fd));
-				}
+				// Failsafe for a skipped cleanup(): closes silently.
+				// ~descriptor(void) noexcept {
+				// 	if (_fd != -1)
+				// 		static_cast<void>(ca::sys::close(_fd));
+				// }
 
 				/* @DOC Opens path with options (readable when no access option is given); mode
 				   applies with create. errc::not_supported when an option is unavailable here. */
@@ -167,7 +167,7 @@ namespace ca {
 
 				auto operator=(const self&) -> self& = delete;
 
-				/* @DOC Takes other's descriptor. Traps when this one is still open: destroy() first. */
+				/* @DOC Takes other's descriptor. Traps when this one is still open: cleanup() first. */
 				auto operator=(self&& other) noexcept -> self& {
 
 					if (this == &other)
@@ -259,7 +259,7 @@ namespace ca {
 					ca::dynamic_array<ca::byte> contents;
 					auto read = ca::fs::impl::read_to_end(_fd, contents);
 					if (!read) {
-						static_cast<void>(contents.destroy());
+						static_cast<void>(contents.cleanup());
 						return read.propagate();
 					}
 					return contents;
@@ -347,7 +347,7 @@ namespace ca {
 				}
 
 				/* @DOC Closes. The descriptor is gone even on failure; a closed one succeeds. */
-				[[nodiscard]] auto destroy(void) noexcept -> ca::result<void> {
+				[[nodiscard]] auto cleanup(void) noexcept -> ca::result<void> {
 
 					if (_fd == -1)
 						return ca::result<void>{};

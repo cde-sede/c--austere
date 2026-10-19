@@ -1,0 +1,41 @@
+Per-thread slots with an exit callback: the POSIX thread-specific keys, reduced to what C++
+`thread_local` cannot do.
+
+`sys::thread_key_create(on_exit)` makes a slot holding one pointer per thread, null in each. When
+a thread other than the main one exits with a non-null value in the slot, `on_exit(value)` runs in
+that thread, the slot cleared first. `sys::thread_key_set(key, value)` stores the calling thread's
+value. Keys are never deleted.
+
+There is no getter on purpose: the data itself lives in a `thread_local` variable, which is
+faster to reach, and the key only arranges the cleanup. `ca::heap` uses this to hand a dying
+thread's memory back, and `ca::io::out()` to flush a thread's buffered output when it ends.
+
+```c++
+#include "ca/thread.hpp"
+
+namespace {
+
+	struct thread_cache final {
+		int items;
+	};
+
+	constinit thread_local thread_cache* cache = nullptr;
+
+	auto release_cache(void* const value) noexcept -> void {
+		static_cast<thread_cache*>(value)->items = 0;
+	}
+
+} // namespace
+
+auto main(void) -> int {
+	static thread_cache main_cache{3};
+	auto key = ca::sys::thread_key_create(&release_cache);
+	if (!key)
+		return 1;
+	cache = &main_cache;
+	return ca::sys::thread_key_set(*key, cache) && cache->items == 3 ? 0 : 2;
+}
+```
+
+The callback does not run for the main thread, which ends with the process; flush or release
+main-thread state from `main` or an atexit handler instead.

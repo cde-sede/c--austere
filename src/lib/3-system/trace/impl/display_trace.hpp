@@ -33,7 +33,8 @@ namespace ca {
 			}
 
 			/* @DOC The error's message, then one line per frame, origin first:
-			   `  at function (file:line): message`, and how many frames were dropped. W has
+			   `  at function (file:line): message` (`  trapped: message` for a frame with no
+			   location: a trap left for a context), and how many frames were dropped. W has
 			   put(char) and put(sv::str); frame_at(i) returns the i-th ca::trace::frame. */
 			template <typename W, typename F>
 			auto display_trace(W& out, const ca::error error, const ca::usz count, const ca::usz dropped, const F& frame_at) noexcept -> void {
@@ -41,6 +42,11 @@ namespace ca {
 				out.put(ca::sys::error_message(error));
 				for (ca::usz i = 0U; i < count; ++i) {
 					const ca::trace::frame frame = frame_at(i);
+					if (frame.where().line() == 0U) {
+						out.put(ca::sv::str{"\n  trapped: "});
+						out.put(frame.message());
+						continue;
+					}
 					out.put(ca::sv::str{"\n  at "});
 					out.put(ca::sv::str{frame.where().function()});
 					out.put(ca::sv::str{" ("});

@@ -677,6 +677,7 @@ constinit ca::atomic<ca::impl::move_bytes_function> ca::impl::move_bytes_variant
 extern "C" {
 
 	auto memcpy(void* const to, const void* const from, const ca::usz count) noexcept -> void* { // ns-leak: ignore
+
 		if (count <= 64U) [[likely]] {
 			ca::impl::move_few(static_cast<char*>(to), static_cast<const char*>(from), count);
 			return to;
@@ -685,6 +686,7 @@ extern "C" {
 	}
 
 	auto memmove(void* const to, const void* const from, const ca::usz count) noexcept -> void* { // ns-leak: ignore
+
 		if (count <= 64U) [[likely]] {
 			ca::impl::move_few(static_cast<char*>(to), static_cast<const char*>(from), count);
 			return to;

@@ -25,7 +25,7 @@ auto main(void) -> int {
 	auto zero = a.remove(0);
 	if (!zero || *zero != 0 || a.size() != 4 || a[3] != 3)
 		return 5;
-	if (!a.destroy())
+	if (!a.cleanup())
 		return 6;
 
 	{
@@ -37,6 +37,8 @@ auto main(void) -> int {
 		auto two = t.remove(tracked{2});
 		if (!two || two->value != 2 || t.size() != 3 || t[2].value != 3 || tracked::alive != 4)
 			return 8;
+		if (!t.cleanup())
+			return 10;
 	}
 	return tracked::alive == 0 ? 0 : 9;
 }

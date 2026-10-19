@@ -1,0 +1,92 @@
+Doubly linked lists, for when elements must not move: their addresses stay valid through
+insertions, removals, sorting and splicing, and both ends cost O(1).
+
+| Type | Nodes | Fails |
+|---|---|---|
+| `list<T, A>` | one node per element, from A | on allocation (`append`, `insert`, `clone`) |
+| `intrusive_list<T, Tag>` | the links live in the elements | never: it allocates nothing |
+
+Both have `append`, `prepend`, `insert` before a position, `pop`, `pop_front`, `first`, `last`,
+`remove`, `reverse`, `splice` (moves all of another list in O(1)), and a stable merge `sort` that
+relinks nodes and never moves an element. `list` adds `find`, `count`, `contains`, `retain`,
+`extend`, `clone` and `cleanup`.
+
+```c++
+#include "ca/array.hpp"
+#include "ca/list.hpp"
+#include "ca/utility.hpp"
+
+auto main(void) -> int {
+	ca::list<int> l{};
+	if (!l.extend({5, 3, 9}) || !l.prepend(1) || !l.append(7))
+		return 1;
+	const int* const three = &*l.find(3).value_or(l.end());
+	l.sort();
+	if (&*l.find(3).value_or(l.end()) != three)
+		return 2;
+
+	auto at = l.find(5);
+	if (!at || !l.insert(*at, 4))
+		return 3;
+	if (!l.retain([](const int& v) noexcept { return v != 9; }))
+		return 4;
+
+	ca::list<int> tail{};
+	if (!tail.extend({100, 200}))
+		return 5;
+	l.splice(l.end(), ca::move(tail));
+	int expected[] = {1, 3, 4, 5, 7, 100, 200};
+	ca::usz i = 0U;
+	for (const int v : l)
+		if (v != expected[i++])
+			return 6;
+	return i == 7U && tail.empty() && l.cleanup() ? 0 : 7;
+}
+```
+
+### Intrusive lists
+
+An element joins an `intrusive_list<T, Tag>` by deriving `ca::list_link<T, Tag>` once per list it
+can be in; the Tag tells the links apart, so one object can sit in several lists at once (a task in
+a run queue and in a timer list). The list stores nothing per element and allocates nothing, so
+no operation can fail. Misuse traps: linking an element that is already linked, removing one that
+is not, or destroying an element while it is still linked.
+
+```c++
+#include "ca/intrusive_list.hpp"
+#include "ca/list_link.hpp"
+
+struct by_priority;
+
+struct task final : ca::list_link<task>, ca::list_link<task, by_priority> {
+	int id;
+	int priority;
+	task(const int identifier, const int level) noexcept : id{identifier}, priority{level} {
+	}
+};
+
+auto main(void) -> int {
+	task a{1, 3};
+	task b{2, 1};
+	task c{3, 2};
+	ca::intrusive_list<task> arrival;
+	ca::intrusive_list<task, by_priority> urgent;
+	arrival.append(a);
+	arrival.append(b);
+	arrival.append(c);
+	for (task& t : arrival)
+		urgent.append(t);
+	urgent.sort([](const task& l, const task& r) noexcept { return l.priority < r.priority; });
+
+	const bool ordered = urgent.first().value_or(a).id == 2 && arrival.first().value_or(c).id == 1;
+	arrival.remove(b);
+	const bool removed = arrival.size() == 2U && urgent.size() == 3U;
+	arrival.clear();
+	urgent.clear();
+	return ordered && removed ? 0 : 1;
+}
+```
+
+`list` has no sentinel node, so the list object itself holds no self-pointer and relocates with a
+memcpy; `end()` is a null node that remembers its list, so `--end()` still reaches the last
+element, and like every iterator it is invalidated when the list object moves.

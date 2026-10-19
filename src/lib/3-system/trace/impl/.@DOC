@@ -1,0 +1,13 @@
+The per-thread trace behind `ca::trace`.
+
+- `trace_state.hpp`: the thread's one trace, a `constinit thread_local` record of the error it
+  follows (its trace number and code) and its first `CAPACITY` frames (32), later ones only
+  counted in `dropped`. `start` replaces it for a new error and returns that error numbered with
+  it; `push` appends a frame. Trace numbers come from one process-wide atomic counter, never 0,
+  so an error from an older trace or from another thread is recognized as stale rather than
+  shown with the wrong frames.
+- `display_trace.hpp`: the text form of a trace, shared by `ca::print_trace`, the `{}` formatting
+  of a `trace::record` and `ca::report`: the error's message, then one line per frame, origin first,
+  `  at function (file:line): message`, or `  trapped: message` for a frame without a location
+  (a trap that left for a context), and a last line counting dropped frames. It writes through
+  any `W` with `put(char)` and `put(sv::str)`, so layer 3 needs no formatter.

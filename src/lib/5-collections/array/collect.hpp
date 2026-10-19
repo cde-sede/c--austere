@@ -42,7 +42,7 @@ namespace ca {
 		for (auto&& element : range) {
 			auto added = out.append(element);
 			if (!added) [[unlikely]] {
-				static_cast<void>(out.destroy());
+				static_cast<void>(out.cleanup());
 				return added.propagate();
 			}
 		}

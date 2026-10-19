@@ -1,0 +1,49 @@
+System error codes and where they come from.
+
+`ca::errc` names the errno values ca uses as `ca::error` constants, written per platform in
+`errc.hpp` and checked against `<errno.h>` when the library builds, so no program needs the
+header: `errc::no_entry` (ENOENT), `errc::access_denied` (EACCES), `errc::exists`,
+`errc::invalid_argument`, `errc::no_space`, `errc::out_of_range`, `errc::try_again`,
+`errc::interrupted`, `errc::not_supported`, `errc::not_recoverable` (what a trapped context
+fails with), and the rest of the common set.
+
+| Function | Answers |
+|---|---|
+| `sys::error_name(e)` | the errc constant's name, `"no_entry"`; empty for a code with none |
+| `sys::error_message(e)` | the system's text, `"No such file or directory"`, untranslated |
+| `sys::last_error()` | the calling thread's last system error |
+
+Both strings have static storage. `error_message` never fails: an unknown code gives
+`"Unknown error"`.
+
+```c++
+#include "ca/error.hpp"
+#include "ca/file.hpp"
+#include "ca/sv.hpp"
+
+[[nodiscard]] static auto describe(const ca::error e) noexcept -> ca::sv::str {
+	if (e == ca::errc::no_entry)
+		return "missing";
+	if (e == ca::errc::access_denied || e == ca::errc::not_permitted)
+		return "forbidden";
+	return ca::sys::error_message(e);
+}
+
+auto main(void) -> int {
+	if (describe(ca::errc::no_entry) != ca::sv::str{"missing"})
+		return 1;
+	if (ca::sys::error_name(ca::errc::exists) != ca::sv::str{"exists"})
+		return 2;
+	auto gone = ca::sys::rmdir("/definitely/not/here");
+	return !gone && ca::sys::last_error() == gone.error() ? 0 : 3;
+}
+```
+
+### ca owns errno
+
+`sys::last_error()` is ca's own thread-local errno, not libc's: every failing `ca::syscall`
+call stores its code there (one store relative to `%fs`, no call), and the few paths that still
+go through libc copy libc's errno into it (`impl::libc_error`, kept in its own object so that
+programs without those paths never link errno). Since only failures write it, a successful
+call never clobbers the error a caller is about to inspect. `sys::set_last_error(e)` sets it
+by hand.

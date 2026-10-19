@@ -34,7 +34,7 @@ namespace ca {
 
 
 		/* @DOC Descriptor changes posix_spawn applies in the child, in order, before it runs the
-		   program (posix_spawn_file_actions_t). init before use; destroy after; the destructor only
+		   program (posix_spawn_file_actions_t). init before use; cleanup after; the destructor only
 		   destroys as a failsafe. Neither copyable nor movable. */
 		class spawn_actions final {
 
@@ -67,7 +67,8 @@ namespace ca {
 
 				spawn_actions(const self&) = delete;
 
-				~spawn_actions(void) noexcept;
+				// Failsafe for a skipped cleanup(): frees the list, ignoring errors.
+				// ~spawn_actions(void) noexcept;
 
 
 				// -- assignment operators -----------------------------------
@@ -77,7 +78,7 @@ namespace ca {
 
 				// -- accessors ----------------------------------------------
 
-				/* @DOC Whether init succeeded and destroy has not run. */
+				/* @DOC Whether init succeeded and cleanup has not run. */
 				[[nodiscard]] constexpr auto is_live(void) const noexcept -> bool {
 					return _live;
 				}
@@ -99,7 +100,7 @@ namespace ca {
 				[[nodiscard]] auto add_open(int fd, const char* path, int flags, ca::u32 mode) noexcept -> ca::result<void>;
 
 				/* @DOC Frees the list. errc::invalid_argument when not live. */
-				[[nodiscard]] auto destroy(void) noexcept -> ca::result<void>;
+				[[nodiscard]] auto cleanup(void) noexcept -> ca::result<void>;
 
 		}; // class spawn_actions
 

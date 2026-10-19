@@ -5,6 +5,7 @@
 
 
 [[nodiscard]] static auto clamp_written(const int written, char* const out, const ca::usz capacity) noexcept -> ca::usz {
+
 	if (written < 0) [[unlikely]] {
 		out[0] = '\0';
 		return 0U;

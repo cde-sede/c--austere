@@ -4,7 +4,7 @@
 
 class cleanable final {
 	public:
-		[[nodiscard]] auto destroy(void) noexcept -> ca::result<void> {
+		[[nodiscard]] auto cleanup(void) noexcept -> ca::result<void> {
 			return ca::result<void>{};
 		}
 };

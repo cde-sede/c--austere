@@ -82,7 +82,7 @@ namespace ca {
 	   for str keys); add builds the key from what it is given only when absent. K is
 	   ca::hash-able and compares with == against its lookup type. Construction allocates
 	   nothing; add, update, the set algebra, reserve and clone acquire memory and can fail.
-	   Insertions may move every key: positions do not survive them. Clean up with destroy(); the
+	   Insertions may move every key: positions do not survive them. Clean up with cleanup(); the
 	   destructor is a failsafe that frees silently. */
 	template <typename K, ca::is_allocator A = ca::heap>
 	class set final {
@@ -146,9 +146,8 @@ namespace ca {
 			: _table{ca::move(other._table)} {
 			}
 
-			/* @DOC Failsafe for a skipped destroy(): destroys the keys and frees, silently. */
-			~set(void) noexcept {
-			}
+			// Failsafe for a skipped cleanup(): destroys the keys and frees, silently.
+			// ~set(void) noexcept = default;
 
 			/* @DOC The distinct keys of keys: set(iterable). On failure the partial set is
 			   destroyed and that error returned. */
@@ -158,7 +157,7 @@ namespace ca {
 				self made{};
 				auto added = made.update(keys);
 				if (!added) {
-					static_cast<void>(made.destroy());
+					static_cast<void>(made.cleanup());
 					return added.propagate();
 				}
 				return made;
@@ -170,7 +169,7 @@ namespace ca {
 			auto operator=(const self&) -> self& = delete;
 
 			/* @DOC Takes other's keys and allocator; the previous keys are released as by the
-			   destructor. Traps when K is cleanable and keys remain: clear() or destroy() first. */
+			   destructor. Traps when K is cleanable and keys remain: clear() or cleanup() first. */
 			auto operator=(self&& other) noexcept -> self& {
 
 				_table = ca::move(other._table);
@@ -408,8 +407,8 @@ namespace ca {
 			}
 
 			/* @DOC clear(), then frees the storage. */
-			[[nodiscard]] auto destroy(void) noexcept -> ca::result<void> {
-				return _table.destroy();
+			[[nodiscard]] auto cleanup(void) noexcept -> ca::result<void> {
+				return _table.cleanup();
 			}
 
 
@@ -427,7 +426,7 @@ namespace ca {
 					return made;
 				auto added = made->update(smaller);
 				if (!added) {
-					static_cast<void>(made->destroy());
+					static_cast<void>(made->cleanup());
 					return added.propagate();
 				}
 				return made;
@@ -461,7 +460,7 @@ namespace ca {
 						continue;
 					auto added = made->add(key);
 					if (!added) {
-						static_cast<void>(made->destroy());
+						static_cast<void>(made->cleanup());
 						return added.propagate();
 					}
 				}
@@ -534,7 +533,7 @@ namespace ca {
 						continue;
 					auto added = made.add(key);
 					if (!added) {
-						static_cast<void>(made.destroy());
+						static_cast<void>(made.cleanup());
 						return added.propagate();
 					}
 				}

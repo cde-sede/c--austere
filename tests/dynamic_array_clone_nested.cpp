@@ -13,7 +13,7 @@ auto main(void) -> int {
 		return 2;
 	if (c->size() != 3 || (*c)[2].size() != 3 || (*c)[2][2] != 2 || (*c)[2].data() == outer[2].data())
 		return 3;
-	if (!c->destroy())
+	if (!c->cleanup())
 		return 4;
-	return outer.destroy() ? 0 : 5;
+	return outer.cleanup() ? 0 : 5;
 }

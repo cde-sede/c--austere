@@ -8,7 +8,7 @@ static auto count(const ca::fs::path& root, const char* pattern, const bool recu
 	if (!found)
 		return 999U;
 	const ca::usz size = found->size();
-	static_cast<void>(found->destroy());
+	static_cast<void>(found->cleanup());
 	return size;
 }
 
@@ -41,7 +41,7 @@ auto main(void) -> int {
 	if (!a)
 		return 8;
 	auto entries = a->iterdir();
-	if (!entries || entries->size() != 2U || !entries->destroy())
+	if (!entries || entries->size() != 2U || !entries->cleanup())
 		return 9;
 	if (count(*root, "a/*.txt", false) != 1U || count(*root, "**/*.txt", false) != 2U || count(*root, "*.txt", true) != 2U
 		|| count(*root, "a/b/c", false) != 1U || count(*root, "*/[ab]", false) != 1U || count(*root, "x/*", false) != 0U)

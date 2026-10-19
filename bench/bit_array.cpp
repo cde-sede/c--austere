@@ -23,7 +23,7 @@ struct growable {
 	auto count(void) const -> size_t { size_t n = 0; for (const bool x : v) n += x; return n; }
 	auto test(const size_t i) const -> bool { return v[i]; }
 	auto size(void) const -> size_t { return v.size(); }
-	auto destroy(void) -> bool { std::vector<bool>{}.swap(v); return true; }
+	auto cleanup(void) -> bool { std::vector<bool>{}.swap(v); return true; }
 };
 #else
 #include "5-collections/array/bit_array.hpp"
@@ -42,7 +42,7 @@ struct growable {
 	auto count(void) const -> size_t { return v.count(); }
 	auto test(const size_t i) const -> bool { return v[i]; }
 	auto size(void) const -> size_t { return v.size(); }
-	auto destroy(void) -> bool { return static_cast<bool>(v.destroy()); }
+	auto cleanup(void) -> bool { return static_cast<bool>(v.cleanup()); }
 };
 #endif
 
@@ -81,7 +81,7 @@ NI static auto append_growable(void) -> void {
 	for (size_t i = 0; i < BITS * 100U; ++i)
 		CHECK(g.append((i * 2654435761U >> 7U) & 1U));
 	sink = g.size();
-	CHECK(g.destroy());
+	CHECK(g.cleanup());
 }
 
 NI static auto count_growable(growable& g) -> void {
@@ -118,6 +118,6 @@ auto main(void) -> int {
 		CHECK(g.append((i * 2654435761U >> 7U) & 1U));
 	bench("count 6.5e6 bits, 20 times", "popcount per word against a bit loop", [&g] { count_growable(g); });
 	bench("operator[] over 6.5e6 bits, 5 times", [&g] { test_growable(g); });
-	CHECK(g.destroy());
+	CHECK(g.cleanup());
 	return 0;
 }

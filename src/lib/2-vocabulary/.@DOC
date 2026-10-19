@@ -1,0 +1,194 @@
+Layer 2: the value types every signature in ca is written with. Nothing here allocates or
+touches the system; these types own nothing beyond what they hold inline.
+
+| Area | Types |
+|---|---|
+| errors | `error`, `ok`, `failure`, `fail`, `result<T, E>` |
+| absence | `optional<T>`, `nullopt`, `realized<T>`, the `uncertain` protocol |
+| views | `span<T>` (memory), `borrowed_slice<T>` (sequences), `sv::` (text) |
+| flags | `option_set`, `is_option`, `inverted`: compile-time option algebra |
+| text | `ca::unicode`: decoding, validation, transcoding, character properties |
+| I/O contracts | `io::is_writer`, `io::is_reader` and their buffered forms |
+
+### Errors as values
+
+ca has no exceptions. A function that can fail returns `ca::result<T>`: a T, or a `ca::error`
+(an int code, 0 meaning success, plus the number of the trace that follows it). Failure is
+built with `ca::failure{e}`, or `ca::fail(code)`; success is the value itself. Discarding a
+result is a warning, and in ca's builds an error.
+
+```c++
+#include "ca/error.hpp"
+#include "ca/fail.hpp"
+#include "ca/result.hpp"
+#include "ca/sv.hpp"
+
+[[nodiscard]] static auto parse_digit(const char c) noexcept -> ca::result<int> {
+	if (c < '0' || c > '9')
+		return ca::failure{ca::errc::invalid_argument};
+	return c - '0';
+}
+
+[[nodiscard]] static auto parse_pair(const ca::sv::str text) noexcept -> ca::result<int> {
+	if (text.size() != 2U)
+		return ca::fail(ca::errc::invalid_argument.code());
+	auto tens = parse_digit(text[0]);
+	if (!tens)
+		return tens.propagate();
+	auto units = parse_digit(text[1]);
+	if (!units)
+		return units.propagate();
+	return *tens * 10 + *units;
+}
+
+auto main(void) -> int {
+	auto good = parse_pair(ca::sv::str{"42"});
+	if (!good || *good != 42)
+		return 1;
+	auto bad = parse_pair(ca::sv::str{"4x"});
+	if (bad || bad.error() != ca::errc::invalid_argument)
+		return 2;
+	return parse_pair(ca::sv::str{"7"}).value_or(-1) == -1 ? 0 : 3;
+}
+```
+
+`propagate()` hands the error on as a `ca::failure`, which converts to a result of any value
+type with the same error type. `ca::result<void>` is success or an error.
+
+### Checked access
+
+`optional` and `result` derive `ca::uncertain`, which enforces one rule: test before you
+read. A container starts unchecked; `bool`, `has_value()`, `ok()` or `holds()` check it, and
+any change of its contents unchecks it again. In debug builds an unchecked `*r`, `->` or
+`value()` fails: at compile time when the optimizer can see it (-O1 and above), otherwise by a
+trap. Reading an absent value traps in every build. Release builds keep no flag, so the check
+costs nothing there.
+
+The functions that need no check are the ones that cannot read an absent value: `value_or`,
+`realize_or`, `match`, comparisons, and the monadic chain.
+
+```c++
+#include "ca/error.hpp"
+#include "ca/optional.hpp"
+#include "ca/result.hpp"
+
+[[nodiscard]] static auto halve(const int n) noexcept -> ca::optional<int> {
+	if (n % 2 != 0)
+		return ca::nullopt;
+	return n / 2;
+}
+
+[[nodiscard]] static auto checked_root(const int n) noexcept -> ca::result<int> {
+	for (int r = 0; r * r <= n; ++r)
+		if (r * r == n)
+			return r;
+	return ca::failure{ca::errc::out_of_range};
+}
+
+auto main(void) -> int {
+	const int a = halve(10)
+		.and_then([](const int v) noexcept { return halve(v); })
+		.transform([](const int v) noexcept { return v + 1; })
+		.value_or(0);
+	if (a != 0)
+		return 1;
+	const int b = halve(8).and_then([](const int v) noexcept { return halve(v); }).value_or(0);
+	if (b != 2)
+		return 2;
+
+	const int c = checked_root(17).match(
+		[](const ca::realized<int>& v) noexcept { return *v; },
+		[](const ca::error& e) noexcept { return -e.code(); });
+	if (c >= 0)
+		return 3;
+
+	auto fixed = checked_root(17).except(ca::errc::out_of_range, [](ca::error) noexcept {
+		return ca::result<int>{0};
+	});
+	return fixed && *fixed == 0 ? 0 : 4;
+}
+```
+
+`match(on_value, on_other)` calls one of two functions: with the `realized` value, or with
+the error (for `optional`, with nothing). `except(code, f)` recovers from one error and lets
+the others through; `or_else`, `transform_error` and `or_fail` (optional to result) complete
+the chain. `ca::realized<T>` is what a checked container converts to: a T that is known to
+be there, which a function can take to state that its caller already checked.
+
+`raise()` turns a failed result into a trap at once, for code where the error cannot be
+handled locally: inside a context (`ca::with`, layer 4) the context fails with that error and
+its trace; outside, the program stops.
+
+`optional<T&>` holds a reference and never binds a temporary; assigning one rebinds it, as in
+C++26.
+
+### Views
+
+Three views share one shape, a pointer and a size passed in two registers, and differ by what
+they are for. APIs take views, never a pointer and a size.
+
+- `ca::span<T>`: memory. Buffers, I/O, mappings. A `span<ca::byte>` also views char, signed
+  char and char8_t memory, so text passes where bytes are expected.
+- `ca::borrowed_slice<T>`: a sequence of elements, with the slice methods: `prefix`, `suffix`,
+  `sub`, `find`, `find_if`, `contains`, `count`, `starts_with`, `compare`, `fill`, `reverse`.
+  `dynamic_array`, `ca::slice` and `ca::array` share the same methods through it.
+- `ca::sv::basic<C>` (`sv::str` for char): text, with Python's read-only str methods.
+
+```c++
+#include "ca/borrowed_slice.hpp"
+#include "ca/integers.hpp"
+#include "ca/span.hpp"
+
+[[nodiscard]] static auto checksum(const ca::span<const ca::byte> data) noexcept -> unsigned {
+	unsigned sum = 0U;
+	for (ca::usz i = 0U; i < data.size(); ++i)
+		sum += data[i];
+	return sum;
+}
+
+auto main(void) -> int {
+	int values[] = {5, 3, 8, 3, 1};
+	const ca::borrowed_slice<int> all{values};
+	if (all.count(3) != 2U || all.find(8).value_or(99U) != 2U)
+		return 1;
+	all.sub(1U, 3U).reverse();
+	if (values[1] != 3 || values[2] != 8 || values[3] != 3)
+		return 2;
+	if (all.get(5U))
+		return 3;
+
+	char text[] = {'a', 'b', 'c'};
+	return checksum(ca::span<char>{text}) == 'a' + 'b' + 'c' ? 0 : 4;
+}
+```
+
+Constness belongs to the elements: a `span<int>` that is itself const still writes its ints.
+Cutting functions clamp to the bounds rather than failing; `operator[]` traps out of range in
+every build, and `get(i)` returns an optional for an index that may be out of range. A view
+may be built from a temporary only when its elements are const or the temporary is itself a
+view (`BORROWED`), so a view of a dying container does not compile. Arrays of const code units
+are refused: a text literal's NUL would come along, and text goes through `ca::sv`.
+
+### Option sets
+
+`ca::option_set<Os...>` is a set of flags as a type: `a | b` is the union, `a & b` the
+intersection, `~a` the complement and `a & ~b` the difference, all resolved at compile time.
+Any type with a `domain`, a bit `VALUE` and a `SUPPORTED` flag is an option (`ca::is_option`).
+The open flags of `ca::fs` (layer 3) are options, so `fs::descriptor` (layer 6) rejects an
+unsupported or contradictory combination when it compiles.
+
+```c++
+#include "ca/fs.hpp"
+#include "ca/option_set.hpp"
+#include "ca/traits.hpp"
+
+constexpr auto flags = ca::fs::append | ca::fs::cloexec | ca::fs::nonblock;
+using without_nonblock = decltype(flags & ~ca::fs::nonblock);
+
+static_assert(without_nonblock::HAS<ca::fs::append_t>);
+static_assert(!without_nonblock::HAS<ca::fs::nonblock_t>);
+static_assert(ca::is_same<decltype(ca::fs::append | ca::fs::append), ca::option_set<ca::fs::append_t>>);
+```
+
+`ca::in_place` selects in-place construction where a type has both a value constructor and
+one taking constructor arguments.

@@ -8,5 +8,6 @@
 #include "1-primitives/utility/exchange.hpp"
 #include "1-primitives/utility/initializer_list.hpp"
 #include "1-primitives/utility/swap.hpp"
+#include "1-primitives/utility/type_key.hpp"
 
 #endif // ca_include_utility_hpp

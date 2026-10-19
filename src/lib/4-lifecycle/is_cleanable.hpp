@@ -12,11 +12,12 @@ namespace ca {
 
 	// -- IS CLEANABLE -------------------------------------------------------
 
-	/* @DOC Types with explicit, fallible cleanup: destroy() -> result<void>. Their destructor is only
-	   a failsafe for a skipped destroy(). */
+	/* @DOC Types owning resources. Contract: cleanup() -> result<void> releases every resource the
+	   object owns; other methods (close, flush, ...) may do part of it. Only owners have cleanup().
+	   Their destructor is only a failsafe for a skipped cleanup(). */
 	template <typename T>
 	concept is_cleanable = requires(T& value) {
-		{ value.destroy() } -> ca::is_same<ca::result<void>>;
+		{ value.cleanup() } -> ca::is_same<ca::result<void>>;
 	};
 
 } // namespace ca

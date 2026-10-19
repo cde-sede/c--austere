@@ -1,0 +1,178 @@
+Contiguous and ring containers. Pick by where the elements live and whether the size changes:
+
+| Type | Storage | Size | Counterpart |
+|---|---|---|---|
+| `dynamic_array<T, A>` | one block from A | grows | Python's list, `std::vector` |
+| `array<T, N>` | inline | fixed N | `std::array` |
+| `inline_array<T, N>` | inline | up to N, `errc::no_space` past it | `std::inplace_vector` |
+| `small_array<T, N, A>` | first N inline, then a block from A | grows | LLVM's SmallVector |
+| `slice<T, A>` | one block from A | fixed at creation | Rust's `Box<[T]>` |
+| `deque<T, A>` | a power-of-two ring from A | grows at both ends | `collections.deque` |
+| `bit_array<N>` | inline words | fixed N bits | `std::bitset` |
+| `dynamic_bit_array<A>` | words from A | grows | `std::vector<bool>`, done right |
+
+### dynamic_array
+
+The everyday container. Three pointers wide (plus a stateful allocator), it grows by doubling
+and relocates elements with one memcpy when T is trivially relocatable, which includes ca's own
+owning types.
+
+```c++
+#include "ca/dynamic_array.hpp"
+#include "ca/slice.hpp"
+#include "ca/utility.hpp"
+
+auto main(void) -> int {
+	ca::dynamic_array<int> values{};
+	if (!values.reserve(8U) || !values.extend({5, 3, 8}) || !values.append(1))
+		return 1;
+	if (!values.insert(1U, 9) || values[1] != 9 || values.size() != 5U)
+		return 2;
+
+	if (values.pop().value_or(0) != 1 || values.pop(0U).value_or(0) != 5)
+		return 3;
+	if (values.remove(8).value_or(0) != 8 || values.remove(42))
+		return 4;
+	if (values.size() != 2U || values.find(3).value_or(9U) != 1U || values.get(2U))
+		return 5;
+
+	if (!values.resize(6U, 7) || values.count(7) != 4U)
+		return 6;
+	values.view().sub(2U, 2U).fill(0);
+	values.reverse();
+	if (values[0] != 7 || values.last().value_or(0) != 9)
+		return 7;
+
+	auto copy = values.clone();
+	if (!copy || !(*copy == values))
+		return 8;
+	ca::slice<int> fixed = ca::move(*copy).into_slice();
+	return fixed.size() == 6U && fixed.cleanup() && values.cleanup() ? 0 : 9;
+}
+```
+
+`append(a[0])` is safe even when it reallocates: the element is copied before the old block goes.
+`swap_pop(i)` removes in O(1) by moving the last element into the hole. `into_slice()` hands the
+block to a `slice` without copying, trimmed to size. Range-for, `data()` and `size()` work as
+usual; `view()` gives the `borrowed_slice` for cutting.
+
+### Fixed and inline storage
+
+`ca::array<T, N>` is a plain aggregate (CTAD: `ca::array{1, 2, 3}`), constexpr, with the slice
+methods and `cleanup()`/`clone()` when T has them. `inline_array<T, N>` has the
+`dynamic_array` API over inline storage: never allocates, fails with `errc::no_space` instead.
+`small_array<T, N, A>` keeps the first N elements inline and spills to the heap past them; it is
+not trivially relocatable while inline, since its pointer points into itself.
+
+```c++
+#include "ca/array.hpp"
+#include "ca/error.hpp"
+#include "ca/inline_array.hpp"
+#include "ca/small_array.hpp"
+
+constexpr auto sorted3(ca::array<int, 3> a) noexcept -> ca::array<int, 3> {
+	if (a[0] > a[1])
+		ca::swap(a[0], a[1]);
+	if (a[1] > a[2])
+		ca::swap(a[1], a[2]);
+	if (a[0] > a[1])
+		ca::swap(a[0], a[1]);
+	return a;
+}
+
+static_assert(sorted3(ca::array{3, 1, 2}) == ca::array{1, 2, 3});
+
+auto main(void) -> int {
+	ca::inline_array<int, 4> few;
+	if (!few.extend({1, 2, 3, 4}) || !few.full())
+		return 1;
+	auto overflow = few.append(5);
+	if (overflow || overflow.error() != ca::errc::no_space)
+		return 2;
+
+	ca::small_array<int, 4> mostly_small;
+	if (!mostly_small.extend({1, 2, 3}) || !mostly_small.is_inline())
+		return 3;
+	if (!mostly_small.extend({4, 5}) || mostly_small.is_inline())
+		return 4;
+	return mostly_small.cleanup() ? 0 : 5;
+}
+```
+
+### slice and deque
+
+A `slice<T, A>` is an owned run of fixed length: `make(n, args...)` builds n elements from args,
+`from(view)` copies a view. A `deque<T, A>` is a ring buffer with O(1) `append`, `prepend`, `pop`
+and `pop_front`; `as_slices()` exposes its contents as the two contiguous runs of the ring.
+
+```c++
+#include "ca/borrowed_slice.hpp"
+#include "ca/deque.hpp"
+#include "ca/slice.hpp"
+
+auto main(void) -> int {
+	auto sevens = ca::slice<int>::make(4U, 7);
+	if (!sevens || sevens->count(7) != 4U)
+		return 1;
+	const int raw[] = {4, 3, 2, 1};
+	auto copied = ca::slice<int>::from(raw);
+	if (!copied || !(*copied == ca::borrowed_slice{raw}))
+		return 2;
+
+	ca::deque<int> queue;
+	for (int i = 0; i < 5; ++i)
+		if (!queue.append(i))
+			return 3;
+	if (!queue.prepend(-1) || queue.pop_front().value_or(0) != -1 || queue.pop().value_or(0) != 4)
+		return 4;
+	const auto runs = queue.as_slices();
+	if (runs[0U].size() + runs[1U].size() != 4U || queue.first().value_or(9) != 0)
+		return 5;
+	return sevens->cleanup() && copied->cleanup() && queue.cleanup() ? 0 : 6;
+}
+```
+
+### Bits
+
+`bit_array<N>` and `dynamic_bit_array<A>` pack bits into 64-bit words and work a word at a time:
+`count`, `any`, `all`, `none`, `find_first`, `find_next`, `find_first_unset`, iteration over the
+set bits with `ones()`, and `&=`, `|=`, `^=` between arrays of the same size. `ones()` is a view
+into the array: call it on a named array, not on a temporary, which would be gone before the loop
+runs.
+
+```c++
+#include "ca/bit_array.hpp"
+#include "ca/dynamic_bit_array.hpp"
+#include "ca/integers.hpp"
+
+constexpr auto primes_below_32(void) noexcept -> ca::bit_array<32> {
+	ca::bit_array<32> sieve;
+	sieve.set_all();
+	sieve.reset(0U);
+	sieve.reset(1U);
+	for (ca::usz i = 2U; i * i < 32U; ++i)
+		if (sieve[i])
+			for (ca::usz j = i * i; j < 32U; j += i)
+				sieve.reset(j);
+	return sieve;
+}
+
+static_assert(primes_below_32().count() == 11U);
+static_assert(primes_below_32().find_next(14U).value_or(0U) == 17U);
+
+auto main(void) -> int {
+	const ca::bit_array<32> primes = primes_below_32();
+	ca::usz sum = 0U;
+	for (const ca::usz p : primes.ones())
+		sum += p;
+	if (sum != 160U)
+		return 1;
+	auto flags = ca::dynamic_bit_array<>::make(100U, false);
+	if (!flags || !flags->append(true) || flags->count() != 1U || flags->find_first().value_or(0U) != 100U)
+		return 2;
+	return flags->cleanup() ? 0 : 3;
+}
+```
+
+`ca::collect(range)` gathers any range into a new `dynamic_array`, Python's `list(range)`: the
+pieces of a split, the keys of a map.

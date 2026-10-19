@@ -5,7 +5,6 @@
 
 #include "1-primitives/debug/assume.hpp"
 #include "1-primitives/debug/is_constant_folded.hpp"
-#include "1-primitives/debug/source_location.hpp"
 #include "1-primitives/debug/trap.hpp"
 #include "1-primitives/debug/unreachable.hpp"
 

@@ -1,0 +1,29 @@
+The formatting engine, in two halves: what runs in the compiler, and what runs in the
+program.
+
+### At compile time
+
+- `parse_braces.hpp`, `parse_printf.hpp`: split a `{}` or `%` format into count + 1 literal
+  `format_piece`s (offset and size in the literal) and count `format_spec`s, inside the consteval
+  constructors of `format_string` and `printf_string`.
+- `format_spec.hpp`: one parsed placeholder: fill, align, sign, `#`, zero padding, width,
+  precision and type. Align 0 means the kind's default.
+- `display_kind.hpp`: the `display_kind` of each argument type (integer, float, text of each unit
+  size, error, pointer, custom, ...), `none` for a type that cannot print.
+- `check_spec.hpp`: rejects a spec the argument kind cannot honour (a precision on a char, `x` on
+  a string, ...).
+- `format_errors.hpp`: functions declared and never defined, one per mistake
+  (`format_has_more_placeholders_than_arguments`, `format_type_does_not_fit_the_argument`,
+  `format_has_unmatched_closing_brace`, `printf_conversion_is_unknown`, ...). Calling one in a
+  consteval context is a compile error whose message names the function, which is how a bad
+  format reports what is wrong.
+
+### At run time
+
+- `display_argument.hpp`: each argument erased to a small record (kind, address, size), so the
+  engine is one function, not a template per call site; text of 2- or 4-byte units carries its unit
+  size, a `ca::error` its code and trace number.
+- `render.hpp` / `render.cpp`: the engine, shared by `format`, `format_to`, `printf_to`, `print` and
+  `printf`: writes the pieces and arguments through a `text_writer`, padding by code points.
+- `emit.hpp`: one message to a writer: rendered in place in the window a windowed writer lends,
+  else through a stack stage handed to `write`; returns the bytes written or the error.

@@ -1,0 +1,105 @@
+Formatting, Python's `{}` syntax and C's `%` syntax, both parsed and checked when the program
+compiles: a placeholder that does not fit its argument, a missing argument or an extra one is a
+compile error naming the problem. There are no varargs and no runtime parsing.
+
+| Function | Writes into |
+|---|---|
+| `ca::format("...", args...)` | a new `ca::str`, returned as `result<str>` |
+| `ca::format_append(s, "...", args...)` | the end of an existing string (`str`, `basic_str<char, A>`, `inline_str<N>`) |
+| `ca::format_to(writer, "...", args...)` | any `io::is_writer`; returns the bytes written |
+| `ca::printf_to(writer, "%...", args...)` | the same, with C's `%` syntax |
+| `ca::print`, `ca::printf` (layer 6) | standard output |
+
+```c++
+#include "ca/error.hpp"
+#include "ca/format.hpp"
+#include "ca/format_append.hpp"
+#include "ca/format_to.hpp"
+#include "ca/memory_writer.hpp"
+#include "ca/printf_to.hpp"
+#include "ca/str.hpp"
+
+auto main(void) -> int {
+	auto s = ca::format("{}-{:04} {:.2f} {x}", "id", 42, 3.14159, 255);
+	if (!s || *s != ca::sv::str{"id-0042 3.14 ff"})
+		return 1;
+	if (!ca::format_append(*s, " [{:>4}]", 7) || *s != ca::sv::str{"id-0042 3.14 ff [   7]"})
+		return 2;
+
+	char buffer[64];
+	ca::io::memory_writer out{buffer};
+	auto n = ca::printf_to(out, "%5d|%-4s|%#x", 42, "ab", 255);
+	if (!n || out.view() != ca::sv::str{"   42|ab  |0xff"})
+		return 3;
+	out.clear();
+	if (!ca::format_to(out, "{} {d} {?}", ca::errc::no_entry, ca::errc::no_entry, "tab\there"))
+		return 4;
+	if (out.view() != ca::sv::str{"no_entry 2 \"tab\\there\""})
+		return 5;
+	return s->cleanup() ? 0 : 6;
+}
+```
+
+### The `{}` syntax
+
+A placeholder is `{}` or `{spec}` (a leading `:` is allowed, `{:04}` and `{04}` are the same),
+with spec `[[fill]align][sign][#][0][width][.precision][type]`:
+
+- align `<`, `>` or `^`, after an optional fill character; numbers align right by default, text left
+- sign `+` or space; `#` adds the 0x, 0b or 0 prefix; `0` pads numbers with zeros
+- width, and the precision of a string, count code points, not bytes
+- precision: digits of a float, most code points of a string, fewest digits of an integer
+- type: `d x X o b B c` for integers, chars and bools; `s` text; `p` pointers; `f F e E g G a A`
+  floats; `?` quotes and escapes strings and characters, as a debugger shows them
+- `{{` and `}}` print one brace
+
+`printf_to` takes `%[flags][width][.precision][length]conversion` with C's meaning, except that
+the length modifiers are read and ignored (the type is known) and `%s` prints any displayable
+argument. There is no `*` width and no `%n`.
+
+### What prints
+
+`ca::is_displayable<T>` lists the types: bool, characters, integers, enums (as their integer),
+`f32` and `f64` (shortest round-trip form by default), C strings, char arrays, views and strings
+of every code unit type (printed as UTF-8, transcoded when needed, invalid sequences as U+FFFD),
+anything with `view() -> sv::basic<C>` (`ca::str`, `fs::path`), `ca::error` (its message or errc
+name; `{d}` the code), pointers, and any type with a `display` member:
+
+```c++
+#include "ca/format.hpp"
+#include "ca/format_to.hpp"
+#include "ca/is_displayable.hpp"
+#include "ca/text_writer.hpp"
+
+struct point final {
+	int x;
+	int y;
+
+	auto display(ca::text_writer& out) const noexcept -> void {
+		ca::format_to(out, "({}, {})", x, y);
+	}
+};
+
+static_assert(ca::is_displayable<point>);
+
+auto main(void) -> int {
+	auto s = ca::format("{} -> {}", point{1, 2}, point{3, -4});
+	if (!s || *s != ca::sv::str{"(1, 2) -> (3, -4)"})
+		return 1;
+	return s->cleanup() ? 0 : 2;
+}
+```
+
+A `display` function writes through the `ca::text_writer` it is given, with `put(char)`,
+`put(sv::str)`, `fill(c, n)` or a nested `format_to`. It cannot fail itself: when the writer
+runs out of room or fails, the rest of the message is dropped and the outer call returns the
+error.
+
+### How it runs
+
+A `format_string<Args...>` is built in a consteval constructor, which parses the literal into
+pieces and specs and checks them against Args; a bad format calls a function that is never
+defined, so the compiler reports it at the call. At run time one type-erased engine renders the
+pieces, so code size does not grow with each format. Writing goes through a `text_writer`
+straight into the window a windowed writer lends (stdout's buffer, the string's own storage), so
+formatted text is usually written once, in place.

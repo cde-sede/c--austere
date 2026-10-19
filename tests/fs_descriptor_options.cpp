@@ -15,5 +15,5 @@ auto main(void) -> int {
 	auto closed = d->test(ca::fs::cloexec);
 	if (!kept || !*kept || !gone || *gone || !closed || *closed)
 		return 3;
-	return d->destroy() ? 0 : 4;
+	return d->cleanup() ? 0 : 4;
 }

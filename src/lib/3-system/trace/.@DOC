@@ -1,0 +1,69 @@
+Error traces: where an error came from, and what each caller was doing when it passed
+through. A `ca::error` is an int code plus the number of a trace; the trace itself lives in the
+calling thread, so returning a traced error costs no more than returning an untraced one.
+
+| Function | Does |
+|---|---|
+| `trace::fail(error, message)` | starts the thread's trace with error, first frame at the caller |
+| `trace::context(error, message)` | adds a frame at the caller to error's trace |
+| `trace::of(error)` | the `record` of error: its frames, origin first |
+| `ca::print_trace(error)` | prints the error and its trace (layer 6) |
+
+`fail` and `context` return a `ca::failure`, so they sit directly in a return statement. Each
+frame records the function, file and line through `ca::source_location`, without a macro.
+Messages must outlive the trace, so they are literals; `ca::context` (layer 5) adds formatted
+messages, and `ca::report` keeps a trace beyond the thread.
+
+```c++
+#include "ca/error.hpp"
+#include "ca/result.hpp"
+#include "ca/sv.hpp"
+#include "ca/trace.hpp"
+
+[[nodiscard]] static auto open_config(const bool present) noexcept -> ca::result<int> {
+	if (!present)
+		return ca::trace::fail(ca::errc::no_entry, "config.toml");
+	return 3;
+}
+
+[[nodiscard]] static auto load(const bool present) noexcept -> ca::result<int> {
+	auto config = open_config(present);
+	if (!config)
+		return ca::trace::context(config.error(), "opening config");
+	return *config + 1;
+}
+
+auto main(void) -> int {
+	auto r = load(false);
+	if (r || r.error() != ca::errc::no_entry || r.error().trace() == 0U)
+		return 1;
+	const ca::trace::record record = ca::trace::of(r.error());
+	if (record.frames().size() != 2U || record.dropped() != 0U)
+		return 2;
+	if (record.frames()[0].message() != ca::sv::str{"config.toml"})
+		return 3;
+	if (record.frames()[1].message() != ca::sv::str{"opening config"})
+		return 4;
+	return record.frames()[1].where().line() == 15U ? 0 : 5;
+}
+```
+
+Printed with `{}` or `ca::print_trace`, a record reads:
+
+```text
+No such file or directory
+  at open_config (app.cpp:8): config.toml
+  at load (app.cpp:15): opening config
+```
+
+### One trace per thread
+
+Each thread holds one trace, of at most 32 frames; later frames are counted in `dropped()`.
+`fail` replaces it, so a trace follows the error currently being returned. `context` on an
+error that does not carry the thread's current trace (one made by hand, returned by a system
+call, or from another thread) starts a new trace instead of extending a wrong one, and `of`
+returns no frames for it. A `record` borrows from the thread's trace and stays valid until the
+thread starts another.
+
+Traps join the same trace: when a trap fails a context (`ca::with`), the context's error carries
+a frame with the trap's reason, and `result::raise` adds an "error raised" frame.

@@ -1,0 +1,8 @@
+Conversions between ca's portable process types and the platform's, declared with opaque
+pointers so that no header names a system type, and defined in `.cpp` files:
+
+- `native_resource(which)`: the `RLIMIT_*` constant of a `sys::resource`.
+- `to_native(set, native)`, `from_native(native)`: a `sys::signal_set` to and from `sigset_t`,
+  signals 1 to 64.
+- `wait_status_of(raw)`: the int status word of `waitpid` decoded into a `sys::wait_status`
+  (exit code or terminating signal), with the platform's `WIFEXITED` family.

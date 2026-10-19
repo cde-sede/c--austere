@@ -163,6 +163,7 @@ namespace ca {
 				/* @DOC The buffered bytes, reading more first when there are none; empty at end of
 				   input. Valid until the next call. Unbuffered: errc::invalid_argument. */
 				[[nodiscard]] auto fill(void) noexcept -> ca::result<ca::sv::str> {
+
 					if (_at == _filled) [[unlikely]] {
 						auto got = this->_refill();
 						if (!got) [[unlikely]]

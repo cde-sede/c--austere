@@ -1,0 +1,32 @@
+The two hash functions every hashed container of ca rests on; `ca::hash` (layer 5, `map/`)
+picks between them by key type.
+
+- `ca::hash_word(u64)`: one 64x64 to 128-bit multiply folded to 64 bits. Every output bit depends
+  on every input bit, so even small sequential integers spread over the whole table. Integers of
+  every width hash by value: `5`, `5U` and `ca::u8{5}` agree.
+- `ca::hash_bytes(data, size, seed)`: wyhash (final 4). Up to 16 bytes take two or three loads and
+  two multiplies with no loop; longer inputs consume 16 bytes per multiply, in three independent
+  lanes past 48 bytes so the multiplies overlap.
+
+```c++
+#include "ca/hash.hpp"
+#include "ca/integers.hpp"
+
+auto main(void) -> int {
+	const char key[] = "user:42";
+	const ca::u64 a = ca::hash_bytes(key, sizeof(key) - 1U);
+	const ca::u64 b = ca::hash_bytes(key, sizeof(key) - 1U);
+	const ca::u64 seeded = ca::hash_bytes(key, sizeof(key) - 1U, 0x9E37'79B9U);
+	if (a != b || a == seeded)
+		return 1;
+	if (ca::hash_word(5U) != ca::hash_word(ca::u8{5U}))
+		return 2;
+	return ca::hash_word(1U) != ca::hash_word(2U) ? 0 : 3;
+}
+```
+
+`hash_word` is constexpr; `hash_bytes` is not, since it reads unaligned words. Both are
+deterministic and unseeded: the same input hashes the same in every run and on every machine
+of the same byte order. That makes tables reproducible, and also means they offer no defense
+against keys chosen to collide; pass a secret `seed` to `hash_bytes` when keys come from an
+adversary.

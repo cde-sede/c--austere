@@ -10,7 +10,7 @@
    | construction | O(N) | value-initialized, or from N values; constexpr |
    | find, count, contains, compare, == | O(N) | memchr/memcmp for code units, element loops otherwise |
    | fill, reverse | O(N) | |
-   | destroy, clone | O(N) | only for cleanable and clonable T |
+   | cleanup, clone | O(N) | only for cleanable and clonable T |
 
    Space: exactly the elements. Locality and alignment: contiguous, stride sizeof(T), wherever
    the array lives (stack, inside another object, static storage); scans vectorize and the
@@ -84,7 +84,7 @@ namespace ca {
 	   (cut, find, compare, fill, reverse) of ca::impl::slice_methods returning borrowed_slices
 	   into it. Built value-initialized or from exactly N values (`ca::array a{1, 2, 3}` deduces
 	   array<int, 3>); copies, moves and destroys as T does; constexpr. operator[] traps out of
-	   range; get allows the doubt. destroy() and clone() for cleanable and clonable T. */
+	   range; get allows the doubt. cleanup() and clone() for cleanable and clonable T. */
 	template <typename T, ca::usz N>
 	class array final : public ca::impl::slice_methods<ca::array<T, N>, T, const T> {
 
@@ -245,7 +245,7 @@ namespace ca {
 						if (!cloned) {
 							if constexpr (ca::is_cleanable<T>) {
 								for (ca::usz j = 0U; j < i; ++j)
-									static_cast<void>(copy.data()[j].destroy());
+									static_cast<void>(copy.data()[j].cleanup());
 							}
 							return cloned.propagate();
 						}
@@ -259,11 +259,11 @@ namespace ca {
 
 			/* @DOC Cleans up every element, in order; they stay in place, ready for their
 			   destructors. Returns the first cleanup error; every element is cleaned up regardless. */
-			[[nodiscard]] constexpr auto destroy(void) noexcept -> ca::result<void> requires ca::is_cleanable<T> {
+			[[nodiscard]] constexpr auto cleanup(void) noexcept -> ca::result<void> requires ca::is_cleanable<T> {
 
 				ca::error first{};
 				for (T& element : *this) {
-					element.destroy().match([] {
+					element.cleanup().match([] {
 					}, [&first](const ca::error& error) {
 						if (first.ok())
 							first = error;

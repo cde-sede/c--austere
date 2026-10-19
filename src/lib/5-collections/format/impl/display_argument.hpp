@@ -63,6 +63,16 @@ namespace ca {
 
 		}; // struct display_custom
 
+		/* @DOC A ca::error as its code and trace number. */
+		struct display_error final {
+
+				using self = ca::impl::display_error;
+
+				int _code;
+				ca::u32 _trace;
+
+		}; // struct display_error
+
 
 		/* @DOC One argument of print, its type erased: the engine is not a template. size: bytes
 		   of the source integer, float or character type, or of a wide text's code unit. */
@@ -78,7 +88,7 @@ namespace ca {
 						ca::impl::display_text _text;
 						ca::impl::display_units _units;
 						ca::impl::display_custom _custom;
-						int _code;
+						ca::impl::display_error _error;
 						bool _boolean;
 						char _character;
 				};
@@ -130,7 +140,7 @@ namespace ca {
 			else if constexpr (kind == ca::impl::display_kind::floating)
 				argument._float_value = static_cast<ca::f64>(value);
 			else if constexpr (kind == ca::impl::display_kind::error)
-				argument._code = value.code();
+				argument._error = ca::impl::display_error{value.code(), value.trace()};
 			else if constexpr (kind == ca::impl::display_kind::pointer) {
 				if constexpr (ca::is_null_pointer<U>)
 					argument._pointer = nullptr;

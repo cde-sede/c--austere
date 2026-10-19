@@ -31,7 +31,15 @@ debug)   modeflags='-g -O1' ;;
 *)       echo "MODE must be debug or release" >&2; exit 2 ;;
 esac
 
-make -s -C "$root" CXX="$CXX" MODE="$MODE"
+make -j$(nproc) -s -C "$root" CXX="$CXX" MODE="$MODE"
+
+
+echo $CXX -std=$std -nostdinc++ -fno-exceptions -fno-rtti \
+	-Wall -Wextra -Wpedantic -Werror -pthread $modeflags \
+	-I"$root/src/lib" \
+	"$src" -o "$out" \
+	"$root/build/$(basename "$CXX")-$MODE/libca.a" \
+	-nostdinc++ -pthread $ldextra
 
 $CXX -std=$std -nostdinc++ -fno-exceptions -fno-rtti \
 	-Wall -Wextra -Wpedantic -Werror -pthread $modeflags \

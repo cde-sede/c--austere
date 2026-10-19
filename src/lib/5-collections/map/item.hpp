@@ -58,7 +58,7 @@ namespace ca {
 			// -- methods ----------------------------------------------------
 
 			/* @DOC Cleans up both parts; returns the first error. */
-			[[nodiscard]] auto destroy(void) noexcept -> ca::result<void>
+			[[nodiscard]] auto cleanup(void) noexcept -> ca::result<void>
 			requires (!ca::is_reference<K> && !ca::is_reference<V> && (ca::is_cleanable<K> || ca::is_cleanable<V>)) {
 
 				ca::error first{};

@@ -36,6 +36,6 @@ auto main(void) -> int {
 	auto report = ca::report<>::of(r.error());
 	if (report.size() != 32U || report.dropped() != 8U)
 		return 5;
-	auto destroyed = report.destroy();
+	auto destroyed = report.cleanup();
 	return destroyed ? 0 : 6;
 }

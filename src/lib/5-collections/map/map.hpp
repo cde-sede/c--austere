@@ -15,7 +15,7 @@
    | floor, ceiling | O(log n) | |
    | iteration, keys, values, items | O(n) | in key order; amortized O(1) per step |
    | retain | O(n + r log n) | r entries removed |
-   | clear, destroy, clone | O(n) | clone copies the tree shape, memcpy per node for trivially copyable entries |
+   | clear, cleanup, clone | O(n) | clone copies the tree shape, memcpy per node for trivially copyable entries |
 
    Space: nodes are at least half full (5 of 11 keys) except the root; for small entries the
    overhead per entry is about 16 / 8 + 8 / 6 bytes: far below a red-black tree's three pointers
@@ -37,7 +37,7 @@
 
    | Case | clang 18 | gcc 13 | Notes |
    |---|---|---|---|
-   | insert 1e6 scrambled u64, then destroy | 0.74x | 0.78x | entries shift within nodes |
+   | insert 1e6 scrambled u64, then cleanup | 0.74x | 0.78x | entries shift within nodes |
    | insert 1e6 u64 in order | 0.24x | 0.32x | |
    | 3e6 lookup hits in 1e6 entries | 0.57x | 0.32x | |
    | 1e6 ceiling misses | 0.52x | 0.67x | std: lower_bound |
@@ -103,7 +103,7 @@ namespace ca {
 	   compare() when they have it, else by <; set and setdefault build the key from what they
 	   are given only when it is absent. Construction allocates nothing; set, setdefault, update
 	   and clone acquire memory and can fail, changing nothing. Insertions and removals move
-	   entries: positions and references do not survive them. Clean up with destroy(); the
+	   entries: positions and references do not survive them. Clean up with cleanup(); the
 	   destructor is a failsafe that frees silently. A stateful A has no default construction
 	   and moves with the entries. */
 	template <typename K, typename V, ca::is_allocator A = ca::heap>
@@ -198,10 +198,10 @@ namespace ca {
 			: _root{ca::exchange(other._root, nullptr)}, _size{ca::exchange(other._size, 0U)}, _allocator{other._allocator} {
 			}
 
-			/* @DOC Failsafe for a skipped destroy(): destroys the entries and frees, silently. */
-			~map(void) noexcept {
-				this->_release();
-			}
+			// Failsafe for a skipped cleanup(): destroys the entries and frees, silently.
+			// ~map(void) noexcept {
+			// 	this->_release();
+			// }
 
 			/* @DOC dict.fromkeys: each key of keys mapped to a copy of value; later duplicates
 			   change nothing. On failure the partial map is destroyed and that error returned. */
@@ -214,7 +214,7 @@ namespace ca {
 						continue;
 					auto added = made.set(key, value);
 					if (!added) {
-						static_cast<void>(made.destroy());
+						static_cast<void>(made.cleanup());
 						return added.propagate();
 					}
 				}
@@ -227,7 +227,7 @@ namespace ca {
 			auto operator=(const self&) -> self& = delete;
 
 			/* @DOC Takes other's entries and allocator; the previous entries are released as by the
-			   destructor. Traps when an entry is cleanable and entries remain: clear() or destroy()
+			   destructor. Traps when an entry is cleanable and entries remain: clear() or cleanup()
 			   first. */
 			auto operator=(self&& other) noexcept -> self& {
 
@@ -484,7 +484,7 @@ namespace ca {
 					if (!outcome)
 						break;
 				}
-				static_cast<void>(other.destroy());
+				static_cast<void>(other.cleanup());
 				return outcome;
 			}
 
@@ -525,7 +525,7 @@ namespace ca {
 			}
 
 			/* @DOC clear(): a map keeps no memory beyond its nodes. */
-			[[nodiscard]] auto destroy(void) noexcept -> ca::result<void> {
+			[[nodiscard]] auto cleanup(void) noexcept -> ca::result<void> {
 				return this->clear();
 			}
 

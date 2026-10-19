@@ -1,0 +1,37 @@
+How the string methods are shared. `methods.hpp` defines `sv::impl::methods<T, C>`, a CRTP
+base that writes every read-only text method once, for any type T with `view() -> sv::basic<C>`:
+the views themselves, `ca::basic_str` and `ca::inline_str` all derive it, so a method added here
+appears on every string type at once. The methods return views into the text and never
+allocate.
+
+`classify.hpp` holds the per-code-point helpers the methods walk with: `point_at` and
+`point_before` decode one code point forwards or backwards (ASCII without decoding), and
+`space_at`, `space_before` and `line_break_at` measure a white space code point or a line
+boundary, 0 when there is none. Walking backwards meets the same code points as walking
+forwards, so `strip_end` and `split` agree on invalid text.
+
+`forward.hpp` declares `sv::basic` ahead of its definition: the methods use `ca::unicode`,
+whose functions take views, so the view type must be nameable first.
+
+A type of your own gets the whole text API by deriving the base and providing `view()`:
+
+```c++
+#include "ca/sv.hpp"
+
+class token final : public ca::sv::impl::methods<token, char> {
+	private:
+		ca::sv::str _text;
+
+	public:
+		constexpr explicit token(const ca::sv::str text) noexcept
+		: _text{text} {
+		}
+
+		[[nodiscard]] constexpr auto view(void) const noexcept -> ca::sv::str {
+			return _text;
+		}
+};
+
+static_assert(token{"  if  "}.strip() == ca::sv::str{"if"});
+static_assert(token{"while"}.is_identifier());
+```

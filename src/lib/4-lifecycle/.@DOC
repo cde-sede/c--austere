@@ -1,0 +1,157 @@
+Layer 4: how objects are created, owned, copied and destroyed without exceptions, and where
+their memory comes from (`memory/`).
+
+### Explicit cleanup
+
+ca has no RAII for resources. A type owning resources (memory, descriptors, mappings) is
+`ca::is_cleanable`: it has `cleanup() -> result<void>`, which releases everything it owns and can
+report a failure, such as a close or a flush that failed. Its destructor remains only as a
+failsafe that releases silently what a skipped `cleanup()` left. Assigning over a cleanable object
+that still owns something traps, so a forgotten cleanup shows up instead of hiding a lost error.
+
+Construction follows the same rule. `ca::make<T>(args...)` builds a T and returns a
+`result<T>`: when T has a constructor taking `ca::error&` first, the constructor reports failure
+through it and `make` returns that error, destroying the half-built object. Constructors only
+initialize; acquiring a resource is a fallible function or factory (`arena::make`,
+`fs::descriptor::open`).
+
+```c++
+#include "ca/error.hpp"
+#include "ca/is_cleanable.hpp"
+#include "ca/make.hpp"
+#include "ca/result.hpp"
+
+class counter final {
+	private:
+		int _limit;
+		int _count;
+
+	public:
+		counter(ca::error& error, const int limit) noexcept
+		: _limit{limit}, _count{0} {
+			if (limit <= 0)
+				error = ca::errc::invalid_argument;
+		}
+
+		[[nodiscard]] auto tick(void) noexcept -> bool {
+			return ++_count <= _limit;
+		}
+
+		[[nodiscard]] auto cleanup(void) noexcept -> ca::result<void> {
+			_count = 0;
+			return {};
+		}
+};
+
+static_assert(ca::is_cleanable<counter>);
+
+auto main(void) -> int {
+	auto bad = ca::make<counter>(0);
+	if (bad || bad.error() != ca::errc::invalid_argument)
+		return 1;
+	auto made = ca::make<counter>(2);
+	if (!made)
+		return 2;
+	counter& c = *made;
+	const bool ticks = c.tick() && c.tick() && !c.tick();
+	return ticks && c.cleanup() ? 0 : 3;
+}
+```
+
+Copies are explicit too: `ca::is_clonable` types have `clone() const -> result<T>`, a copy
+that may fail (it allocates), which containers use instead of a copy constructor.
+
+### Owning one object
+
+`ca::unique<T, A>` owns one T in memory from allocator A (`ca::heap` by default), like
+`std::unique_ptr` but built through `ca::make_in`, cleaned with `cleanup()` (which runs T's own
+cleanup first), and cloned with `clone()`. Over a stateless allocator it is one pointer wide.
+
+`ca::make_in<T>(source, args...)` builds an allocator-aware T over any allocator or allocator
+resource: `ca::make_in<ca::unique<T>>(ca::heap{}, ...)` on the heap, or `ca::make_in<
+ca::dynamic_array<int>>(arena)` in an arena, the type rebound to that allocator.
+
+```c++
+#include "ca/make_in.hpp"
+#include "ca/memory.hpp"
+#include "ca/unique.hpp"
+#include "ca/utility.hpp"
+
+struct node final {
+	int value;
+	explicit node(const int v) noexcept : value{v} {
+	}
+};
+
+auto main(void) -> int {
+	auto made = ca::make_in<ca::unique<node>>(ca::heap{}, 7);
+	if (!made || (*made)->value != 7)
+		return 1;
+	ca::unique<node> owner = ca::move(*made);
+	auto copy = owner.clone();
+	if (!copy || (*copy)->value != 7 || !copy->cleanup())
+		return 2;
+
+	auto arena = ca::arena::make();
+	if (!arena)
+		return 3;
+	auto in_arena = ca::make_in<ca::unique<node>>(*arena, 9);
+	if (!in_arena || (*in_arena)->value != 9 || !in_arena->cleanup())
+		return 4;
+	return owner.cleanup() && arena->cleanup() ? 0 : 5;
+}
+```
+
+### Contexts
+
+A context is Python's `with` statement for a world without exceptions: setup, a body, and a
+leave step that always runs, told whether the body failed. Every `ca::trap` reached inside the
+body (an out-of-range index, a failed result read, an explicit trap) unwinds to the context, which
+fails with that error instead of ending the program.
+
+`ca::with(enter, leave, args...)` builds one from two callables; `ca::context_manager<Self>` is
+the CRTP base for a reusable context class with `enter(args...)` and `leave(const E* error)`,
+run by `self.run(args...)` or `ca::ctx<Self>::run(args...)`.
+
+```c++
+#include "ca/context_manager.hpp"
+#include "ca/dynamic_array.hpp"
+#include "ca/error.hpp"
+#include "ca/with.hpp"
+
+struct job final : ca::context_manager<job> {
+	int left = 0;
+	bool failed = false;
+
+	auto enter(ca::dynamic_array<int>& values, const ca::usz index) noexcept -> void {
+		values[index] = 1;
+	}
+
+	auto leave(const ca::error* const error) noexcept -> void {
+		++left;
+		failed = error != nullptr;
+	}
+};
+
+auto main(void) -> int {
+	ca::dynamic_array<int> values{};
+	if (!values.append(0))
+		return 1;
+	job j{};
+	if (!j.run(values, 0U) || j.failed)
+		return 2;
+	auto out_of_range = j.run(values, 5U);
+	if (out_of_range || out_of_range.error() != ca::errc::not_recoverable || !j.failed || j.left != 2)
+		return 3;
+
+	int entered = 0;
+	auto done = ca::with([&entered](const int n) noexcept { entered = n; },
+		[](const ca::error*) noexcept {}, 3);
+	return done && entered == 3 && values.cleanup() ? 0 : 4;
+}
+```
+
+A trap skips the destructors of the frames it unwinds: what they owned leaks, so `leave` is
+where a context releases what `enter` acquired. Inside a context, reading a failed result fails
+the context with that result's error, so a body can be written as straight-line code with `*r`
+and still report the first error that happened.

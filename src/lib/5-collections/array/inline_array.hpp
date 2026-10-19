@@ -15,7 +15,7 @@
    | insert(i), pop(i) | O(size - i) | one memmove for trivially relocatable T |
    | swap_pop(i), pop() | O(1) | |
    | remove(value) | O(size) | find, then pop(i) |
-   | resize, clear, destroy | O(abs(n - size)) | O(1) for trivially destructible T without destroy() |
+   | resize, clear, cleanup | O(abs(n - size)) | O(1) for trivially destructible T without cleanup() |
    | clone, from(view) | O(n) | one memcpy for trivially copyable T |
    | find, count, contains, compare, == | O(n) | memchr/memcmp for code units, element loops otherwise |
 
@@ -95,7 +95,7 @@ namespace ca {
 	   allocates (C++26 std::inplace_vector, Rust's ArrayVec). Operations that would pass N fail
 	   with errc::no_space and change nothing. Has the sequence methods (cut, find, compare, fill,
 	   reverse) of ca::impl::slice_methods. Trivially copyable when T is; otherwise clone() copies
-	   and moving leaves the source empty. Clean up with destroy() when T is cleanable; the
+	   and moving leaves the source empty. Clean up with cleanup() when T is cleanable; the
 	   destructor is a failsafe. operator[] traps out of range; get allows the doubt. */
 	template <typename T, ca::usz N>
 	class inline_array final : public ca::impl::slice_methods<ca::inline_array<T, N>, T, const T> {
@@ -167,10 +167,13 @@ namespace ca {
 
 			~inline_array(void) noexcept requires ca::is_trivially_destructible<T> = default;
 
-			/* @DOC Failsafe for a skipped destroy(): destroys the elements, silently. */
 			~inline_array(void) noexcept {
-				ca::destroy_n(_slots, _size);
 			}
+
+			// Failsafe for a skipped cleanup(): destroys the elements, silently.
+			// ~inline_array(void) noexcept {
+			// 	ca::destroy_n(_slots, _size);
+			// }
 
 			/* @DOC A copy of the elements of view: clone() of each when T has one, else the copy
 			   constructor. errc::no_space when view holds more than N. On a failed element clone, the
@@ -186,7 +189,7 @@ namespace ca {
 					for (const T& element : view) {
 						auto cloned = element.clone();
 						if (!cloned) {
-							static_cast<void>(copy.destroy());
+							static_cast<void>(copy.cleanup());
 							return cloned.propagate();
 						}
 						ca::construct_at(copy._slots + copy._size, ca::move(*cloned));
@@ -210,7 +213,7 @@ namespace ca {
 			auto operator=(self&&) noexcept -> self& requires ca::is_trivially_copyable<T> = default;
 
 			/* @DOC Destroys the current elements as by the destructor, then relocates other's; other
-			   is left empty. Traps when T is cleanable and elements remain: clear() or destroy()
+			   is left empty. Traps when T is cleanable and elements remain: clear() or cleanup()
 			   first. */
 			auto operator=(self&& other) noexcept -> self& requires (!ca::is_trivially_copyable<T> && ca::is_move_constructible<T>) {
 
@@ -451,7 +454,7 @@ namespace ca {
 			}
 
 			/* @DOC clear(): an inline_array owns no memory beyond itself. */
-			[[nodiscard]] auto destroy(void) noexcept -> ca::result<void> {
+			[[nodiscard]] auto cleanup(void) noexcept -> ca::result<void> {
 				return this->_truncate(0U);
 			}
 
@@ -490,7 +493,7 @@ namespace ca {
 				if constexpr (ca::is_cleanable<T>) {
 					ca::error first{};
 					for (T* element = tail; element != end; ++element) {
-						element->destroy().match([] {
+						element->cleanup().match([] {
 						}, [&first](const ca::error& error) {
 							if (first.ok())
 								first = error;

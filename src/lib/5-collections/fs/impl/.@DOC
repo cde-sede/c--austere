@@ -1,0 +1,11 @@
+The parts of `fs::basic_path` that do not depend on the allocator, compiled once in the
+library instead of once per allocator type.
+
+- `path_text.hpp`: normalization (`path_append_components`, which collapses slashes and drops "."
+  components while copying), name checks, glob matching (`*`, `?`, `[abc]`, `[a-z]`, `[!x]`) and
+  the lexical `match` and `relative_to` on already-normalized text, plus the system queries
+  behind `exists` and the kind tests, for which a missing path or a non-directory parent
+  (`path_is_missing`) means false rather than an error.
+- `read_to_end.hpp`: reads a whole descriptor into a `dynamic_array`, sized from `fstat` first and
+  grown when the file is longer than it said (as files in /proc are): what `read_text` and
+  `read_bytes` use.

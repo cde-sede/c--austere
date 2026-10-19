@@ -10,5 +10,5 @@ auto main(void) -> int {
 	auto last = a.pop();
 	if (!last || *last != 2 || a.size() != 1)
 		return 3;
-	return a.destroy() ? 0 : 4;
+	return a.cleanup() ? 0 : 4;
 }

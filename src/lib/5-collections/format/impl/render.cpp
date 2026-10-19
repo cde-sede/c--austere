@@ -18,8 +18,11 @@
 #include "2-vocabulary/unicode/is_scalar_value.hpp"
 #include "2-vocabulary/unicode/transcode.hpp"
 #include "3-system/error/error_message.hpp"
+#include "3-system/error/error_name.hpp"
 #include "3-system/text/format_float.hpp"
 #include "3-system/text/format_float_shortest.hpp"
+#include "3-system/trace/of.hpp"
+#include "3-system/trace/record.hpp"
 #include "5-collections/format/impl/display_kind.hpp"
 #include "5-collections/format/impl/render.hpp"
 
@@ -400,6 +403,17 @@ static auto render_pointer(ca::text_writer& out, const ca::impl::format_spec& sp
 	emit(out, spec, '>', "0x", 2U, 0U, begin, static_cast<ca::usz>(end - begin), static_cast<ca::usz>(end - begin), true);
 }
 
+static auto error_text(const ca::error error) noexcept -> ca::sv::str {
+
+	const ca::trace::record record = ca::trace::of(error);
+	if (!record.frames().empty() && !record.frames()[0].message().empty())
+		return record.frames()[0].message();
+	const ca::sv::str name = ca::sys::error_name(error);
+	if (!name.empty())
+		return name;
+	return ca::sys::error_message(error);
+}
+
 static auto render_float(ca::text_writer& out, const ca::impl::format_spec& spec, const ca::f64 value, const ca::u8 size) noexcept -> void {
 
 	char text[float_capacity];
@@ -487,9 +501,9 @@ static auto render_argument(ca::text_writer& out, const ca::impl::format_spec& s
 			break;
 		case ca::impl::display_kind::error:
 			if (spec._type == 'd')
-				render_signed(out, spec, argument._code, sizeof(int));
+				render_signed(out, spec, argument._error._code, sizeof(int));
 			else {
-				const ca::sv::str message = ca::sys::error_message(ca::error{argument._code});
+				const ca::sv::str message = error_text(ca::error{argument._error._code, argument._error._trace});
 				render_text(out, spec, message.data(), message.size());
 			}
 			break;

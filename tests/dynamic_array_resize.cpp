@@ -4,7 +4,7 @@
 
 struct cleanable {
 	int code;
-	auto destroy(void) noexcept -> ca::result<void> {
+	auto cleanup(void) noexcept -> ca::result<void> {
 		if (code != 0)
 			return ca::fail(code);
 		return ca::result<void>{};
@@ -29,7 +29,7 @@ auto main(void) -> int {
 		return 2;
 	if (!a.resize(1) || a.size() != 1 || a.capacity() < 5)
 		return 3;
-	if (!a.destroy())
+	if (!a.cleanup())
 		return 4;
 
 	{
@@ -38,6 +38,8 @@ auto main(void) -> int {
 			return 5;
 		if (!t.resize(10) || t[9].value != -1 || !t.resize(2) || tracked::alive != 2)
 			return 6;
+		if (!t.cleanup())
+			return 11;
 	}
 	if (tracked::alive != 0)
 		return 7;
@@ -48,5 +50,5 @@ auto main(void) -> int {
 	auto r = c.resize(1);
 	if (r || r.error().code() != 3 || c.size() != 1)
 		return 9;
-	return c.destroy() ? 0 : 10;
+	return c.cleanup() ? 0 : 10;
 }

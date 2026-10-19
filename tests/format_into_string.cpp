@@ -30,7 +30,7 @@ static auto formats(void) noexcept -> int {
 			return 6;
 	if (!writer.flush() || !big->view().ends_with("998,999,"))
 		return 4;
-	return s->destroy() && big->destroy() ? 0 : 5;
+	return s->cleanup() && big->cleanup() ? 0 : 5;
 }
 
 static auto bounded(void) noexcept -> int {
@@ -61,7 +61,7 @@ static auto in_arena(void) noexcept -> int {
 	auto s = ca::format(arena.allocator(), "{} {} {}", "allocated", "in the", "arena");
 	if (!s || *s != ca::sv::str{"allocated in the arena"})
 		return 21;
-	return s->destroy() && arena.destroy() ? 0 : 22;
+	return s->cleanup() && arena.cleanup() ? 0 : 22;
 }
 
 static auto lines(void) noexcept -> int {
@@ -79,7 +79,7 @@ static auto lines(void) noexcept -> int {
 	auto all = ca::io::read_to_end(reader, rest);
 	if (!all || rest.view().ends_with("end") == false)
 		return 32;
-	return line.destroy() && rest.destroy() ? 0 : 33;
+	return line.cleanup() && rest.cleanup() ? 0 : 33;
 }
 
 auto main(void) -> int {

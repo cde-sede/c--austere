@@ -14,6 +14,7 @@
 #include "1-primitives/traits/is_nothrow_move_constructible.hpp"
 #include "1-primitives/traits/is_reference.hpp"
 #include "1-primitives/traits/is_same.hpp"
+#include "1-primitives/traits/is_trivially_destructible.hpp"
 #include "1-primitives/traits/is_void.hpp"
 #include "1-primitives/traits/remove_cvref.hpp"
 #include "1-primitives/utility/addressof.hpp"
@@ -83,6 +84,7 @@ namespace ca {
 			static constexpr bool _movable                    = self::_move_constructible && ca::is_move_assignable<self::held>;
 			static constexpr bool _nothrow_movable            = self::_nothrow_move_constructible
 				&& ca::is_nothrow_move_assignable<self::held>;
+			static constexpr bool _trivially_destructible     = ca::is_trivially_destructible<self::held>;
 
 
 		public:
@@ -139,6 +141,8 @@ namespace ca {
 				if (other._engaged)
 					this->_construct(*ca::move(other._value));
 			}
+
+			constexpr ~optional(void) noexcept requires self::_trivially_destructible = default;
 
 			constexpr ~optional(void) noexcept {
 				this->reset();

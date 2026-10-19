@@ -26,7 +26,7 @@ namespace ca {
 
 	/* @DOC Owner of chunks of pages (page_allocator) carved by bumping a pointer, all released at
 	   once: an allocator resource, handing out arena_allocator. A chunk holds chunk_size bytes,
-	   or one larger block. Moving an arena keeps its allocators valid; destroy() or reset()
+	   or one larger block. Moving an arena keeps its allocators valid; cleanup() or reset()
 	   invalidates every block. Not thread-safe. */
 	class arena final {
 
@@ -63,10 +63,10 @@ namespace ca {
 			: _state{ca::exchange(other._state, nullptr)} {
 			}
 
-			/* @DOC Failsafe for a skipped destroy(). */
-			~arena(void) noexcept {
-				ca::impl::arena_release(_state);
-			}
+			// Failsafe for a skipped cleanup().
+			// ~arena(void) noexcept {
+			// 	ca::impl::arena_release(_state);
+			// }
 
 			/* @DOC An arena with its first chunk, chunk_size bytes rounded up to pages. */
 			[[nodiscard]] static auto make(ca::usz chunk_size = self::CHUNK_SIZE) noexcept -> ca::result<self>;
@@ -89,7 +89,7 @@ namespace ca {
 
 			// -- accessors --------------------------------------------------
 
-			/* @DOC Whether make() built it and destroy() has not run. */
+			/* @DOC Whether make() built it and cleanup() has not run. */
 			[[nodiscard]] constexpr auto holds(void) const noexcept -> bool {
 				return _state != nullptr;
 			}
@@ -110,7 +110,7 @@ namespace ca {
 			auto reset(void) noexcept -> void;
 
 			/* @DOC Releases every chunk; the arena is empty after. */
-			[[nodiscard]] auto destroy(void) noexcept -> ca::result<void> {
+			[[nodiscard]] auto cleanup(void) noexcept -> ca::result<void> {
 
 				ca::impl::arena_release(ca::exchange(_state, nullptr));
 				return ca::result<void>{};

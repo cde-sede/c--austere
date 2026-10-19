@@ -1,0 +1,25 @@
+Floating point aliases named by width, as the integers are: `ca::f32` is `float` and
+`ca::f64` is `double`. Each header checks at compile time that the type really is IEEE 754
+binary32 or binary64 (its width in bits and its mantissa digits), so code
+that relies on the bit layout, such as the shortest float formatting of layer 3, fails to build
+on a target where it would be wrong.
+
+```c++
+#include "ca/bit.hpp"
+#include "ca/floats.hpp"
+#include "ca/integers.hpp"
+#include "ca/limits.hpp"
+
+static_assert(sizeof(ca::f64) == 8U);
+static_assert(ca::bit_cast<ca::u64>(ca::f64{-0.0}) == 0x8000'0000'0000'0000U);
+static_assert(ca::limits<ca::f32>::infinity() > ca::limits<ca::f32>::max());
+
+[[nodiscard]] constexpr auto is_nan(const ca::f64 value) noexcept -> bool {
+	return value != value;
+}
+
+static_assert(is_nan(ca::limits<ca::f64>::quiet_nan()));
+```
+
+`long double` has no alias: its layout differs between targets (80-bit x87 on x86-64,
+binary128 or binary64 elsewhere), and nothing in ca depends on it.

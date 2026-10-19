@@ -1,0 +1,87 @@
+`ca::unicode`: Unicode algorithms over string views, constexpr, allocating nothing. The
+encoding is chosen by the size of the code unit: 1 byte is UTF-8, 2 bytes UTF-16, 4 bytes
+UTF-32, so one function serves `sv::str`, `sv::u8`, `sv::u16`, `sv::u32` and `sv::wide`.
+
+| Function | Answers |
+|---|---|
+| `decode(text)` | the first code point with its length and validity, or nothing when empty |
+| `encode(point, out)` | writes one code point, returns the units written |
+| `encoded_size<C>(point)` | units one code point takes in C's encoding |
+| `code_points{text}` | range of the code points, for range-for |
+| `count_code_points(text)` | number of code points: Python's `len()` |
+| `is_valid(text)`, `find_invalid(text)` | well-formedness, and where it breaks |
+| `transcode(text, out, capacity)` | conversion between encodings |
+| `transcoded_size<To>(text)` | exact output size of a transcode |
+| `properties_of(point)` | the character database entry: classes and case mappings |
+
+### Invalid input
+
+Malformed text never stops an algorithm. Every invalid sequence (overlong forms, surrogates,
+values past U+10FFFF, truncated sequences, lone continuation bytes) decodes as U+FFFD
+(`replacement_character`), consuming its maximal valid prefix as Unicode recommends, and
+encoding a value that is not a scalar value writes U+FFFD. So counting, iterating and
+transcoding agree on how many code points a text has, and transcoding always produces
+well-formed output: transcoding to the same encoding sanitizes.
+
+```c++
+#include "ca/sv.hpp"
+#include "ca/unicode.hpp"
+
+static_assert(ca::unicode::is_valid(ca::sv::u8{u8"héllo"}));
+static_assert(ca::unicode::count_code_points(ca::sv::str{"héllo \U0001F600"}) == 7U);
+static_assert(ca::unicode::find_invalid(ca::sv::str{"ok\xC0\x80"}).value_or(99U) == 2U);
+static_assert(ca::unicode::transcoded_size<char16_t>(ca::sv::str{"a\U0001F600"}) == 3U);
+static_assert(ca::unicode::encoded_size<char>(U'€') == 3U);
+
+auto main(void) -> int {
+	const ca::sv::str text{"a\xFF\xE2\x82\xAC"};
+	char32_t points[4]{};
+	ca::usz n = 0U;
+	for (const char32_t c : ca::unicode::code_points{text})
+		points[n++] = c;
+	if (n != 3U || points[0] != U'a' || points[1] != ca::unicode::replacement_character || points[2] != U'€')
+		return 1;
+
+	char16_t wide[8]{};
+	const auto done = ca::unicode::transcode(ca::sv::str{"\xC3\xA9!"}, wide, 8U);
+	if (done.read() != 3U || done.written() != 2U || wide[0] != u'é')
+		return 2;
+
+	const auto first = ca::unicode::decode(ca::sv::str{"\xE2\x82\xAC"});
+	return first && first->code_point() == U'€' && first->length() == 3U ? 0 : 3;
+}
+```
+
+`transcode` stops before the first code point that does not fit in the output and never
+splits one; `read()` then tells where to resume. Size the output exactly with
+`transcoded_size` to convert in one call. The iterator of `code_points` exposes `decoded()`
+and `position()`, to tell a real U+FFFD from an invalid sequence and to locate it.
+
+UTF-8 paths skip ASCII 16 bytes at a time: validating, counting and transcoding mostly-ASCII
+text costs little more than a memchr.
+
+### Character properties
+
+`properties_of(point)` returns the database entry of one code point, generated from the UCD of
+the Python that ran `make unicode` (currently Unicode 15.0), with the classes Python's str
+methods use: `is_alpha`, `is_decimal`, `is_digit`, `is_numeric`, `is_space`, `is_printable`,
+`is_identifier_start`, ... It also holds the case mappings, simple (one code point:
+`to_upper`, `to_lower`, `to_fold`) and full (`upper()`, `lower()`, `title()`, `fold()`, each a
+`mapping` of 1 to 3 code points, as sharp s uppercases to "SS"). ASCII costs two table reads,
+any other code point three.
+
+```c++
+#include "ca/unicode.hpp"
+
+static_assert(ca::unicode::properties_of(U'é').is_alpha());
+static_assert(ca::unicode::properties_of(U'é').to_upper() == U'É');
+static_assert(ca::unicode::properties_of(U'٣').is_decimal());
+static_assert(ca::unicode::properties_of(U'　').is_space());
+static_assert(ca::unicode::properties_of(U'ß').upper().size() == 2U);
+static_assert(ca::unicode::properties_of(U'ß').upper().first() == U'S');
+static_assert(!ca::unicode::is_scalar_value(0xD800U));
+static_assert(ca::unicode::max_units<char16_t> == 2U);
+```
+
+The string methods of `sv::impl::methods` and `basic_str` (`is_alpha`, `split()`, `upper()`,
+`case_fold()`, ...) are built on these, which is why they agree with Python on non-ASCII text.

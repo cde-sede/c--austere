@@ -28,5 +28,5 @@ auto main(void) -> int {
 	relocating = false;
 	if (!a.insert(0, 9))
 		return 4;
-	return a[0].value == 9 && a[1].value == 0 && a[5].value == 4 && a.destroy() ? 0 : 5;
+	return a[0].value == 9 && a[1].value == 0 && a[5].value == 4 && a.cleanup() ? 0 : 5;
 }

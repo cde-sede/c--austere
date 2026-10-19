@@ -57,7 +57,7 @@ static auto basics(void) noexcept -> int {
 	const auto& constant = m;
 	if (constant[4] != 8 || constant.get(4).value_or(0) != 8 || !constant.contains(4))
 		return 9;
-	return m.destroy() && m.empty() ? 0 : 10;
+	return m.cleanup() && m.empty() ? 0 : 10;
 }
 
 static auto many(void) noexcept -> int {
@@ -134,7 +134,7 @@ static auto many(void) noexcept -> int {
 	ca::map<int, int> moved;
 	if (!moved.set(1, 1) || !moved.set(2, 2) || !copy->update(ca::move(moved)) || !moved.empty() || (*copy)[2] != 2)
 		return 32;
-	return m.destroy() && copy->destroy() ? 0 : 33;
+	return m.cleanup() && copy->cleanup() ? 0 : 33;
 }
 
 static auto from_keys(void) noexcept -> int {
@@ -142,7 +142,7 @@ static auto from_keys(void) noexcept -> int {
 	auto made = ca::map<int, int>::from_keys(ca::array{3, 1, 3, 2}, 7);
 	if (!made || !holds(*made, ca::array{1, 2, 3}) || (*made)[2] != 7)
 		return 40;
-	return made->destroy() ? 0 : 41;
+	return made->cleanup() ? 0 : 41;
 }
 
 static int cleanups = 0;
@@ -150,7 +150,7 @@ static int clones = 0;
 
 struct tracked {
 	int code;
-	auto destroy(void) noexcept -> ca::result<void> {
+	auto cleanup(void) noexcept -> ca::result<void> {
 		++cleanups;
 		if (code != 0)
 			return ca::fail(code);
@@ -188,7 +188,7 @@ static auto cleanup(void) noexcept -> int {
 	auto cloned = nested.clone();
 	if (!cloned || (*cloned)[4][0] != 1)
 		return 55;
-	return m.destroy() && nested.destroy() && cloned->destroy() ? 0 : 56;
+	return m.cleanup() && nested.cleanup() && cloned->cleanup() ? 0 : 56;
 }
 
 static auto arena(void) noexcept -> int {
@@ -205,10 +205,10 @@ static auto arena(void) noexcept -> int {
 			if (!m->set(i, -i))
 				return 62;
 		auto first = m->first();
-		if (m->size() != 1000U || !first || first->key != 1 || !m->destroy())
+		if (m->size() != 1000U || !first || first->key != 1 || !m->cleanup())
 			return 63;
 	}
-	return arena.destroy() ? 0 : 64;
+	return arena.cleanup() ? 0 : 64;
 }
 
 auto main(void) -> int {

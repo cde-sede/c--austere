@@ -18,7 +18,7 @@ auto main(void) -> int {
 	if (!key || !m.set(ca::move(*key), "moved in") || m["a key long enough to live on the heap"] != "moved in")
 		return 3;
 	auto owned = ca::str::from("name");
-	if (!owned || m[*owned] != "ca-lib" || !owned->destroy())
+	if (!owned || m[*owned] != "ca-lib" || !owned->cleanup())
 		return 4;
 	for (int i = 0; i < 200; ++i) {
 		char text[] = {'k', static_cast<char>('a' + i % 26), static_cast<char>('a' + i / 26), '\0'};
@@ -31,10 +31,10 @@ auto main(void) -> int {
 	if (!copy || !(*copy == m))
 		return 7;
 	auto value = m.pop("language");
-	if (!value || *value != "c++" || !value->destroy() || m.contains("language"))
+	if (!value || *value != "c++" || !value->cleanup() || m.contains("language"))
 		return 8;
 	auto item = m.popitem();
-	if (!item || !item->destroy())
+	if (!item || !item->cleanup())
 		return 9;
-	return m.destroy() && copy->destroy() ? 0 : 10;
+	return m.cleanup() && copy->cleanup() ? 0 : 10;
 }

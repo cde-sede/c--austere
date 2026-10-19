@@ -63,7 +63,7 @@ namespace ca {
 	/* @DOC Growable sequence of bits packed in 64-bit words from A: std::vector<bool> with whole-word
 	   operations, boost::dynamic_bitset. The bit operations (test, set, flip, count, find_next,
 	   ones, &=, ...) come from ca::impl::bit_methods. append, resize, reserve and clone acquire
-	   memory and can fail, changing nothing then. Clean up with destroy(); the destructor is a
+	   memory and can fail, changing nothing then. Clean up with cleanup(); the destructor is a
 	   failsafe. Indexed access traps out of range; get allows the doubt. */
 	template <ca::is_allocator A = ca::heap>
 	class dynamic_bit_array final : public ca::impl::bit_methods<ca::dynamic_bit_array<A>> {
@@ -248,10 +248,10 @@ namespace ca {
 			}
 
 			/* @DOC Frees the words: empty, no capacity. */
-			[[nodiscard]] auto destroy(void) noexcept -> ca::result<void> {
+			[[nodiscard]] auto cleanup(void) noexcept -> ca::result<void> {
 
 				_size = 0U;
-				return _words.destroy();
+				return _words.cleanup();
 			}
 
 
