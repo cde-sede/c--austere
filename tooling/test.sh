@@ -13,6 +13,8 @@
 #   // expect: error REGEX     does not build; diagnostics match REGEX (grep -E)
 #   // expect: trap            builds, then dies by a trap (SIGILL or SIGTRAP)
 #   // mode: debug             only checked in debug builds (or: release)
+#   // link: freestanding      linked without libc: static, ca's own _start and runtime
+#                              (RUNTIME, built from src/runtime/), no startup files
 
 ulimit -c 0
 test=$1
@@ -34,7 +36,13 @@ if [ -n "$mode" ] && [ "$mode" != "$MODE" ]; then
 	exit 0
 fi
 
-out=$($CXX $CXXFLAGS "$test" -o "$bin" "$LIB" $LDFLAGS 2>&1)
+link=$(sed -n 's|^// link: ||p' "$test")
+if [ "$link" = freestanding ]; then
+	out=$($CXX $CXXFLAGS "$test" -o "$bin" -nostdlib -static -Wl,-u,_start \
+		-Wl,--start-group "$LIB" "$RUNTIME" -Wl,--end-group 2>&1)
+else
+	out=$($CXX $CXXFLAGS "$test" -o "$bin" "$LIB" $LDFLAGS 2>&1)
+fi
 built=$?
 failure=
 case $kind in

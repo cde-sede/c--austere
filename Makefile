@@ -70,9 +70,14 @@ GENERATORS := gen_traits gen_syscalls gen_unicode gen_includes gen_str_test auto
 
 BUILD := build/$(notdir $(CXX))-$(MODE)
 LIB   := $(BUILD)/libca.a
-SRCS  := $(shell find src -type f -name '*.cpp')
+SRCS  := $(shell find src/lib -type f -name '*.cpp')
 OBJS  := $(SRCS:%.cpp=$(BUILD)/%.o)
-DEPS  := $(OBJS:.o=.d)
+
+RUNTIME      := $(BUILD)/libca_runtime.a
+RUNTIME_SRCS := $(shell find src/runtime -type f -name '*.cpp')
+RUNTIME_OBJS := $(RUNTIME_SRCS:%.cpp=$(BUILD)/%.o)
+
+DEPS  := $(OBJS:.o=.d) $(RUNTIME_OBJS:.o=.d)
 
 TEST_MATCHES := $(foreach p,$(or $(T),*),$(or $(wildcard tests/$(p).cpp),$(error no test matches '$(p)')))
 TEST_NAMES   := $(sort $(basename $(notdir $(TEST_MATCHES))))
@@ -82,7 +87,7 @@ CONFIGS := clang++-debug clang++-release g++-debug g++-release
 
 .PHONY: all includes test leaks matrix matrix-includes $(CONFIGS:%=matrix-%) bench bench-doc syscalls unicode gen clean fclean FORCE
 
-all: includes $(LIB)
+all: includes $(LIB) $(RUNTIME)
 
 includes:
 ifeq ($(MATRIX),)
@@ -94,6 +99,11 @@ $(LIB): $(OBJS)
 	rm -f $@
 	$(AR) rcs $@ $^
 
+$(RUNTIME): $(RUNTIME_OBJS)
+	@mkdir -p $(@D)
+	rm -f $@
+	$(AR) rcs $@ $^
+
 $(BUILD)/%.o: %.cpp
 	@mkdir -p $(@D)
 	$(CXX) $(CPPFLAGS) $(CXXFLAGS) -c $< -o $@
@@ -101,9 +111,9 @@ $(BUILD)/%.o: %.cpp
 test: $(TEST_RESULTS)
 	@CXX='$(CXX)' MODE='$(MODE)' BUILD='$(BUILD)' tooling/test_summary.sh $(TEST_NAMES)
 
-$(BUILD)/tests/%.result: tests/%.cpp $(LIB) FORCE | includes
+$(BUILD)/tests/%.result: tests/%.cpp $(LIB) $(RUNTIME) FORCE | includes
 	@CXX='$(CXX)' MODE='$(MODE)' CXXFLAGS='$(CPPFLAGS) $(CXXFLAGS)' LDFLAGS='$(LDFLAGS)' \
-		LIB='$(LIB)' BUILD='$(BUILD)' TAG='$(TAG)' tooling/test.sh $<
+		LIB='$(LIB)' RUNTIME='$(RUNTIME)' BUILD='$(BUILD)' TAG='$(TAG)' tooling/test.sh $<
 
 FORCE:
 
