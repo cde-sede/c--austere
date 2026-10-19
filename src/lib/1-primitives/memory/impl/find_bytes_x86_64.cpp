@@ -16,16 +16,22 @@
    | strlen          | the next 3 vectors one test each (short strings end there), then a |
    |                 | loop of 4 vectors aligned to 4 V: unsigned minimum, one test       |
    | memchr          | a loop of 4 vectors, equality masks or-ed, one test, while more    |
-   |                 | than 4 V remain; then vector by vector, the last one cut at count  |
+   |                 | than 4 V remain; then at most 4 V: up to V the aligned vector cut  |
+   |                 | at count; up to 2 V it and the vector ending at the end; else the  |
+   |                 | next 2 aligned, then the 2 ending at the end (each pair one mask)  |
    | locate in 4     | their masks packed in two words, one bit scan                      |
 
    memchr loads its first vector unaligned when that cannot cross a page, as glibc: ranges up
-   to V bytes take one vector whatever their alignment (mixed sizes 27.6 -> 23.4 cycles). The
-   4-vector loops fold their loads into vpcmpeqb or vpminub (asm, one fused uop each).
+   to V bytes take one vector whatever their alignment (mixed sizes 27.6 -> 23.4 cycles). Its
+   tail loads the vectors ending at the end unaligned, as glibc, never past it (vector by vector
+   before: mixed 23.4 -> 22.3, 64 B 1.24 -> 1.1, 256 B 1.3 -> 1.2; aligned loads with the
+   fourth address a cmov and the masks cut by bzhi were slower, 100 B 1.36 -> 1.7). The 4-vector
+   loops fold their loads into vpcmpeqb or vpminub (asm, one fused uop each).
 
    Per call against glibc 2.39 (AVX2, called without its PLT, perf cycles, i7-10750H): strlen
    1 - 7 B 1.0, 20 - 100 B 1.2 - 1.3, 256 B - 4 KiB 1.17 - 1.35; memchr 1 - 20 B 1.07 - 1.15,
-   mixed sizes 1.1, 64 B - 1 KiB 1.2 - 1.36. Known gaps: the long loops.
+   mixed sizes 1.06, 64 B 1.1, 100 - 256 B 1.2 - 1.36, 1 - 4 KiB 1.07 - 1.1. Known gaps: the
+   long loops.
 */
 
 #include "1-primitives/memory/impl/find_bytes.hpp"
@@ -71,6 +77,15 @@ template <typename V>
 
 	V v;
 	ca::impl::peek_aligned(at, v);
+	return v;
+}
+
+/* The vector at, any alignment, all of it in the range. */
+template <typename V>
+[[gnu::always_inline]] static inline auto loose(const char* const at) noexcept -> V {
+
+	V v;
+	ca::impl::peek(at, v);
 	return v;
 }
 
@@ -205,9 +220,7 @@ template <typename V>
 	ca::u64 head;
 	ca::usz span;
 	if ((address(start) & (PAGE - 1U)) <= PAGE - n) [[likely]] {
-		V v;
-		ca::impl::peek(start, v);
-		head = matches(v, needle);
+		head = matches(loose<V>(start), needle);
 		span = n;
 	} else {
 		const ca::usz skip = address(start) & (n - 1U);
@@ -234,16 +247,23 @@ template <typename V>
 		}
 		unlink(at);
 	}
-	for (;; at += n) {
-		const ca::u64 found = ca::impl::byte_mask(equal_at(at, needle));
-		const ca::usz left = static_cast<ca::usz>(end - at);
-		if (left <= n) {
-			const ca::u64 kept = found & low_bits(left);
-			return kept != 0U ? const_cast<char*>(at + __builtin_ctzll(kept)) : nullptr;
-		}
-		if (found != 0U)
-			return const_cast<char*>(at + __builtin_ctzll(found));
+	const ca::usz left = static_cast<ca::usz>(end - at);
+	const ca::u64 first = ca::impl::byte_mask(equal_at(at, needle));
+	if (left <= n) {
+		const ca::u64 kept = first & low_bits(left);
+		return kept != 0U ? const_cast<char*>(at + __builtin_ctzll(kept)) : nullptr;
 	}
+	if (left <= 2U * n) {
+		const ca::u64 last = matches(loose<V>(end - n), needle);
+		if ((first | last) == 0U)
+			return nullptr;
+		return const_cast<char*>(first != 0U ? at + __builtin_ctzll(first) : end - n + __builtin_ctzll(last));
+	}
+	const ca::u64 low = first | ca::u64{ca::impl::byte_mask(equal_at(at + n, needle))} << n;
+	if (low != 0U)
+		return const_cast<char*>(at + __builtin_ctzll(low));
+	const ca::u64 high = matches(loose<V>(end - 2U * n), needle) | matches(loose<V>(end - n), needle) << n;
+	return high != 0U ? const_cast<char*>(end - 2U * n + __builtin_ctzll(high)) : nullptr;
 }
 
 
