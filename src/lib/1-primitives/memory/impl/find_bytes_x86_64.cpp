@@ -26,12 +26,14 @@
    tail loads the vectors ending at the end unaligned, as glibc, never past it (vector by vector
    before: mixed 23.4 -> 22.3, 64 B 1.24 -> 1.1, 256 B 1.3 -> 1.2; aligned loads with the
    fourth address a cmov and the masks cut by bzhi were slower, 100 B 1.36 -> 1.7). The 4-vector
-   loops fold their loads into vpcmpeqb or vpminub (asm, one fused uop each).
+   loops fold their loads into vpcmpeqb or vpminub (asm, one fused uop each) and end in one
+   fused test and branch: strlen's is a do-while (a jne out and a jmp back before: 4 KiB 1.33 ->
+   1.02), memchr's compares the cursor to the end less 4 V, computed once (4 KiB 1.07 -> 0.92).
 
    Per call against glibc 2.39 (AVX2, called without its PLT, perf cycles, i7-10750H): strlen
-   1 - 7 B 1.0, 20 - 100 B 1.2 - 1.3, 256 B - 4 KiB 1.17 - 1.35; memchr 1 - 20 B 1.07 - 1.15,
-   mixed sizes 1.06, 64 B 1.1, 100 - 256 B 1.2 - 1.36, 1 - 4 KiB 1.07 - 1.1. Known gaps: the
-   long loops.
+   1 - 100 B 1.0 - 1.05, mixed sizes 1.19, 256 B 1.1, 1 - 4 KiB 1.0; memchr 1 - 20 B 1.07 -
+   1.15, mixed sizes 1.05, 64 B 1.1, 100 - 256 B 1.17 - 1.36, 1 KiB 1.04, 4 KiB 0.92. Known
+   gaps: memchr 100 - 256 B.
 */
 
 #include "1-primitives/memory/impl/find_bytes.hpp"
@@ -192,18 +194,20 @@ template <typename V>
 	}
 	at += 4U * n;
 	at -= address(at) & (4U * n - 1U);
-	for (;; at += 4U * n) {
+	ca::u64 any;
+	do {
 		const V low = least_at(at + n, load<V>(at));
 		const V high = least_at(at + 3U * n, load<V>(at + 2U * n));
-		if (matches(least(low, high), zero) != 0U) [[unlikely]] {
-			const ca::u64 m0 = ca::impl::byte_mask(equal_at(at, zero));
-			const ca::u64 m1 = ca::impl::byte_mask(equal_at(at + n, zero));
-			const ca::u64 m2 = ca::impl::byte_mask(equal_at(at + 2U * n, zero));
-			const ca::u64 m3 = ca::impl::byte_mask(equal_at(at + 3U * n, zero));
-			return static_cast<ca::usz>(at - text) + first_of<n>(m0, m1, m2, m3);
-		}
+		any = matches(least(low, high), zero);
+		at += 4U * n;
 		unlink(at);
-	}
+	} while (any == 0U);
+	at -= 4U * n;
+	const ca::u64 m0 = ca::impl::byte_mask(equal_at(at, zero));
+	const ca::u64 m1 = ca::impl::byte_mask(equal_at(at + n, zero));
+	const ca::u64 m2 = ca::impl::byte_mask(equal_at(at + 2U * n, zero));
+	const ca::u64 m3 = ca::impl::byte_mask(equal_at(at + 3U * n, zero));
+	return static_cast<ca::usz>(at - text) + first_of<n>(m0, m1, m2, m3);
 }
 
 
@@ -236,7 +240,7 @@ template <typename V>
 	const char* at = start + span;
 	at -= address(at) & (n - 1U);
 	const char* const end = start + count;
-	for (; end - at > static_cast<long>(4U * n); at += 4U * n) {
+	for (const char* const last = end - 4U * n; at < last; at += 4U * n) {
 		const V e0 = equal_at(at, needle);
 		const V e1 = equal_at(at + n, needle);
 		const V e2 = equal_at(at + 2U * n, needle);
