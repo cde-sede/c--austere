@@ -52,11 +52,18 @@
    | an early difference paid for the      | block of 4 by one bit scan           |        |       |
    | whole range (100 B, bench)            |                                      |        |       |
    | (tried) variants aligned to 64 bytes  | reverted: within noise               |        |       |
+   | above 64 B, a size test then a jump   | first vector tested before any size  | 10.1   | 8.2   |
+   | into a merged exit before the first   | dispatch                             |        |       |
+   | vector's verdict (difference at 0)    |                                      |        |       |
+   | below 32 B: two loads, mask built by  | b's load folded into vpcmpeqb (asm), | 11.2   | 9.2   |
+   | shift and not, exit merged into a     | mask + 1 as the difference bits,     |        |       |
+   | jump (difference at 3)                | the exit sealed                      |        |       |
 
    bench/memcmp.cpp, ca / glibc cycles (glibc through its PLT), clang and gcc:
-   33 B - 1 MiB 0.86 - 1.18, mixed sizes 0.97 - 1.09. Known gaps: 1 - 16 B 1.1 - 1.5, a
-   difference in the first bytes 1.25 - 1.45, at a random place of 256 B 1.2 - 1.35. gcc rows
-   move up to 30% between runs of the same binary.
+   33 B - 1 MiB 0.93 - 1.2, mixed sizes 1.01 - 1.09, a difference in the first bytes 1.12.
+   Known gaps: 1 - 16 B 1.1 - 1.25 (glibc's PLT jump versus the jump through the variant and
+   one more instruction), at a random place of 256 B 1.27 - 1.34. gcc rows move up to 30%
+   between runs of the same binary.
 */
 
 #include "1-primitives/memory/impl/compare_bytes.hpp"
@@ -267,10 +274,44 @@ template <typename T>
 
 // -- FEW --------------------------------------------------------------------
 
+/* Ends a path with an asm of its own, so the compiler does not merge its exit with the others
+   into a jump: on the small-size mismatch, 11.2 -> 10.1 cycles (sealing the vector paths' exits
+   too moved code and cost 1 cycle at 40 - 100 B: left out). */
+template <int K>
+[[gnu::always_inline]] static inline auto seal(void) noexcept -> void {
+	asm("# %c0" : : "i"(K));
+}
+
+/* The bits of value below count (< 32): bzhi with BMI2 (the AVX2 variants), else a mask. */
+[[gnu::always_inline]] static inline auto low_bits(const ca::u32 value, const ca::u32 count) noexcept -> ca::u32 {
+	return value & ((1U << count) - 1U);
+}
+
+/* Equality lanes of the vectors at a and b, which may run past the range (see peek), loaded in
+   asm. AVX2 folds b's load into vpcmpeqb; legacy SSE pcmpeqb faults on an unaligned memory
+   operand, so the 16-byte one loads both. */
+[[gnu::always_inline]] static inline auto same_peeked(const char* const a, const char* const b, ca::impl::bytes16& lanes) noexcept -> void {
+
+	ca::impl::bytes16 x;
+	ca::impl::bytes16 y;
+	ca::impl::peek(a, x);
+	ca::impl::peek(b, y);
+	lanes = __builtin_bit_cast(ca::impl::bytes16, x == y);
+}
+
+[[gnu::target("avx2")]] static inline auto same_peeked(const char* const a, const char* const b, ca::impl::bytes32& lanes) noexcept -> void {
+
+	ca::impl::bytes32 x;
+	ca::impl::peek(a, x);
+	asm("vpcmpeqb %1, %2, %0" : "=x"(lanes) : "m"(*reinterpret_cast<const char(*)[32]>(b)), "x"(x));
+}
+
 /* 0 - (sizeof(V) - 1) bytes. From 2, one vector compare masked to count when neither pointer
    is within sizeof(V) bytes of a page end (a page boundary is never crossed, so the extra bytes
-   cannot fault): one branch for every size, where the ladder mispredicts on mixed sizes. Near a
-   page end, the ladder or two 16-byte vectors. 0 and 1 apart: a null pointer is valid with 0. */
+   cannot fault): one branch for every size, where the ladder mispredicts on mixed sizes. The
+   mask + 1 has its lowest bit at the first difference (and none when all lanes are equal), so
+   one and with the count's bits tests and locates it (bzhi with BMI2). Near a page end, the
+   ladder or two 16-byte vectors. 0 and 1 apart: a null pointer is valid with 0. */
 template <typename V, bool LOCATE>
 [[gnu::always_inline]] static inline auto compare_small(const char* const a, const char* const b, const ca::usz count) noexcept -> int {
 
@@ -281,15 +322,14 @@ template <typename V, bool LOCATE>
 			return compare_pair<ca::impl::bytes16, LOCATE>(a, b, count);
 		return LOCATE ? compare_ladder(a, b, count) : differ_ladder(a, b, count);
 	}
-	V x;
-	V y;
-	ca::impl::peek(a, x);
-	ca::impl::peek(b, y);
-	const ca::u32 differ = ~mask(__builtin_bit_cast(V, x == y)) & ((1U << count) - 1U);
+	V lanes;
+	same_peeked(a, b, lanes);
+	const ca::u32 differ = low_bits(mask(lanes) + 1U, static_cast<ca::u32>(count));
 	if constexpr (LOCATE) {
 		if (differ == 0U)
 			return 0;
 		const unsigned at = static_cast<unsigned>(__builtin_ctz(differ));
+		seal<1>();
 		return difference(a + at, b + at);
 	} else {
 		return static_cast<int>(differ != 0U);
@@ -307,11 +347,14 @@ template <typename V, bool LOCATE>
 	const char* const b = static_cast<const char*>(right);
 	if (count < n) [[unlikely]]
 		return compare_small<V, LOCATE>(a, b, count);
-	if (count <= 2U * n) [[likely]]
-		return compare_pair<V, LOCATE>(a, b, count);
 	const ca::u32 head = differ_bits<V>(a, b);
 	if (head != 0U) [[unlikely]]
 		return found<LOCATE>(a, b, static_cast<ca::usz>(__builtin_ctz(head)));
+	if (count <= 2U * n) [[likely]] {
+		const ca::usz last = count - n;
+		const ca::u32 tail = differ_bits<V>(a + last, b + last);
+		return tail != 0U ? found<LOCATE>(a, b, last + static_cast<ca::usz>(__builtin_ctz(tail))) : 0;
+	}
 	if (count <= 4U * n)
 		return compare_four<V, LOCATE>(a, b, count);
 	if (count <= 8U * n)
