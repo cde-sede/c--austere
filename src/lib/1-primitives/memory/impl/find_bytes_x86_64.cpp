@@ -24,16 +24,17 @@
    memchr loads its first vector unaligned when that cannot cross a page, as glibc: ranges up
    to V bytes take one vector whatever their alignment (mixed sizes 27.6 -> 23.4 cycles). Its
    tail loads the vectors ending at the end unaligned, as glibc, never past it (vector by vector
-   before: mixed 23.4 -> 22.3, 64 B 1.24 -> 1.1, 256 B 1.3 -> 1.2; aligned loads with the
-   fourth address a cmov and the masks cut by bzhi were slower, 100 B 1.36 -> 1.7). The 4-vector
+   before: mixed 23.4 -> 22.3, 64 B 1.24 -> 1.1, 256 B 1.3 -> 1.2; aligned loads, the fourth
+   address a cmov or a branch and the masks cut by bzhi, were slower or no faster). The 4-vector
    loops fold their loads into vpcmpeqb or vpminub (asm, one fused uop each) and end in one
    fused test and branch: strlen's is a do-while (a jne out and a jmp back before: 4 KiB 1.33 ->
-   1.02), memchr's compares the cursor to the end less 4 V, computed once (4 KiB 1.07 -> 0.92).
+   1.02), memchr's compares the cursor to the end less 4 V, computed once (4 KiB 1.07 -> 0.92;
+   gcc lays it out with the bound test at the top whatever the loop's form: 1.17).
 
-   Per call against glibc 2.39 (AVX2, called without its PLT, perf cycles, i7-10750H): strlen
-   1 - 100 B 1.0 - 1.05, mixed sizes 1.19, 256 B 1.1, 1 - 4 KiB 1.0; memchr 1 - 20 B 1.07 -
-   1.15, mixed sizes 1.05, 64 B 1.1, 100 - 256 B 1.17 - 1.36, 1 KiB 1.04, 4 KiB 0.92. Known
-   gaps: memchr 100 - 256 B.
+   Per call against glibc 2.39 (AVX2, called without its PLT, perf cycles, i7-10750H, clang):
+   strlen 1 - 100 B 1.0 - 1.05, mixed sizes 1.19, 256 B 1.1, 1 - 4 KiB 1.0; memchr mixed sizes
+   1.02, 16 - 64 B 1.11 - 1.14, 100 B 1.28, 256 B 1.14, 1 KiB 1.03, 4 KiB 0.91. Known gaps:
+   memchr 100 B (15 instructions more than glibc's path), gcc's memchr loop.
 */
 
 #include "1-primitives/memory/impl/find_bytes.hpp"
@@ -144,12 +145,27 @@ template <typename V>
 	return lanes;
 }
 
-/* value in every byte, broadcast as 32-bit words, as fill_bytes. */
+/* value in every byte of a 32-byte vector: vmovd and vpbroadcastb (a word broadcast puts imul
+   on the path to the first compare: memchr 16 - 256 B 7 - 13% slower, mixed sizes 1.06 ->
+   1.02 against glibc; V{} + value is vpinsrb on gcc). */
+[[gnu::target("avx2")]] static inline auto broadcast(const int value, ca::impl::bytes32& lanes) noexcept -> void {
+
+	using words [[gnu::vector_size(16)]] = int;
+	const ca::impl::bytes16 low = __builtin_bit_cast(ca::impl::bytes16, words{value, 0, 0, 0});
+	lanes = __builtin_shufflevector(low, low, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0);
+}
+
+/* value in every byte: broadcast for 32-byte vectors, else as 32-bit words, as fill_bytes. */
 template <typename V>
 [[gnu::always_inline]] static inline auto splat(const int value) noexcept -> V {
-
-	using words [[gnu::vector_size(sizeof(V))]] = ca::u32;
-	return __builtin_bit_cast(V, words{} + static_cast<ca::u8>(value) * 0x01010101U);
+	if constexpr (sizeof(V) == 32U) {
+		V lanes;
+		broadcast(value, lanes);
+		return lanes;
+	} else {
+		using words [[gnu::vector_size(sizeof(V))]] = ca::u32;
+		return __builtin_bit_cast(V, words{} + static_cast<ca::u8>(value) * 0x01010101U);
+	}
 }
 
 /* Lane-wise unsigned minimum: a zero in either lane stays zero. */
@@ -173,6 +189,21 @@ template <ca::usz N>
 
 static auto low_bits(const ca::usz count) noexcept -> ca::u64 {
 	return count >= 64U ? ~ca::u64{0} : (ca::u64{1} << count) - 1U;
+}
+
+/* The bits of value below count, all of them from 64: bzhi in the AVX2 variants (flattened,
+   they inline it), else low_bits. */
+[[gnu::target("bmi2")]] static inline auto zero_high(const ca::u64 value, const ca::usz count) noexcept -> ca::u64 {
+	return __builtin_ia32_bzhi_di(value, count);
+}
+
+template <typename V>
+[[gnu::always_inline]] static inline auto cut(const ca::u64 value, const ca::usz count) noexcept -> ca::u64 {
+
+	if constexpr (sizeof(V) == 32U)
+		return zero_high(value, count);
+	else
+		return value & low_bits(count);
 }
 
 
@@ -254,7 +285,7 @@ template <typename V>
 	const ca::usz left = static_cast<ca::usz>(end - at);
 	const ca::u64 first = ca::impl::byte_mask(equal_at(at, needle));
 	if (left <= n) {
-		const ca::u64 kept = first & low_bits(left);
+		const ca::u64 kept = cut<V>(first, left);
 		return kept != 0U ? const_cast<char*>(at + __builtin_ctzll(kept)) : nullptr;
 	}
 	if (left <= 2U * n) {
