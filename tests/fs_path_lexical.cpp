@@ -1,4 +1,5 @@
 // expect: exit 0
+// link: both
 #include "5-collections/fs/path.hpp"
 
 static auto is(const ca::sv::str a, const char* b) noexcept -> bool {

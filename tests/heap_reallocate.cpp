@@ -1,4 +1,5 @@
 // expect: exit 0
+// link: both
 #include "1-primitives/integers/u8.hpp"
 #include "4-lifecycle/memory/expand.hpp"
 #include "4-lifecycle/memory/heap.hpp"

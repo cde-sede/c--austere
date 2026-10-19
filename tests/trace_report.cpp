@@ -1,4 +1,5 @@
 // expect: exit 0
+// link: both
 #include "2-vocabulary/result.hpp"
 #include "3-system/error/errc.hpp"
 #include "3-system/trace/fail.hpp"
@@ -43,9 +44,9 @@ auto main(void) -> int {
 		return 8;
 	const ca::sv::str expected{
 		"Permission denied\n"
-		"  at open (tests/trace_report.cpp:12): open\n"
-		"  at read_config (tests/trace_report.cpp:19): reading /etc/app.conf\n"
-		"  at load (tests/trace_report.cpp:26): loading settings, attempt 2"};
+		"  at open (tests/trace_report.cpp:13): open\n"
+		"  at read_config (tests/trace_report.cpp:20): reading /etc/app.conf\n"
+		"  at load (tests/trace_report.cpp:27): loading settings, attempt 2"};
 	if (m.view() != expected)
 		return 4;
 
@@ -53,7 +54,7 @@ auto main(void) -> int {
 	if (plain.size() != 0U)
 		return 5;
 	plain.context("no trace");
-	if (plain.size() != 1U || plain.frame(0).where().line() != 55U)
+	if (plain.size() != 1U || plain.frame(0).where().line() != 56U)
 		return 6;
 
 	auto destroyed = report.cleanup();

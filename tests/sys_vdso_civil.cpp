@@ -1,4 +1,5 @@
 // expect: exit 0
+// link: both
 #include "3-system/syscall/auxiliary.hpp"
 #include "3-system/syscall/vdso.hpp"
 #include "3-system/time/clock.hpp"

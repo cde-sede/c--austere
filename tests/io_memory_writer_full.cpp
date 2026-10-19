@@ -1,4 +1,5 @@
 // expect: exit 0
+// link: both
 #include "3-system/error/errc.hpp"
 #include "5-collections/format/format_to.hpp"
 #include "5-collections/io/memory_writer.hpp"

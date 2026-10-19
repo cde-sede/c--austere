@@ -1,4 +1,5 @@
 // expect: exit 0
+// link: both
 #include "2-vocabulary/result.hpp"
 #include "3-system/error/errc.hpp"
 #include "3-system/trace/context.hpp"
@@ -38,7 +39,7 @@ auto main(void) -> int {
 	const ca::trace::record record = ca::trace::of(e);
 	if (record.frames().size() != 3U || record.dropped() != 0U)
 		return 3;
-	if (record.frames()[1].message() != ca::sv::str{"opening config"} || record.frames()[0].where().line() != 12U)
+	if (record.frames()[1].message() != ca::sv::str{"opening config"} || record.frames()[0].where().line() != 13U)
 		return 4;
 
 	char buffer[512];
@@ -47,9 +48,9 @@ auto main(void) -> int {
 		return 9;
 	const ca::sv::str expected{
 		"No such file or directory\n"
-		"  at open_config (tests/trace_context.cpp:12)\n"
-		"  at load (tests/trace_context.cpp:19): opening config\n"
-		"  at start (tests/trace_context.cpp:26): loading settings\n"};
+		"  at open_config (tests/trace_context.cpp:13)\n"
+		"  at load (tests/trace_context.cpp:20): opening config\n"
+		"  at start (tests/trace_context.cpp:27): loading settings\n"};
 	if (m.view() != expected)
 		return 5;
 

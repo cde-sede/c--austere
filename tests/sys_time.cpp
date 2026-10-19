@@ -1,4 +1,5 @@
 // expect: exit 0
+// link: both
 #include "3-system/time/now.hpp"
 #include "3-system/time/sleep_for.hpp"
 

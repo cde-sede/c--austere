@@ -1,4 +1,5 @@
 // expect: exit 0
+// link: both
 #include "3-system/process/exit_immediately.hpp"
 #include "3-system/process/fork.hpp"
 #include "3-system/process/getegid.hpp"

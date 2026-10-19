@@ -1,4 +1,5 @@
 // expect: exit 0
+// link: both
 #include "3-system/process/mask_change.hpp"
 #include "3-system/process/raise.hpp"
 #include "3-system/process/sigaction.hpp"

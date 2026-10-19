@@ -15,6 +15,7 @@
 #   // mode: debug             only checked in debug builds (or: release)
 #   // link: freestanding      linked without libc: static, ca's own _start and runtime
 #                              (RUNTIME, built from src/runtime/), no startup files
+#   // link: both              checked twice: against libc, then freestanding
 
 ulimit -c 0
 test=$1
@@ -36,35 +37,50 @@ if [ -n "$mode" ] && [ "$mode" != "$MODE" ]; then
 	exit 0
 fi
 
-link=$(sed -n 's|^// link: ||p' "$test")
-if [ "$link" = freestanding ]; then
-	out=$($CXX $CXXFLAGS "$test" -o "$bin" -nostdlib -static -Wl,-u,_start \
-		-Wl,--start-group "$LIB" "$RUNTIME" -Wl,--end-group 2>&1)
-else
-	out=$($CXX $CXXFLAGS "$test" -o "$bin" "$LIB" $LDFLAGS 2>&1)
-fi
-built=$?
-failure=
-case $kind in
-error)
-	if [ $built -eq 0 ]; then
-		failure="built, but must not"
-	elif ! printf '%s\n' "$out" | grep -Eq -- "$arg"; then
-		failure="rejected, but not with /$arg/"
-	fi ;;
-exit|trap)
-	if [ $built -ne 0 ]; then
-		failure="does not build"
+# check MODE BIN: builds the test as BIN, against libc (MODE libc) or without it (freestanding),
+# runs it, and sets failure (empty when it behaved as expected), out and built.
+check() {
+	if [ "$1" = freestanding ]; then
+		out=$($CXX $CXXFLAGS "$test" -o "$2" -nostdlib -static -Wl,-u,_start \
+			-Wl,--start-group "$LIB" "$RUNTIME" -Wl,--end-group 2>&1)
 	else
-		status=$("$bin" >/dev/null 2>&1; echo $?)
-		if [ "$kind" = exit ] && [ "$status" != "$arg" ]; then
-			failure="expected exit $arg, got status $status"
-		elif [ "$kind" = trap ] && [ "$status" != 132 ] && [ "$status" != 133 ]; then
-			failure="expected a trap, got status $status"
-		fi
-	fi ;;
+		out=$($CXX $CXXFLAGS "$test" -o "$2" "$LIB" $LDFLAGS 2>&1)
+	fi
+	built=$?
+	failure=
+	case $kind in
+	error)
+		if [ $built -eq 0 ]; then
+			failure="built, but must not"
+		elif ! printf '%s\n' "$out" | grep -Eq -- "$arg"; then
+			failure="rejected, but not with /$arg/"
+		fi ;;
+	exit|trap)
+		if [ $built -ne 0 ]; then
+			failure="does not build"
+		else
+			status=$("$2" >/dev/null 2>&1; echo $?)
+			if [ "$kind" = exit ] && [ "$status" != "$arg" ]; then
+				failure="expected exit $arg, got status $status"
+			elif [ "$kind" = trap ] && [ "$status" != 132 ] && [ "$status" != 133 ]; then
+				failure="expected a trap, got status $status"
+			fi
+		fi ;;
+	*)
+		failure='no "// expect:" line' ;;
+	esac
+	[ "$1" = freestanding ] && [ -n "$failure" ] && failure="(freestanding) $failure"
+}
+
+link=$(sed -n 's|^// link: ||p' "$test")
+case $link in
+freestanding)
+	check freestanding "$bin" ;;
+both)
+	check libc "$bin"
+	[ -z "$failure" ] && check freestanding "${bin}_freestanding" ;;
 *)
-	failure='no "// expect:" line' ;;
+	check libc "$bin" ;;
 esac
 
 if [ -z "$failure" ]; then

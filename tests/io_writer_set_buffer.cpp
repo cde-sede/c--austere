@@ -1,4 +1,5 @@
 // expect: exit 0
+// link: both
 #include "3-system/file/read.hpp"
 #include "3-system/fs/options.hpp"
 #include "3-system/io/pipe.hpp"

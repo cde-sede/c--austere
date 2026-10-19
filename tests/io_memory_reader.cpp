@@ -1,4 +1,5 @@
 // expect: exit 0
+// link: both
 #include "5-collections/array/dynamic_array.hpp"
 #include "5-collections/io/memory_reader.hpp"
 #include "5-collections/io/read_line.hpp"

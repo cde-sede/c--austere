@@ -1,4 +1,5 @@
 // expect: exit 0
+// link: both
 #include "6-resources/fs/descriptor.hpp"
 
 auto main(void) -> int {

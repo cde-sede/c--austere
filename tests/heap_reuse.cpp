@@ -1,4 +1,5 @@
 // expect: exit 0
+// link: both
 #include "4-lifecycle/memory/heap.hpp"
 
 auto main(void) -> int {

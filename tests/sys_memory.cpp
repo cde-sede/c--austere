@@ -1,4 +1,5 @@
 // expect: exit 0
+// link: both
 #include "3-system/error/errc.hpp"
 #include "3-system/memory/mmap_anonymous.hpp"
 #include "3-system/memory/mprotect.hpp"

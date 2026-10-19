@@ -1,4 +1,5 @@
 // expect: exit 0
+// link: both
 #include "2-vocabulary/io/is_buffered_reader.hpp"
 #include "2-vocabulary/io/is_stream.hpp"
 #include "2-vocabulary/io/is_windowed_writer.hpp"

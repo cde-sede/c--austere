@@ -1,3 +1,4 @@
+#include "1-primitives/bit/popcount.hpp"
 #include "1-primitives/config/architecture.hpp"
 #include "1-primitives/config/platform.hpp"
 #include "1-primitives/integers/u64.hpp"
@@ -16,7 +17,7 @@
 		return 1U;
 	ca::usz count = 0U;
 	for (ca::usz i = 0U; i < static_cast<ca::usz>(*filled) / sizeof(ca::u64); ++i)
-		count += static_cast<ca::usz>(__builtin_popcountll(mask[i]));
+		count += static_cast<ca::usz>(ca::popcount(mask[i]));
 	return count < 1U ? 1U : count;
 #else
 	const long count = ::sysconf(_SC_NPROCESSORS_ONLN);

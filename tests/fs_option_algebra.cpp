@@ -1,4 +1,5 @@
 // expect: exit 0
+// link: both
 #include "1-primitives/traits/is_same.hpp"
 #include "3-system/fs/options.hpp"
 

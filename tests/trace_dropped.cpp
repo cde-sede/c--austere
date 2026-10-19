@@ -1,4 +1,5 @@
 // expect: exit 0
+// link: both
 #include "2-vocabulary/result.hpp"
 #include "3-system/error/errc.hpp"
 #include "3-system/trace/context.hpp"

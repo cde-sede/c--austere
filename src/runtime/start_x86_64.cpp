@@ -56,7 +56,7 @@ static constexpr ca::isz ARCH_SET_FS = 0x1002;
 /* Raw syscall, no error handling: TLS may not exist yet. */
 template <typename... As>
 [[gnu::always_inline]] static inline auto raw(const ca::isz number, const As... arguments) noexcept -> ca::isz {
-	return ca::syscall::impl::enter(number, static_cast<ca::isz>(arguments)...);
+	return ca::syscall::impl::enter(number, ca::syscall::impl::word(arguments)...);
 }
 
 [[gnu::no_stack_protector]] static auto auxiliary(const ca::u64* entry, const ca::u64 type) noexcept -> ca::u64 {

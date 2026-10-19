@@ -9,6 +9,8 @@
 #   symbols   every external symbol LIB defines is mangled inside namespace
 #             ca (functions, inline variables, guards, thread-locals), except
 #             the C functions ca provides in libc's place (C_SYMBOLS).
+#   helpers   no compiler runtime helper (libgcc's __popcountdi2, __udivti3, ...):
+#             programs linked without libc link no libgcc either.
 #   layer 1   every object of 1-primitives references only symbols inside ca:
 #             the freestanding layer calls nothing from libc (memcpy, ...), not
 #             even the C_SYMBOLS it defines itself, which would recurse.
@@ -37,6 +39,13 @@ symbols=$(nm -g --defined-only "$LIB" 2>/dev/null | awk 'NF == 3 { print $3 }' \
 if [ -n "$symbols" ]; then
 	printf '  LEAK  %s defines symbols outside ca:\n' "$LIB"
 	printf '%s\n' "$symbols" | sed 's/^/          /'
+	status=1
+fi
+
+helpers=$(nm -u "$LIB" 2>/dev/null | awk '{ print $2 }' | grep -E '^__[a-z0-9]+[dt]i[0-9]$|^__(u)?(div|mod)ti3$|^__cpu_(model|indicator)' | sort -u)
+if [ -n "$helpers" ]; then
+	printf '  LEAK  %s references compiler runtime (libgcc) helpers, absent without it:\n' "$LIB"
+	printf '%s\n' "$helpers" | sed 's/^/          /'
 	status=1
 fi
 

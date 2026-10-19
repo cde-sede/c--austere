@@ -1,4 +1,5 @@
 // expect: exit 0
+// link: both
 #include "3-system/error/errc.hpp"
 #include "6-resources/io/writer.hpp"
 #include "6-resources/print/print.hpp"

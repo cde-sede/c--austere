@@ -1,4 +1,5 @@
 // expect: exit 0
+// link: both
 #include "3-system/environment/environ.hpp"
 #include "3-system/environment/setenv.hpp"
 #include "3-system/error/errc.hpp"

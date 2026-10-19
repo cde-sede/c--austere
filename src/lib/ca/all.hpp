@@ -15,7 +15,6 @@
 #include "1-primitives/bit/popcount.hpp"
 #include "1-primitives/bit/rotl.hpp"
 #include "1-primitives/bit/rotr.hpp"
-#include "1-primitives/config/compiler.hpp"
 #include "1-primitives/integers/i16.hpp"
 #include "1-primitives/integers/i8.hpp"
 #include "1-primitives/integers/uint.hpp"

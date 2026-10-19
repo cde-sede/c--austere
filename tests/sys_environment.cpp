@@ -1,4 +1,5 @@
 // expect: exit 0
+// link: both
 #include "3-system/environment/getenv.hpp"
 #include "3-system/environment/setenv.hpp"
 #include "3-system/environment/unsetenv.hpp"

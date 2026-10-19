@@ -1,4 +1,5 @@
 // expect: exit 0
+// link: both
 #include "2-vocabulary/sv/str.hpp"
 #include "3-system/error/errc.hpp"
 #include "3-system/file/access.hpp"
