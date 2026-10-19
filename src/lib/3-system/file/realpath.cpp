@@ -20,7 +20,7 @@
 static constexpr ca::usz LIMIT = 4096U;
 static constexpr int LINKS = 40;
 
-static auto fail(const ca::error error) noexcept -> ca::result<char*> {
+[[nodiscard]] static auto refuse(const ca::error error) noexcept -> ca::result<char*> {
 
 	ca::sys::set_last_error(error);
 	return ca::failure{error};
@@ -38,12 +38,12 @@ static auto fail(const ca::error error) noexcept -> ca::result<char*> {
 	ca::usz left = 0U;
 	for (; path[left] != '\0'; ++left) {
 		if (left + 1U >= LIMIT) [[unlikely]]
-			return fail(ca::errc::name_too_long);
+			return refuse(ca::errc::name_too_long);
 		rest[left] = path[left];
 	}
 	rest[left] = '\0';
 	if (left == 0U) [[unlikely]]
-		return fail(ca::errc::no_entry);
+		return refuse(ca::errc::no_entry);
 	if (rest[0] != '/') {
 		const auto cwd = ca::sys::getcwd(ca::span<char>{resolved, LIMIT});
 		if (!cwd) [[unlikely]]
@@ -75,7 +75,7 @@ static auto fail(const ca::error error) noexcept -> ca::result<char*> {
 		}
 		const ca::usz before = length;
 		if (length + 1U + size + 1U > LIMIT) [[unlikely]]
-			return fail(ca::errc::name_too_long);
+			return refuse(ca::errc::name_too_long);
 		resolved[length++] = '/';
 		for (ca::usz k = 0U; k < size; ++k)
 			resolved[length++] = rest[at + k];
@@ -86,32 +86,32 @@ static auto fail(const ca::error error) noexcept -> ca::result<char*> {
 		at = end;
 		if (status->kind() == ca::sys::file_kind::symlink) {
 			if (++links > LINKS) [[unlikely]]
-				return fail(ca::errc::symlink_loop);
+				return refuse(ca::errc::symlink_loop);
 			const auto target = ca::sys::readlink(resolved, ca::span<char>{swap, LIMIT});
 			if (!target) [[unlikely]]
 				return target.propagate();
 			ca::usz copied = *target;
 			if (copied >= LIMIT - 1U) [[unlikely]]
-				return fail(ca::errc::name_too_long);
+				return refuse(ca::errc::name_too_long);
 			if (rest[at] != '\0')
 				swap[copied++] = '/';
 			for (ca::usz k = at; rest[k] != '\0'; ++k) {
 				if (copied + 1U >= LIMIT) [[unlikely]]
-					return fail(ca::errc::name_too_long);
+					return refuse(ca::errc::name_too_long);
 				swap[copied++] = rest[k];
 			}
 			for (ca::usz k = 0U; k < copied; ++k)
 				rest[k] = swap[k];
 			rest[copied] = '\0';
-			at = 0U;
-			length = rest[0] == '/' ? 0U : before;
+			          at = 0U;
+			      length = rest[0] == '/' ? 0U : before;
 			continue;
 		}
 		bool more = false;
 		for (ca::usz k = at; rest[k] != '\0' && !more; ++k)
 			more = rest[k] == '/';
 		if (more && status->kind() != ca::sys::file_kind::directory) [[unlikely]]
-			return fail(ca::errc::not_a_directory);
+			return refuse(ca::errc::not_a_directory);
 	}
 	if (length == 0U)
 		resolved[length++] = '/';
