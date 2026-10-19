@@ -16,7 +16,8 @@ namespace ca {
 
 		// -- PROCESSOR COUNT ------------------------------------------------
 
-		/* @DOC Processors online now, at least 1. Never fails. */
+		/* @DOC Processors this process may run on now (its affinity mask, as nproc counts them on
+		   Linux; the online ones elsewhere), at least 1. Never fails. */
 		[[nodiscard]] auto processor_count(void) noexcept -> ca::usz;
 
 	} // namespace sys
