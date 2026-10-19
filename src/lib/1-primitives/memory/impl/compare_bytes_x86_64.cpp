@@ -63,7 +63,9 @@
    33 B - 1 MiB 0.93 - 1.2, mixed sizes 1.01 - 1.09, a difference in the first bytes 1.12.
    Known gaps: 1 - 16 B 1.1 - 1.25 (glibc's PLT jump versus the jump through the variant and
    one more instruction), at a random place of 256 B 1.27 - 1.34. gcc rows move up to 30%
-   between runs of the same binary.
+   between runs of the same binary. Fixed sizes below 64 B are whole cycles set by code
+   placement: built with -mbranches-within-32B-boundaries (the JCC erratum of this CPU) 33 and
+   64 B go 9 -> 8 cycles, 1 B 10 -> 12, mixed sizes unchanged; the mix is the figure to trust.
 */
 
 #include "1-primitives/memory/impl/compare_bytes.hpp"
@@ -282,9 +284,20 @@ template <int K>
 	asm("# %c0" : : "i"(K));
 }
 
-/* The bits of value below count (< 32): bzhi with BMI2 (the AVX2 variants), else a mask. */
+/* The bits of value below count (< 32): bzhi with BMI2 (the AVX2 variants, flattened, inline
+   it; clang otherwise builds the mask with mov, shlx and not: 9.2 -> 8.4 cycles at 7 B), else a
+   mask. */
+[[gnu::target("bmi2")]] static inline auto zero_high(const ca::u32 value, const ca::u32 count) noexcept -> ca::u32 {
+	return __builtin_ia32_bzhi_si(value, count);
+}
+
+template <typename V>
 [[gnu::always_inline]] static inline auto low_bits(const ca::u32 value, const ca::u32 count) noexcept -> ca::u32 {
-	return value & ((1U << count) - 1U);
+
+	if constexpr (sizeof(V) == 32U)
+		return zero_high(value, count);
+	else
+		return value & ((1U << count) - 1U);
 }
 
 /* Equality lanes of the vectors at a and b, which may run past the range (see peek), loaded in
@@ -324,7 +337,7 @@ template <typename V, bool LOCATE>
 	}
 	V lanes;
 	same_peeked(a, b, lanes);
-	const ca::u32 differ = low_bits(mask(lanes) + 1U, static_cast<ca::u32>(count));
+	const ca::u32 differ = low_bits<V>(mask(lanes) + 1U, static_cast<ca::u32>(count));
 	if constexpr (LOCATE) {
 		if (differ == 0U)
 			return 0;
