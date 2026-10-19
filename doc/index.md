@@ -62,9 +62,9 @@ The habits it shows run through the whole library: every allocation is a `result
 
 | Layer | Headers | Documented entities |
 |---|---|---|
-| [1-primitives](1-primitives.md) | 217 | 199/199 |
+| [1-primitives](1-primitives.md) | 225 | 199/199 |
 | [2-vocabulary](2-vocabulary.md) | 64 | 19/19 |
-| [3-system](3-system.md) | 169 | 0/0 |
+| [3-system](3-system.md) | 177 | 0/0 |
 | [4-lifecycle](4-lifecycle.md) | 34 | 29/29 |
 | [5-collections](5-collections.md) | 65 | 38/38 |
 | [6-resources](6-resources.md) | 14 | 4/4 |
@@ -107,6 +107,9 @@ Layer 1: what the language and the compiler give, wrapped once.
 - [`debug/unreachable.hpp`](1-primitives.md#debugunreachablehpp) - Marks a point as unreachable; reaching it is undefined.
 - [`floats/f32.hpp`](1-primitives.md#floatsf32hpp) - IEEE 754 binary32; fails to compile otherwise.
 - [`floats/f64.hpp`](1-primitives.md#floatsf64hpp) - IEEE 754 binary64; fails to compile otherwise.
+- [`floats/impl/exact_decimal.hpp`](1-primitives.md#floatsimplexactdecimalhpp)
+- [`floats/impl/power5_tables.hpp`](1-primitives.md#floatsimplpower5tableshpp)
+- [`floats/impl/shortest_decimal.hpp`](1-primitives.md#floatsimplshortestdecimalhpp)
 - [`hash/hash_bytes.hpp`](1-primitives.md#hashhashbyteshpp) - Hash of size bytes at data, from seed: wyhash (final 4).
 - [`hash/hash_word.hpp`](1-primitives.md#hashhashwordhpp) - Hash of a 64-bit value: one 64x64->128 multiply, every output bit depending on every input bit.
 - [`hash/impl/hash_multiply.hpp`](1-primitives.md#hashimplhashmultiplyhpp)
@@ -145,6 +148,11 @@ Layer 1: what the language and the compiler give, wrapped once.
 - [`memory/relocate_n.hpp`](1-primitives.md#memoryrelocatenhpp) - Moves count objects from `from` into uninitialized storage at `to`, ending the lifetime of the so...
 - [`memory/relocate_overlapping_n.hpp`](1-primitives.md#memoryrelocateoverlappingnhpp) - relocate_n within one array: the ranges may overlap.
 - [`memory/string_length.hpp`](1-primitives.md#memorystringlengthhpp) - Length in code units of a NUL-terminated string, NUL excluded.
+- [`memory/impl/byte_vectors.hpp`](1-primitives.md#memoryimplbytevectorshpp)
+- [`memory/impl/compare_bytes.hpp`](1-primitives.md#memoryimplcomparebyteshpp) - Signature of a compare_bytes variant (memcmp: negative, 0 or positive, bytes as unsigned) and of...
+- [`memory/impl/cpu_features.hpp`](1-primitives.md#memoryimplcpufeatureshpp)
+- [`memory/impl/fill_bytes.hpp`](1-primitives.md#memoryimplfillbyteshpp) - Signature of a fill_bytes variant: memset semantics, count 0 accepts any pointer; returns `to`, s...
+- [`memory/impl/find_bytes.hpp`](1-primitives.md#memoryimplfindbyteshpp) - Signature of a find_byte variant: memchr semantics, count 0 accepts any pointer.
 - [`memory/impl/loose_bytes.hpp`](1-primitives.md#memoryimplloosebyteshpp)
 - [`memory/impl/move_bytes.hpp`](1-primitives.md#memoryimplmovebyteshpp) - Signature of a move_bytes variant: memmove semantics, count 0 accepts any pointers; returns `to`,...
 - [`memory/impl/move_paths.hpp`](1-primitives.md#memoryimplmovepathshpp)
@@ -433,7 +441,9 @@ Layer 3: the boundary with the operating system.
 - [`file/utimens.hpp`](3-system.md#fileutimenshpp) - Sets the access and modification times of path to now.
 - [`file/write.hpp`](3-system.md#filewritehpp) - Writes up to all of bytes; returns how many.
 - [`file/write_all.hpp`](3-system.md#filewriteallhpp) - Writes all of bytes, looping over short writes.
+- [`file/impl/directory_stream.hpp`](3-system.md#fileimpldirectorystreamhpp) - On linux x86-64, without libc: the directory's descriptor and a buffer of raw entries (struct lin...
 - [`file/impl/status_of.hpp`](3-system.md#fileimplstatusofhpp)
+- [`file/impl/temporary_name.hpp`](3-system.md#fileimpltemporarynamehpp)
 - [`fs/options.hpp`](3-system.md#fsoptionshpp) - Files, paths and descriptors.
 - [`io/dup2.hpp`](3-system.md#iodup2hpp) - Makes target a copy of fd, closing what target held; the copy is not close-on-exec.
 - [`io/get_terminal_size.hpp`](3-system.md#iogetterminalsizehpp) - Size of the terminal fd is attached to; fails on anything but a terminal.
@@ -509,12 +519,16 @@ Layer 3: the boundary with the operating system.
 - [`process/impl/wait_status_of.hpp`](3-system.md#processimplwaitstatusofhpp)
 - [`random/getentropy.hpp`](3-system.md#randomgetentropyhpp) - Fills buffer from the kernel's secure random source, any size (fetched 256 bytes at a time).
 - [`syscall/argument.hpp`](3-system.md#syscallargumenthpp) - What a raw syscall takes in a register: an integer, an enum or a pointer.
+- [`syscall/auxiliary.hpp`](3-system.md#syscallauxiliaryhpp) - Value of entry type (AT_*) of the auxiliary vector the kernel handed the process, 0 when absent.
 - [`syscall/invoke.hpp`](3-system.md#syscallinvokehpp) - Raw kernel entry points: invoke, plus one function per syscall of the target (number::* and a cal...
+- [`syscall/restarting.hpp`](3-system.md#syscallrestartinghpp) - call() again while it fails with errc::interrupted (a signal handler ran before the syscall did a...
 - [`syscall/syscalls.hpp`](3-system.md#syscallsyscallshpp) - Whether the target has a generated table: number::\<name> and \<name>(args...).
+- [`syscall/vdso.hpp`](3-system.md#syscallvdsohpp) - Address of function name in the vDSO, the shared object the kernel maps into every process (clock...
 - [`syscall/impl/enter.hpp`](3-system.md#syscallimplenterhpp) - enter(number, args...) makes syscall number with exactly the arguments given, 0 to 6, and returns...
 - [`syscall/table/linux_x86_64.hpp`](3-system.md#syscalltablelinuxx8664hpp) - Syscall numbers of linux x86_64 implemented by kernel 7.0.0-38-generic.
 - [`text/format_float.hpp`](3-system.md#textformatfloathpp) - Writes value as printf's %\<conversion> would (conversion one of f F e E g G a A), with precision...
 - [`text/format_float_shortest.hpp`](3-system.md#textformatfloatshortesthpp) - Writes the fewest %g digits that read back as the same value: 0.1 is "0.1", not "0.10000000000000...
+- [`text/impl/float_text.hpp`](3-system.md#textimplfloattexthpp)
 - [`thread/thread_key.hpp`](3-system.md#threadthreadkeyhpp) - A per-thread slot from thread_key_create, holding one pointer per thread.
 - [`thread/thread_key_create.hpp`](3-system.md#threadthreadkeycreatehpp) - A new per-thread slot, null in every thread.
 - [`thread/thread_key_set.hpp`](3-system.md#threadthreadkeysethpp) - Stores value in the calling thread's slot of key.
@@ -527,6 +541,8 @@ Layer 3: the boundary with the operating system.
 - [`time/utc_seconds.hpp`](3-system.md#timeutcsecondshpp) - Seconds since the epoch of time read as UTC, from year to second only; fields out of range carry...
 - [`time/utc_time.hpp`](3-system.md#timeutctimehpp) - Date and time of seconds since the epoch, in UTC.
 - [`time/impl/calendar_of.hpp`](3-system.md#timeimplcalendarofhpp)
+- [`time/impl/civil.hpp`](3-system.md#timeimplcivilhpp)
+- [`time/impl/time_zone.hpp`](3-system.md#timeimpltimezonehpp)
 - [`trace/context.hpp`](3-system.md#tracecontexthpp) - Adds a frame here (the caller) to error's trace and returns error to return: `if (!r) return ca::...
 - [`trace/fail.hpp`](3-system.md#tracefailhpp) - Starts the thread's trace with error, first frame here (the caller), and returns it to return: `r...
 - [`trace/frame.hpp`](3-system.md#traceframehpp) - Error traces: where an error came from and what each caller was doing.

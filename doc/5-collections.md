@@ -2109,19 +2109,19 @@ Performance:
 - Formats are parsed and checked at compile time into pieces and specs; nothing is parsed at run time. Arguments are type-erased into 24-byte records, so one out-of-line engine serves every call site: small code per call, no varargs.
 - Text is written in place into the writer's window (memory_writer, buffered ca::io::writer); writers without one are staged on a 1 KiB stack buffer.
 - Width and precision count code points: ASCII text is checked with a few word loads, anything else decoded. Wide text is transcoded through a 256-byte stack buffer.
-- Integers: two digits per division (decimal), shifts for x/o/b. Floats go through ca::sys::format_float (snprintf); the shortest form takes up to three snprintf/strtod rounds.
+- Integers: two digits per division (decimal), shifts for x/o/b. Floats go through ca::sys::format_float (exact digits, no libc); the shortest form is Ryu, a few 128-bit products.
 
 Baseline snprintf, and fprintf for the buffered line: bench/format.cpp on Intel Core i7-10750H, -O2, min of 9 runs: user cycles relative to the baseline.
 
 | Case | clang 18 | gcc 13 | Notes |
 |---|---|---|---|
 | 3 integers, printf_to, 1e6 | 0.59x | 0.57x | std: snprintf |
-| 3 integers, format_to, 1e6 | 0.59x | 0.57x | std: snprintf with the % spelling |
-| %-8s %6d %08x, 1e6 | 0.67x | 0.62x | |
-| 3 strings, 1e6 | 0.71x | 0.68x | |
-| %.3f, 1e6 | 1.10x | 1.15x | ca formats fixed floats through snprintf |
-| shortest float {}, 1e6 | 1.38x | 1.45x | std: %.17g, which is not the shortest round trip |
-| buffered fd line, ca::printf, 1e6 | 0.63x | 0.60x | std: fprintf to /dev/null |
+| 3 integers, format_to, 1e6 | 0.59x | 0.58x | std: snprintf with the % spelling |
+| %-8s %6d %08x, 1e6 | 0.67x | 0.64x | |
+| 3 strings, 1e6 | 0.67x | 0.64x | |
+| %.3f, 1e6 | 0.42x | 0.39x | ca: exact digits, no libc |
+| shortest float {}, 1e6 | 0.16x | 0.15x | ca: Ryu; std: %.17g, which is not the shortest round trip |
+| buffered fd line, ca::printf, 1e6 | 0.65x | 0.60x | std: fprintf to /dev/null |
 
 ### function `format_to`
 

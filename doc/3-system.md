@@ -989,7 +989,43 @@ Writes all of bytes, looping over short writes. On failure an unknown prefix was
 
 `status_of(raw)` turns the platform's `struct stat`, passed as an opaque pointer, into a `sys::file_status`: the type from the mode bits, permissions, size, ids and the three times in nanoseconds. It is declared here and defined in a `.cpp`, so `stat`, `lstat`, `fstat` and `fstatat` share one conversion and no header ever names `struct stat`.
 
+## `file/impl/directory_stream.hpp`
+
+### class `directory_stream`
+
+```c++
+class directory_stream final;
+```
+
+On linux x86-64, without libc: the directory's descriptor and a buffer of raw entries (struct linux_dirent64) that getdents64 fills, [_at, _end) not yet returned. The stream is one anonymous mapping of SIZE bytes.
+
 ## `file/impl/status_of.hpp`
+
+## `file/impl/temporary_name.hpp`
+
+### variable `impl::TEMPORARY_ATTEMPTS`
+
+```c++
+inline constexpr int TEMPORARY_ATTEMPTS = 100;
+```
+
+How many names mkdtemp and mkstemp try before giving up with errc::exists.
+
+### function `impl::temporary_suffix`
+
+```c++
+[[nodiscard]] auto temporary_suffix(char* pattern) noexcept -> ca::result<char*>;
+```
+
+The "XXXXXX" ending pattern, which must have one (errc::invalid_argument otherwise, as set_last_error).
+
+### function `impl::randomize_suffix`
+
+```c++
+[[nodiscard]] auto randomize_suffix(char* suffix) noexcept -> ca::result<void>;
+```
+
+Writes 6 random characters of [A-Za-z0-9] at suffix (kernel entropy).
 
 ## `fs/`
 
@@ -2699,6 +2735,16 @@ concept are_arguments = sizeof...(As) <= ca::usz;
 
 At most six syscall arguments, the kernel's limit.
 
+## `syscall/auxiliary.hpp`
+
+### function `auxiliary`
+
+```c++
+[[nodiscard]] auto auxiliary(ca::u64 type) noexcept -> ca::u64;
+```
+
+Value of entry type (AT_*) of the auxiliary vector the kernel handed the process, 0 when absent. Read from /proc/self/auxv at each call: for one-time lookups (the vDSO). Linux x86-64; 0 elsewhere.
+
 ## `syscall/invoke.hpp`
 
 ### namespace `syscall`
@@ -2729,6 +2775,17 @@ requires ca::syscall::are_arguments<As...>
 
 Makes syscall number with exactly these arguments, in as many registers; returns what the kernel returns, or its errno as the error, also stored for sys::last_error. Inline asm on linux x86_64, aarch64 and riscv64 (impl::inline_entry), libc's syscall(2) on other linux CPUs, errc::not_supported on macOS.
 
+## `syscall/restarting.hpp`
+
+### function `restarting`
+
+```c++
+template <typename F>
+[[nodiscard]] inline auto restarting(const F& call) noexcept -> decltype(call());
+```
+
+call() again while it fails with errc::interrupted (a signal handler ran before the syscall did anything); its first other result.
+
 ## `syscall/syscalls.hpp`
 
 ### variable `has_table`
@@ -2738,6 +2795,16 @@ inline constexpr bool has_table = (ca_platform(linux) && ca_architecture(x86_64)
 ```
 
 Whether the target has a generated table: number::\<name> and \<name>(args...). Without one only invoke exists.
+
+## `syscall/vdso.hpp`
+
+### function `vdso_symbol`
+
+```c++
+[[nodiscard]] auto vdso_symbol(const char* name) noexcept -> void*;
+```
+
+Address of function name in the vDSO, the shared object the kernel maps into every process (clock_gettime, gettimeofday, time, getcpu without entering the kernel), or null: no vDSO, or no such symbol. Walks its ELF dynamic symbols at each call: look up once and keep the address. Linux x86-64; null elsewhere.
 
 ## `syscall/impl/`
 
@@ -5726,7 +5793,7 @@ listns(const struct ns_id_req *req, u64 *ns_ids, size_t nr_ns_ids, unsigned int 
 
 ## `text/`
 
-Floating point to text: the one piece of formatting that still goes through the C library (snprintf and strtod), kept here so the formatter of layer 5 needs no libc of its own.
+Floating point to text, without the C library: the shortest digits by Ryu, all others exact (every decimal digit of the double, rounded to nearest, ties to even), digit for digit what glibc's printf prints. Built on `1-primitives/floats/impl/` (shortest_decimal, exact_decimal).
 
 - `sys::format_float(buffer, value, conversion, precision, alternate)` writes value as printf's `%f`, `%e`, `%g` or `%a` (and their capitals) would, with a precision when it is not negative and the `#` flag when alternate is set. Width and sign flags are the formatter's job.
 - `sys::format_float_shortest(buffer, value)` writes the fewest `%g` digits that read back as the same value: `0.1` gives "0.1", not "0.10000000000000001". The `f32` overload round-trips as an `f32`, so `0.1F` also gives "0.1". This is what `{}` prints for a float.
@@ -5754,7 +5821,7 @@ auto main(void) -> int {
 }
 ```
 
-The C locale applies unless the program called setlocale, so the decimal point is '.'.
+The decimal point is always '.', whatever setlocale says. Two outputs differ from glibc on purpose: `%#g` when rounding carries into a new exponent keeps all its digits, as C specifies (glibc prints `1.e+02` for 99.5 at `%#.2g`, ca `1.0e+02`), and the shortest form of a subnormal is truly the shortest (`5e-324`, where `%.15g` gave 15 digits).
 
 ## `text/format_float.hpp`
 
@@ -5764,7 +5831,7 @@ The C locale applies unless the program called setlocale, so the decimal point i
 auto format_float(ca::span<char> buffer, ca::f64 value, char conversion, ca::sint precision, bool alternate) noexcept -> ca::usz;
 ```
 
-Writes value as printf's %\<conversion> would (conversion one of f F e E g G a A), with precision when >= 0 and the # flag when alternate; no width, no + flag, into buffer. Returns the length, at most buffer.size() - 1, and NUL-terminates (buffer not empty). Uses the C locale unless the program called setlocale.
+Writes value as printf's %\<conversion> would (conversion one of f F e E g G a A), with precision when >= 0 and the # flag when alternate; no width, no + flag, into buffer. Returns the length, at most buffer.size() - 1, and NUL-terminates (buffer not empty). Exact digits, ties to even; always '.' as the decimal point.
 
 ## `text/format_float_shortest.hpp`
 
@@ -5774,7 +5841,65 @@ Writes value as printf's %\<conversion> would (conversion one of f F e E g G a A
 auto format_float_shortest(ca::span<char> buffer, ca::f64 value) noexcept -> ca::usz;
 ```
 
-Writes the fewest %g digits that read back as the same value: 0.1 is "0.1", not "0.10000000000000001"; an f32 round-trips as f32. Into buffer; returns the length, at most buffer.size() - 1, and NUL-terminates (buffer not empty). Up to three printf/strtod rounds.
+Writes the fewest %g digits that read back as the same value: 0.1 is "0.1", not "0.10000000000000001"; an f32 round-trips as f32. Into buffer; returns the length, at most buffer.size() - 1, and NUL-terminates (buffer not empty). Ryu: a few 128-bit products, laid out as %.Pg with P = max(digits, 15) (f32: 6).
+
+## `text/impl/float_text.hpp`
+
+### struct `impl::float_sink`
+
+```c++
+struct float_sink final;
+```
+
+Where float text goes: snprintf's contract, characters past capacity - 1 counted but dropped.
+
+### struct `impl::float_digits`
+
+```c++
+struct float_digits final;
+```
+
+Decimal digits ('0' - '9'), value 0.d1 d2 ... * 10^_point; digits past _count are zeros.
+
+### function `impl::finish`
+
+```c++
+[[nodiscard]] auto finish(ca::sys::impl::float_sink& sink) noexcept -> ca::usz;
+```
+
+NUL-terminates; the length written, at most capacity - 1.
+
+### function `impl::put_special`
+
+```c++
+auto put_special(ca::sys::impl::float_sink& sink, bool negative, bool infinite, bool upper) noexcept -> void;
+```
+
+"inf" or "nan" (upper: "INF", "NAN"), after '-' when negative.
+
+### function `impl::put_fixed`
+
+```c++
+auto put_fixed(ca::sys::impl::float_sink& sink, const ca::sys::impl::float_digits& digits, ca::i64 fraction, bool always_point) noexcept -> void;
+```
+
+digits as %f, fraction digits after the point, the point printed when there are some or always. Rounding is the caller's.
+
+### function `impl::put_scientific`
+
+```c++
+auto put_scientific(ca::sys::impl::float_sink& sink, const ca::sys::impl::float_digits& digits, ca::i64 fraction, bool always_point, char exponent_letter) noexcept -> void;
+```
+
+digits as %e: one digit, fraction more after the point (printed when there are some or always), then exponent_letter and the exponent, signed, 2 digits at least.
+
+### function `impl::trimmed`
+
+```c++
+[[nodiscard]] auto trimmed(const ca::sys::impl::float_digits& digits, ca::i64 first, ca::i64 fraction) noexcept -> ca::i64;
+```
+
+How many of fraction digits after the point remain once trailing zeros go (%g without #): digits at index first, first + 1, ...
 
 ## `thread/`
 
@@ -6067,6 +6192,50 @@ Date and time of seconds since the epoch, in UTC. errc::out_of_range when the ye
 ```
 
 calendar_time of struct tm raw.
+
+## `time/impl/civil.hpp`
+
+### struct `impl::civil_date`
+
+```c++
+struct civil_date final;
+```
+
+A day of the proleptic Gregorian calendar: month 1 - 12, day 1 - 31.
+
+### function `impl::days_from_civil`
+
+```c++
+[[nodiscard]] constexpr auto days_from_civil(ca::i64 year, const ca::u32 month, const ca::u32 day) noexcept -> ca::i64;
+```
+
+Days from 1970-01-01 to year-month-day (month 1 - 12, day 1 - 31), any year (Howard Hinnant's days_from_civil: 400-year eras, March-based years).
+
+### function `impl::civil_from_days`
+
+```c++
+[[nodiscard]] constexpr auto civil_from_days(ca::i64 days) noexcept -> ca::sys::impl::civil_date;
+```
+
+The date days after 1970-01-01, any count (Howard Hinnant's civil_from_days).
+
+## `time/impl/time_zone.hpp`
+
+### struct `impl::zone_offset`
+
+```c++
+struct zone_offset final;
+```
+
+How local time differs from UTC at some instant: seconds east, and whether daylight saving is in effect.
+
+### function `impl::zone_offset_at`
+
+```c++
+[[nodiscard]] auto zone_offset_at(ca::i64 seconds) noexcept -> ca::sys::impl::zone_offset;
+```
+
+The local zone's offset at seconds since the epoch, as glibc's localtime_r finds it: TZ unset is /etc/localtime, empty is UTC, a leading ':' is dropped; a TZ naming a TZif file (absolute, or under /usr/share/zoneinfo) uses its transitions, then its POSIX footer past the last one; otherwise TZ is read as a POSIX rule ("EST5EDT,M3.2.0,M11.1.0"), and UTC when it is not one either. The zone is read once per TZ value and kept. Thread-safe.
 
 ## `trace/`
 

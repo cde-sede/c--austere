@@ -348,7 +348,7 @@ requires ca::impl::is_bit_unsigned<T>
 [[nodiscard]] constexpr auto popcount(const T value) noexcept -> int;
 ```
 
-Number of 1 bits. Unsigned integers only.
+Number of 1 bits. Unsigned integers only. One popcnt where the target has it; else the SWAR sum (clang's own expansion of the builtin): gcc would call libgcc's __popcountdi2, which programs linked without libc do not have.
 
 ## `bit/rotl.hpp`
 
@@ -679,6 +679,68 @@ using f64 = double;
 ```
 
 IEEE 754 binary64; fails to compile otherwise.
+
+## `floats/impl/exact_decimal.hpp`
+
+### struct `impl::exact_decimal`
+
+```c++
+struct exact_decimal final;
+```
+
+Every decimal digit of an f64: value = 0.d1 d2 ... d_count * 10^_point, d1 not zero. A double has at most 767 significant digits (subnormals).
+
+### function `impl::exact_decimal_of`
+
+```c++
+auto exact_decimal_of(ca::f64 value, ca::impl::exact_decimal& out) noexcept -> void;
+```
+
+Writes the exact decimal expansion of value (finite, nonzero; sign ignored) into out: value = m * 2^e becomes the integer m << e, or m * 5^-e with the point -e places in, in 32-bit limbs, read out 9 digits per division by 10^9.
+
+## `floats/impl/power5_tables.hpp`
+
+### variable `impl::POWER5_BITS`
+
+```c++
+inline constexpr ca::usz POWER5_BITS = 125U;
+```
+
+Bits kept of each power of 5 and of each inverse.
+
+### variable `impl::?`
+
+```c++
+inline constexpr ca::u64 POWER5_INVERSE[342][2] =;
+```
+
+floor(2^(bits(5^q) - 1 + 125) / 5^q) + 1, q in [0, 342): {low, high}.
+
+### variable `impl::?`
+
+```c++
+inline constexpr ca::u64 POWER5[326][2] =;
+```
+
+5^i shifted to exactly 125 bits, i in [0, 326): {low, high}.
+
+## `floats/impl/shortest_decimal.hpp`
+
+### struct `impl::decimal_float`
+
+```c++
+struct decimal_float final;
+```
+
+digits * 10^exponent, digits without trailing zeros only when the shortest form has none.
+
+### function `impl::shortest_decimal`
+
+```c++
+[[nodiscard]] auto shortest_decimal(ca::f64 value) noexcept -> ca::impl::decimal_float;
+```
+
+The decimal with the fewest digits that reads back as value (round to nearest), the closest of those when several: Ryu (Ulf Adams, 2018), 128-bit powers of 5 from impl/power5_tables.hpp. value finite and nonzero; its sign ignored. The f32 overload uses the f32's own rounding interval, so 0.1F gives 1e-1.
 
 ## `hash/`
 
@@ -1036,7 +1098,7 @@ auto main(void) -> int {
 | `string_length(s)` | strlen, any code unit type, constexpr |
 | `compare_units`, `equal_units`, `find_unit` | memcmp, memchr over char16_t and char32_t too |
 
-Each takes a count of 0 with any pointer, null included, unlike the C functions. `copy_bytes` and `move_bytes` are the compiler's builtins, so small constant copies become a few moves; the calls left over reach the memcpy and memmove that ca itself defines on x86-64 (see `memory/impl/`), so no libc is needed for them.
+Each takes a count of 0 with any pointer, null included, unlike the C functions. `copy_bytes`, `move_bytes`, `fill_bytes`, `compare_bytes`, `find_byte` and `string_length` are the compiler's builtins, so small constant ones become a few moves or fold away; the calls left over reach the memcpy, memmove, memset, memcmp, bcmp, memchr and strlen that ca itself defines on x86-64 (see `memory/impl/`), so no libc is needed for them.
 
 ```c++
 #include "ca/integers.hpp"
@@ -1281,6 +1343,152 @@ Every path loads all it copies before storing, so overlapping ranges need no sep
 
 `move_paths.hpp` holds those pieces, always inlined; `loose_bytes.hpp` the unaligned, aliasing loads and stores they use (`loose<T>(p)`: a T read at any address, through a packed `may_alias` struct, since attributes on an alias are lost as template arguments). The out-of-line strategies are exposed to layer 3 as `ca::move_paths`, for benchmarks and tests that need to call one strategy directly.
 
+## `memory/impl/byte_vectors.hpp`
+
+### function `impl::byte_mask`
+
+```c++
+[[gnu::always_inline]] inline auto byte_mask(const ca::impl::bytes16& v) noexcept -> ca::u32;
+```
+
+Bit i set when byte i of v has its high bit set (pmovmskb): of an equality result, the lanes that compared equal.
+
+### function `impl::byte_mask`
+
+```c++
+[[gnu::target("avx2")]] inline auto byte_mask(const ca::impl::bytes32& v) noexcept -> ca::u32;
+```
+
+Not always_inline: generic templates calling it are compiled without AVX2; the AVX2 variants are flattened, so it is inlined there. The mask is opaque: clang otherwise tests it with vpxor and vptest (3 uops, then the compare again).
+
+### function `impl::peek`
+
+```c++
+[[gnu::always_inline]] inline auto peek(const char* const p, ca::impl::bytes16& v) noexcept -> void;
+```
+
+16 or 32 bytes at p into v, in asm: the compiler sees no access beyond the range the caller owns, which these loads may pass, never beyond p's page (the caller checks). The 16-byte one is legacy SSE (AVX state is clean at entry); the 32-byte one, as byte_mask, by reference (no vector crosses an ABI).
+
+### function `impl::peek_aligned`
+
+```c++
+[[gnu::always_inline]] inline auto peek_aligned(const char* const p, ca::impl::bytes16& v) noexcept -> void;
+```
+
+peek at p aligned to the vector size: such a load never crosses a page, so it may cover bytes before and after any range inside it.
+
+## `memory/impl/compare_bytes.hpp`
+
+### alias `compare_bytes_function`
+
+```c++
+using compare_bytes_function = auto (*)(const void*, const void*, ca::usz) noexcept -> int;
+```
+
+Signature of a compare_bytes variant (memcmp: negative, 0 or positive, bytes as unsigned) and of a differ_bytes one (bcmp: 0 when equal, nonzero otherwise). Count 0 accepts any pointers.
+
+### variable `compare_bytes_variant`
+
+```c++
+extern ca::atomic<ca::impl::compare_bytes_function> compare_bytes_variant;
+```
+
+The compare_bytes variant of this CPU, picked by cpuid on the first call as move_bytes_variant. x86-64: SSE2 or AVX2 with BMI2; below one vector a masked compare, up to 8 vectors overlapping, more with a 4-vector loop; the first difference by bit scan. Calls no libc. On x86-64 the library defines the C memcmp as one jump through it.
+
+### variable `differ_bytes_variant`
+
+```c++
+extern ca::atomic<ca::impl::compare_bytes_function> differ_bytes_variant;
+```
+
+The differ_bytes variant of this CPU: compare_bytes_variant without locating the difference. clang turns memcmp(...) == 0 into bcmp; on x86-64 the library defines the C bcmp as one jump through it.
+
+### function `compare_bytes_sse2`
+
+```c++
+auto compare_bytes_sse2(const void* a, const void* b, ca::usz count) noexcept -> int;
+```
+
+The variants compare_bytes_variant and differ_bytes_variant pick from, for tests: every x86-64 CPU runs the sse2 ones, the avx2 ones need AVX2 and BMI2.
+
+## `memory/impl/cpu_features.hpp`
+
+### struct `impl::cpu_features`
+
+```c++
+struct cpu_features final;
+```
+
+What the byte primitives pick their variant and thresholds from.
+
+### function `impl::read_cpu_features`
+
+```c++
+auto read_cpu_features(void) noexcept -> ca::impl::cpu_features;
+```
+
+The features of this CPU, from cpuid: AVX2 only when the OS saves the YMM state, the last-level cache 8 MiB when cpuid does not report it. Not cached: each call runs cpuid.
+
+## `memory/impl/fill_bytes.hpp`
+
+### alias `fill_bytes_function`
+
+```c++
+using fill_bytes_function = auto (*)(void*, int, ca::usz) noexcept -> void*;
+```
+
+Signature of a fill_bytes variant: memset semantics, count 0 accepts any pointer; returns `to`, so memset is one jump through the variant.
+
+### variable `fill_bytes_variant`
+
+```c++
+extern ca::atomic<ca::impl::fill_bytes_function> fill_bytes_variant;
+```
+
+The fill_bytes variant of this CPU, picked by cpuid on the first call as move_bytes_variant. x86-64: SSE2 or AVX2; each stores up to 8 vectors overlapping, more with an aligned 4-vector loop, rep stosb from 32 KiB with ERMS. Calls no libc. On x86-64 the library defines the C memset as one jump through it.
+
+### function `fill_bytes_sse2`
+
+```c++
+auto fill_bytes_sse2(void* to, int value, ca::usz count) noexcept -> void*;
+```
+
+The variants fill_bytes_variant picks from, for tests: every x86-64 CPU runs fill_bytes_sse2, fill_bytes_avx2 needs AVX2.
+
+## `memory/impl/find_bytes.hpp`
+
+### alias `find_byte_function`
+
+```c++
+using find_byte_function = auto (*)(const void*, int, ca::usz) noexcept -> void*;
+```
+
+Signature of a find_byte variant: memchr semantics, count 0 accepts any pointer.
+
+### alias `string_length_function`
+
+```c++
+using string_length_function = auto (*)(const char*) noexcept -> ca::usz;
+```
+
+Signature of a string_length variant: strlen semantics.
+
+### variable `find_byte_variant`
+
+```c++
+extern ca::atomic<ca::impl::find_byte_function> find_byte_variant;
+```
+
+The find_byte and string_length variants of this CPU, picked by cpuid on the first call as move_bytes_variant. x86-64: SSE2 or AVX2; aligned vector loads only (one never crosses a page, so the bytes around the range are read, never faulted on), 4 vectors per test past the first. Call no libc. On x86-64 the library defines the C memchr and strlen as one jump through them.
+
+### function `find_byte_sse2`
+
+```c++
+auto find_byte_sse2(const void* data, int value, ca::usz count) noexcept -> void*;
+```
+
+The variants find_byte_variant and string_length_variant pick from, for tests: every x86-64 CPU runs the sse2 ones, the avx2 ones need AVX2 and BMI2.
+
 ## `memory/impl/loose_bytes.hpp`
 
 ### function `impl::vector_size`
@@ -1307,6 +1515,15 @@ struct [[gnu::packed, gnu::may_alias]] loose_bytes final;
 ```
 
 T at any address and of any type: an unaligned, aliasing load or store. A struct, because attributes on an alias are lost when it is a template argument.
+
+### struct `impl::aligned_bytes`
+
+```c++
+template <typename T>
+struct [[gnu::may_alias]] aligned_bytes final;
+```
+
+T at an address aligned for T, of any type: an aliasing aligned load or store.
 
 ### function `impl::loose`
 
