@@ -62,14 +62,14 @@ The habits it shows run through the whole library: every allocation is a `result
 
 ### Without libc
 
-On Linux x86-64, ca reaches the kernel itself: `ca::sys` makes its syscalls through `ca::syscall` (the vDSO for the clock), formats and reads floats, finds time zones and copies memory without the C library, and defines `memcpy`, `memset`, `memcmp`, `strlen` and the other functions compilers call by name. A program can therefore link without libc at all, with `build/<compiler>-<mode>/libca_runtime.a` (from `src/runtime/`) in its place: the process entry (`_start`, the main thread's TLS, constructors, `exit` and `atexit`), the environment, `malloc` on `ca::heap`, `fork` and `posix_spawn`. It is not part of `libca.a`: it defines what libc's own startup files define, and must not be linked next to them.
+On Linux x86-64, ca reaches the kernel itself: `ca::sys` makes its syscalls through `ca::syscall` (the vDSO for the clock), formats and reads floats, finds time zones and copies memory without the C library, and defines `memcpy`, `memset`, `memcmp`, `strlen` and the other functions compilers call by name. A program can therefore link without libc at all, with `build/<compiler>-<mode>/libca_runtime.a` (from `src/runtime/`) in its place: the process entry (`_start`, the main thread's TLS, constructors, `exit` and `atexit`), the environment, `malloc` on `ca::heap`, `fork` and `posix_spawn`, and what C++ code compiles to calls of: guards of function-local statics (a recursive initialization traps), `thread_local` destructors (run at exit before static ones), the pure virtual trap, and `operator new` and `delete` on `malloc` (trapping when memory runs out). It is not part of `libca.a`: it defines what libc's own startup files define, and must not be linked next to them.
 
 ```sh
 c++ -std=c++2c -nostdinc++ -fno-exceptions -fno-rtti -I src/lib prog.cpp -nostdlib -static-pie \
-    -Wl,-u,_start -Wl,--start-group libca.a libca_runtime.a -Wl,--end-group
+    -Wl,-u,_start -Wl,--start-group libca.a libca_runtime.a -Wl,--end-group -lgcc
 ```
 
-`-static` works as well. Threads are not supported without libc yet: the runtime's thread keys assume a single thread.
+`-static` works as well. `-lgcc` is for the program's own code: `-nostdlib` drops libgcc too, whose arithmetic helpers (128-bit division: `__udivti3`) need no libc; `libca.a` calls none. Threads are not supported without libc yet: the runtime's thread keys assume a single thread.
 
 | Layer | Headers | Documented entities |
 |---|---|---|
@@ -469,7 +469,7 @@ Layer 3: the boundary with the operating system.
 - [`io/terminal_size.hpp`](3-system.md#ioterminalsizehpp) - Size of a terminal window, in character cells.
 - [`io/writev.hpp`](3-system.md#iowritevhpp) - Writes buffers in order, as one write; returns how many bytes.
 - [`machine/gethostname.hpp`](3-system.md#machinegethostnamehpp) - Writes the host name into buffer, NUL-terminated; returns its length.
-- [`machine/processor_count.hpp`](3-system.md#machineprocessorcounthpp) - Processors online now, at least 1.
+- [`machine/processor_count.hpp`](3-system.md#machineprocessorcounthpp) - Processors this process may run on now (its affinity mask, as nproc counts them on Linux; the onl...
 - [`machine/system_name.hpp`](3-system.md#machinesystemnamehpp) - What uname reports: the kernel, its release and version, the host and the hardware.
 - [`machine/uname.hpp`](3-system.md#machineunamehpp) - Names of the running system.
 - [`memory/advice.hpp`](3-system.md#memoryadvicehpp) - How a mapping will be used, for madvise.
@@ -545,7 +545,7 @@ Layer 3: the boundary with the operating system.
 - [`thread/thread_key_set.hpp`](3-system.md#threadthreadkeysethpp) - Stores value in the calling thread's slot of key.
 - [`time/calendar_time.hpp`](3-system.md#timecalendartimehpp) - A moment as a date and time of day in some time zone, by utc_time or local_time.
 - [`time/clock.hpp`](3-system.md#timeclockhpp) - Clocks to read with now().
-- [`time/local_time.hpp`](3-system.md#timelocaltimehpp) - Date and time of seconds since the epoch, in the local time zone (TZ, or /etc/localtime).
+- [`time/local_time.hpp`](3-system.md#timelocaltimehpp) - Date and time of seconds since the epoch, in the local time zone (TZ, or /etc/localtime, re-read...
 - [`time/now.hpp`](3-system.md#timenowhpp) - Time of source in nanoseconds: since the epoch for realtime, since an arbitrary fixed point for t...
 - [`time/resolution.hpp`](3-system.md#timeresolutionhpp) - Resolution of source in nanoseconds: the smallest step now() can report.
 - [`time/sleep_for.hpp`](3-system.md#timesleepforhpp) - Suspends the thread for nanoseconds, resuming after signals until the time is up.

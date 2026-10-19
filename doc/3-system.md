@@ -1496,7 +1496,7 @@ Writes the host name into buffer, NUL-terminated; returns its length. errc::out_
 [[nodiscard]] auto processor_count(void) noexcept -> ca::usz;
 ```
 
-Processors online now, at least 1. Never fails.
+Processors this process may run on now (its affinity mask, as nproc counts them on Linux; the online ones elsewhere), at least 1. Never fails.
 
 ## `machine/system_name.hpp`
 
@@ -6127,7 +6127,7 @@ Clocks to read with now().
 [[nodiscard]] auto local_time(ca::i64 seconds) noexcept -> ca::result<ca::sys::calendar_time>;
 ```
 
-Date and time of seconds since the epoch, in the local time zone (TZ, or /etc/localtime). errc::out_of_range when the year does not fit.
+Date and time of seconds since the epoch, in the local time zone (TZ, or /etc/localtime, re-read when it changes). errc::out_of_range when the year does not fit.
 
 ## `time/now.hpp`
 

@@ -78,13 +78,17 @@ memory without the C library, and defines `memcpy`, `memset`, `memcmp`, `strlen`
 functions compilers call by name. A program can therefore link without libc at all, with
 `build/<compiler>-<mode>/libca_runtime.a` (from `src/runtime/`) in its place: the process entry
 (`_start`, the main thread's TLS, constructors, `exit` and `atexit`), the environment, `malloc`
-on `ca::heap`, `fork` and `posix_spawn`. It is not part of `libca.a`: it defines what libc's own
-startup files define, and must not be linked next to them.
+on `ca::heap`, `fork` and `posix_spawn`, and what C++ code compiles to calls of: guards of
+function-local statics (a recursive initialization traps), `thread_local` destructors (run at
+exit before static ones), the pure virtual trap, and `operator new` and `delete` on `malloc`
+(trapping when memory runs out). It is not part of `libca.a`: it defines what libc's own startup
+files define, and must not be linked next to them.
 
 ```sh
 c++ -std=c++2c -nostdinc++ -fno-exceptions -fno-rtti -I src/lib prog.cpp -nostdlib -static-pie \
-    -Wl,-u,_start -Wl,--start-group libca.a libca_runtime.a -Wl,--end-group
+    -Wl,-u,_start -Wl,--start-group libca.a libca_runtime.a -Wl,--end-group -lgcc
 ```
 
-`-static` works as well. Threads are not supported without libc yet: the runtime's thread keys
-assume a single thread.
+`-static` works as well. `-lgcc` is for the program's own code: `-nostdlib` drops libgcc too,
+whose arithmetic helpers (128-bit division: `__udivti3`) need no libc; `libca.a` calls none.
+Threads are not supported without libc yet: the runtime's thread keys assume a single thread.
