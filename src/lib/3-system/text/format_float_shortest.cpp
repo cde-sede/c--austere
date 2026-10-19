@@ -1,48 +1,71 @@
+/* The shortest round-trip digits (Ryu, 1-primitives/floats/impl/shortest_decimal) laid out as
+   %.Pg does, P = max(digits, 15) for f64 and max(digits, 6) for f32: what the former libc
+   version printed by trying %.15g, %.16g, %.17g (%.6g ... %.9g) until strtod read the value
+   back, since a correctly rounded %.Ng is the shortest form whenever N digits suffice. */
+
+#include "1-primitives/floats/impl/shortest_decimal.hpp"
+#include "1-primitives/integers/i64.hpp"
+#include "1-primitives/integers/u32.hpp"
+#include "1-primitives/integers/u64.hpp"
 #include "3-system/text/format_float_shortest.hpp"
-
-#include <stdio.h>
-#include <stdlib.h>
+#include "3-system/text/impl/float_text.hpp"
 
 
-[[nodiscard]] static auto clamp_written(const int written, char* const out, const ca::usz capacity) noexcept -> ca::usz {
+static auto put_shortest(const ca::span<char> buffer, const bool negative, ca::impl::decimal_float decimal, const ca::i64 minimum) noexcept -> ca::usz {
 
-	if (written < 0) [[unlikely]] {
-		out[0] = '\0';
-		return 0U;
+	ca::sys::impl::float_sink sink{buffer.data(), buffer.size(), 0U};
+	if (negative)
+		put(sink, '-');
+	while (decimal._digits % 10U == 0U) {
+		decimal._digits /= 10U;
+		++decimal._exponent;
 	}
-	return static_cast<ca::usz>(written) < capacity ? static_cast<ca::usz>(written) : capacity - 1U;
+	char text[20];
+	ca::usz count = 0U;
+	for (ca::u64 rest = decimal._digits; rest != 0U; rest /= 10U)
+		text[count++] = static_cast<char>('0' + rest % 10U);
+	char digits[20];
+	for (ca::usz i = 0U; i < count; ++i)
+		digits[i] = text[count - 1U - i];
+	const ca::sys::impl::float_digits view{digits, count, decimal._exponent + static_cast<ca::i32>(count)};
+	const ca::i64 significant = static_cast<ca::i64>(count) > minimum ? static_cast<ca::i64>(count) : minimum;
+	const ca::i64 exponent = view._point - 1;
+	if (significant > exponent && exponent >= -4)
+		ca::sys::impl::put_fixed(sink, view, ca::sys::impl::trimmed(view, view._point, significant - 1 - exponent), false);
+	else
+		ca::sys::impl::put_scientific(sink, view, ca::sys::impl::trimmed(view, 1, significant - 1), false, 'e');
+	return ca::sys::impl::finish(sink);
+}
+
+static auto put_simple(const ca::span<char> buffer, const bool negative, const bool zero, const bool infinite) noexcept -> ca::usz {
+
+	ca::sys::impl::float_sink sink{buffer.data(), buffer.size(), 0U};
+	if (zero) {
+		if (negative)
+			put(sink, '-');
+		put(sink, '0');
+	} else {
+		ca::sys::impl::put_special(sink, negative, infinite, false);
+	}
+	return ca::sys::impl::finish(sink);
 }
 
 auto ca::sys::format_float_shortest(const ca::span<char> buffer, const ca::f64 value) noexcept -> ca::usz {
 
-	char* const out = buffer.data();
-	const ca::usz capacity = buffer.size();
-	if (capacity == 0U) [[unlikely]]
+	if (buffer.size() == 0U) [[unlikely]]
 		return 0U;
-	if (value != value || value - value != 0.0)
-		return clamp_written(::snprintf(out, capacity, "%g", value), out, capacity);
-	int written = -1;
-	for (int digits = 15; digits <= 17; ++digits) {
-		written = ::snprintf(out, capacity, "%.*g", digits, value);
-		if (written < 0 || static_cast<ca::usz>(written) >= capacity || ::strtod(out, nullptr) == value)
-			break;
-	}
-	return clamp_written(written, out, capacity);
+	const bool negative = (__builtin_bit_cast(ca::u64, value) >> 63U) != 0U;
+	if (value != value || value - value != 0.0 || value == 0.0)
+		return put_simple(buffer, negative, value == 0.0, value == value);
+	return put_shortest(buffer, negative, ca::impl::shortest_decimal(value), 15);
 }
 
 auto ca::sys::format_float_shortest(const ca::span<char> buffer, const ca::f32 value) noexcept -> ca::usz {
 
-	char* const out = buffer.data();
-	const ca::usz capacity = buffer.size();
-	if (capacity == 0U) [[unlikely]]
+	if (buffer.size() == 0U) [[unlikely]]
 		return 0U;
-	if (value != value || value - value != 0.0F)
-		return clamp_written(::snprintf(out, capacity, "%g", static_cast<double>(value)), out, capacity);
-	int written = -1;
-	for (int digits = 6; digits <= 9; ++digits) {
-		written = ::snprintf(out, capacity, "%.*g", digits, static_cast<double>(value));
-		if (written < 0 || static_cast<ca::usz>(written) >= capacity || ::strtof(out, nullptr) == value)
-			break;
-	}
-	return clamp_written(written, out, capacity);
+	const bool negative = (__builtin_bit_cast(ca::u32, value) >> 31U) != 0U;
+	if (value != value || value - value != 0.0F || value == 0.0F)
+		return put_simple(buffer, negative, value == 0.0F, value == value);
+	return put_shortest(buffer, negative, ca::impl::shortest_decimal(value), 6);
 }

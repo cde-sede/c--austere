@@ -21,8 +21,8 @@ namespace ca {
 
 		/* @DOC Writes the fewest %g digits that read back as the same value: 0.1 is "0.1", not
 		   "0.10000000000000001"; an f32 round-trips as f32. Into buffer; returns the length, at
-		   most buffer.size() - 1, and NUL-terminates (buffer not empty). Up to three
-		   printf/strtod rounds. */
+		   most buffer.size() - 1, and NUL-terminates (buffer not empty). Ryu: a few 128-bit
+		   products, laid out as %.Pg with P = max(digits, 15) (f32: 6). */
 		auto format_float_shortest(ca::span<char> buffer, ca::f64 value) noexcept -> ca::usz;
 
 		auto format_float_shortest(ca::span<char> buffer, ca::f32 value) noexcept -> ca::usz;

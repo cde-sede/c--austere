@@ -106,8 +106,8 @@ auto main(void) -> int {
 	bench("3 integers, format_to, 1e6", "std: snprintf with the % spelling", integers_braces);
 	bench("%-8s %6d %08x, 1e6", padded);
 	bench("3 strings, 1e6", strings);
-	bench("%.3f, 1e6", "ca formats fixed floats through snprintf", fixed_floats);
-	bench("shortest float {}, 1e6", "std: %.17g, which is not the shortest round trip", shortest_floats);
+	bench("%.3f, 1e6", "ca: exact digits, no libc", fixed_floats);
+	bench("shortest float {}, 1e6", "ca: Ryu; std: %.17g, which is not the shortest round trip", shortest_floats);
 	bench("buffered fd line, ca::printf, 1e6", "std: fprintf to /dev/null", buffered_file);
 	return 0;
 }

@@ -1,5 +1,6 @@
-Floating point to text: the one piece of formatting that still goes through the C library
-(snprintf and strtod), kept here so the formatter of layer 5 needs no libc of its own.
+Floating point to text, without the C library: the shortest digits by Ryu, all others exact
+(every decimal digit of the double, rounded to nearest, ties to even), digit for digit what
+glibc's printf prints. Built on `1-primitives/floats/impl/` (shortest_decimal, exact_decimal).
 
 - `sys::format_float(buffer, value, conversion, precision, alternate)` writes value as printf's
   `%f`, `%e`, `%g` or `%a` (and their capitals) would, with a precision when it is not negative
@@ -32,4 +33,7 @@ auto main(void) -> int {
 }
 ```
 
-The C locale applies unless the program called setlocale, so the decimal point is '.'.
+The decimal point is always '.', whatever setlocale says. Two outputs differ from glibc on
+purpose: `%#g` when rounding carries into a new exponent keeps all its digits, as C specifies
+(glibc prints `1.e+02` for 99.5 at `%#.2g`, ca `1.0e+02`), and the shortest form of a
+subnormal is truly the shortest (`5e-324`, where `%.15g` gave 15 digits).

@@ -8,7 +8,7 @@
 
 /* glibc's texts (strerrordesc_np, glibc 2.39), indexed by Linux errno; null where Linux has no
    code. tests/sys_error_message.cpp compares them with the libc of the machine. */
-static const char* const MESSAGES[] = {
+static constexpr const char* MESSAGES[] = {
 	"Success",
 	"Operation not permitted",
 	"No such file or directory",

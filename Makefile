@@ -66,7 +66,7 @@ else
 $(error MODE must be debug or release)
 endif
 
-GENERATORS := gen_traits gen_syscalls gen_unicode gen_includes gen_str_test autodoc
+GENERATORS := gen_traits gen_syscalls gen_unicode gen_float_tables gen_includes gen_str_test autodoc
 
 BUILD := build/$(notdir $(CXX))-$(MODE)
 LIB   := $(BUILD)/libca.a

@@ -3,6 +3,9 @@
 #ifndef ca_include_syscall_hpp
 #define ca_include_syscall_hpp
 
+#include "3-system/syscall/auxiliary.hpp"
+#include "3-system/syscall/restarting.hpp"
 #include "3-system/syscall/syscalls.hpp"
+#include "3-system/syscall/vdso.hpp"
 
 #endif // ca_include_syscall_hpp
