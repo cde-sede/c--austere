@@ -1,7 +1,11 @@
+#include "1-primitives/config/architecture.hpp"
+#include "1-primitives/config/platform.hpp"
 #include "2-vocabulary/failure.hpp"
 #include "3-system/error/errc.hpp"
 #include "3-system/error/last_error.hpp"
 #include "3-system/io/readv.hpp"
+#include "3-system/syscall/restarting.hpp"
+#include "3-system/syscall/syscalls.hpp"
 
 #include <errno.h>
 #include <sys/types.h>
@@ -12,6 +16,13 @@
 
 	if (buffers.size() > 0x7FFFFFFFU) [[unlikely]]
 		return ca::failure{ca::errc::invalid_argument};
+#if ca_platform(linux) && ca_architecture(x86_64)
+	return ca::syscall::restarting([&] {
+		return ca::syscall::readv(fd, buffers.data(), buffers.size());
+	}).transform([](const ca::isz done) {
+		return static_cast<ca::usz>(done);
+	});
+#else
 	ssize_t done{-1};
 	do
 		done = ::readv(fd, reinterpret_cast<const ::iovec*>(buffers.data()), static_cast<int>(buffers.size()));
@@ -19,4 +30,5 @@
 	if (done == -1) [[unlikely]]
 		return ca::failure{ca::sys::impl::libc_error()};
 	return static_cast<ca::usz>(done);
+#endif
 }

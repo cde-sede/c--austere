@@ -1,3 +1,5 @@
+#include "1-primitives/config/architecture.hpp"
+#include "1-primitives/config/platform.hpp"
 #include "1-primitives/integers/i64.hpp"
 #include "1-primitives/integers/u32.hpp"
 #include "1-primitives/integers/u64.hpp"
@@ -6,6 +8,10 @@
 
 #include <sys/stat.h>
 
+
+#if ca_platform(linux) && ca_architecture(x86_64)
+static_assert(sizeof(struct ::stat) == 144U, "libc's struct stat is the kernel's: fstat and newfstatat fill it");
+#endif
 
 static auto kind_of(const mode_t mode) noexcept -> ca::sys::file_kind {
 	switch (mode & S_IFMT) {

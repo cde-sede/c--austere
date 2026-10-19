@@ -1,8 +1,11 @@
+#include "1-primitives/config/architecture.hpp"
 #include "1-primitives/config/platform.hpp"
 #include "2-vocabulary/error.hpp"
 #include "2-vocabulary/failure.hpp"
 #include "3-system/error/last_error.hpp"
 #include "3-system/file/fallocate.hpp"
+#include "3-system/syscall/restarting.hpp"
+#include "3-system/syscall/syscalls.hpp"
 
 #include <errno.h>
 #include <fcntl.h>
@@ -13,7 +16,11 @@
 
 [[nodiscard]] auto ca::sys::fallocate(const int fd, const ca::u64 offset, const ca::u64 size) noexcept -> ca::result<void> {
 
-#if ca_platform(linux)
+#if ca_platform(linux) && ca_architecture(x86_64)
+	return ca::syscall::restarting([fd, offset, size] {
+		return ca::syscall::fallocate(fd, 0, offset, size);
+	}).transform([](ca::isz) {});
+#elif ca_platform(linux)
 	int code{EINTR};
 	while (code == EINTR)
 		code = ::posix_fallocate(fd, static_cast<off_t>(offset), static_cast<off_t>(size));

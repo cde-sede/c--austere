@@ -1,7 +1,10 @@
+#include "1-primitives/config/architecture.hpp"
+#include "1-primitives/config/platform.hpp"
 #include "2-vocabulary/failure.hpp"
 #include "3-system/error/last_error.hpp"
 #include "3-system/io/poll.hpp"
 #include "3-system/io/poll_events.hpp"
+#include "3-system/syscall/syscalls.hpp"
 
 #include <poll.h>
 
@@ -37,8 +40,14 @@ static_assert(ca::sys::poll_events::invalid == POLLNVAL);
 
 [[nodiscard]] auto ca::sys::poll(const ca::span<ca::sys::poll_entry> entries, const ca::i32 timeout_ms) noexcept -> ca::result<ca::usz> {
 
+#if ca_platform(linux) && ca_architecture(x86_64)
+	return ca::syscall::poll(entries.data(), entries.size(), timeout_ms).transform([](const ca::isz ready) {
+		return static_cast<ca::usz>(ready);
+	});
+#else
 	const int ready = ::poll(reinterpret_cast<::pollfd*>(entries.data()), static_cast<nfds_t>(entries.size()), timeout_ms);
 	if (ready == -1) [[unlikely]]
 		return ca::failure{ca::sys::impl::libc_error()};
 	return static_cast<ca::usz>(ready);
+#endif
 }
