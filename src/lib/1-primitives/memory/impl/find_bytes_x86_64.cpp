@@ -55,6 +55,12 @@
 
 static constexpr ca::usz PAGE = 4096U;
 
+/* Hides the cursor from the optimizer, which otherwise keeps a base and an index: an indexed
+   memory operand of a VEX instruction is unlaminated on Intel, one more uop per load. */
+[[gnu::always_inline]] static inline auto unlink(const char*& at) noexcept -> void {
+	asm("" : "+r"(at));
+}
+
 static auto address(const void* const pointer) noexcept -> ca::usz {
 	return reinterpret_cast<ca::usz>(pointer);
 }
@@ -181,6 +187,7 @@ template <typename V>
 			const ca::u64 m3 = ca::impl::byte_mask(equal_at(at + 3U * n, zero));
 			return static_cast<ca::usz>(at - text) + first_of<n>(m0, m1, m2, m3);
 		}
+		unlink(at);
 	}
 }
 
@@ -225,6 +232,7 @@ template <typename V>
 			const ca::usz index = first_of<n>(ca::impl::byte_mask(e0), ca::impl::byte_mask(e1), ca::impl::byte_mask(e2), ca::impl::byte_mask(e3));
 			return const_cast<char*>(at + index);
 		}
+		unlink(at);
 	}
 	for (;; at += n) {
 		const ca::u64 found = ca::impl::byte_mask(equal_at(at, needle));
