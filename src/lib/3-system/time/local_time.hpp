@@ -19,7 +19,8 @@ namespace ca {
 		// -- LOCAL TIME -----------------------------------------------------
 
 		/* @DOC Date and time of seconds since the epoch, in the local time zone (TZ, or
-		   /etc/localtime). errc::out_of_range when the year does not fit. */
+		   /etc/localtime, re-read when it changes). errc::out_of_range when the year does not
+		   fit. */
 		[[nodiscard]] auto local_time(ca::i64 seconds) noexcept -> ca::result<ca::sys::calendar_time>;
 
 	} // namespace sys

@@ -13,6 +13,7 @@
 #include "3-system/file/close.hpp"
 #include "3-system/file/open.hpp"
 #include "3-system/file/read.hpp"
+#include "3-system/file/stat.hpp"
 #include "3-system/fs/options.hpp"
 #include "3-system/memory/mmap_anonymous.hpp"
 #include "3-system/memory/munmap.hpp"
@@ -75,6 +76,19 @@ namespace ca {
 					ca::span<ca::byte> _mapping;
 			}; // struct loaded_zone
 
+			/* @DOC The file a zone was read from and its identity then. With TZ unset a change to
+			   it (/etc/localtime replaced) reloads the zone; a TZ kept the same is not re-read,
+			   as with glibc's tzset. */
+			struct zone_file final {
+					using self = ca::sys::impl::zone_file;
+					char _path[288];
+					ca::u64 _device;
+					ca::u64 _inode;
+					ca::u64 _size;
+					ca::i64 _modified;
+					bool _valid;
+			}; // struct zone_file
+
 		} // namespace impl
 
 	} // namespace sys
@@ -83,8 +97,12 @@ namespace ca {
 
 static constexpr ca::usz KEY = 256U;
 static constexpr ca::usz FILE_LIMIT = ca::usz{1} << 20U;
+static constexpr ca::usz FILE_PATH = KEY + 32U;
+
+static_assert(sizeof(ca::sys::impl::zone_file::_path) == FILE_PATH);
 
 static ca::sys::impl::loaded_zone cached{}; // file-state: ignore
+static ca::sys::impl::zone_file cached_file{}; // file-state: ignore
 static char cached_key[KEY]; // file-state: ignore
 static bool cached_valid = false; // file-state: ignore
 static bool cached_unset = false; // file-state: ignore
@@ -354,11 +372,20 @@ static auto release(ca::sys::impl::loaded_zone& zone) noexcept -> void {
 	zone = ca::sys::impl::loaded_zone{};
 }
 
-/* zone from the TZif file name (absolute, or under /usr/share/zoneinfo); false, zone released,
-   when it cannot be read. */
-static auto read_zone(const char* const name, ca::sys::impl::loaded_zone& zone) noexcept -> bool {
+/* Whether path still names the file it did when identity was taken: same device, inode, size
+   and modification time. */
+static auto unchanged(const ca::sys::impl::zone_file& file) noexcept -> bool {
 
-	char path[KEY + 32U];
+	const auto status = ca::sys::stat(file._path);
+	return status && status->device() == file._device && status->inode() == file._inode && status->size() == file._size
+		&& status->modified() == file._modified;
+}
+
+/* zone from the TZif file name (absolute, or under /usr/share/zoneinfo), its path and identity
+   into file when not null; false, zone released, when it cannot be read. */
+static auto read_zone(const char* const name, ca::sys::impl::loaded_zone& zone, ca::sys::impl::zone_file* const file) noexcept -> bool {
+
+	char path[FILE_PATH];
 	ca::usz length = 0U;
 	if (*name != '/') {
 		for (const char* at = "/usr/share/zoneinfo/"; *at != '\0'; ++at)
@@ -367,15 +394,27 @@ static auto read_zone(const char* const name, ca::sys::impl::loaded_zone& zone) 
 	for (const char* at = name; *at != '\0' && length + 1U < sizeof(path); ++at)
 		path[length++] = *at;
 	path[length] = '\0';
+	const auto status = ca::sys::stat(path);
 	const auto buffer = ca::sys::mmap_anonymous(FILE_LIMIT, ca::sys::protection::read | ca::sys::protection::write);
-	if (!buffer)
+	if (!status || !buffer)
 		return false;
 	const ca::usz size = read_file(path, *buffer);
 	const bool read = size != 0U && parse_tzif(reinterpret_cast<const ca::u8*>(buffer->data()), size, zone);
 	static_cast<void>(ca::sys::munmap(*buffer));
-	if (!read)
+	if (!read) {
 		release(zone);
-	return read;
+		return false;
+	}
+	if (file != nullptr) {
+		for (ca::usz i = 0U; i <= length; ++i)
+			file->_path[i] = path[i];
+		  file->_device = status->device();
+		   file->_inode = status->inode();
+		    file->_size = status->size();
+		file->_modified = status->modified();
+		   file->_valid = true;
+	}
+	return true;
 }
 
 /* A rule naming daylight saving without dates takes the transitions of posixrules with the
@@ -388,7 +427,7 @@ static auto read_zone(const char* const name, ca::sys::impl::loaded_zone& zone) 
 static auto default_transitions(ca::sys::impl::loaded_zone& zone) noexcept -> void {
 
 	ca::sys::impl::loaded_zone rules{};
-	if (!read_zone("posixrules", rules))
+	if (!read_zone("posixrules", rules, nullptr))
 		return;
 	if (rules._types < 2U) {
 		release(rules);
@@ -422,13 +461,14 @@ static auto default_transitions(ca::sys::impl::loaded_zone& zone) noexcept -> vo
 	              zone = rules;
 }
 
-static auto load(const char* const tz, ca::sys::impl::loaded_zone& zone) noexcept -> void {
+static auto load(const char* const tz, ca::sys::impl::loaded_zone& zone, ca::sys::impl::zone_file& file) noexcept -> void {
 
 	release(zone);
+	file._valid = false;
 	const char* name = tz == nullptr ? "/etc/localtime" : tz;
 	if (*name == ':')
 		++name;
-	if (*name == '\0' || read_zone(name, zone) || tz == nullptr)
+	if (*name == '\0' || read_zone(name, zone, &file) || tz == nullptr)
 		return;
 	zone._has_rule = parse_rule(name, zone._rule);
 	if (zone._has_rule && zone._rule._has_daylight && !zone._rule._has_dates)
@@ -477,8 +517,10 @@ static auto offset_in(const ca::sys::impl::loaded_zone& zone, const ca::i64 seco
 		}
 		same = text[i] == cached_key[i];
 	}
+	if (same && cached_unset && cached_file._valid)
+		same = unchanged(cached_file);
 	if (!same) {
-		load(text, cached);
+		load(text, cached, cached_file);
 		cached_unset = text == nullptr;
 		ca::usz length = 0U;
 		for (; text != nullptr && text[length] != '\0' && length + 1U < KEY; ++length)
