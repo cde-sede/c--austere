@@ -16,7 +16,9 @@
 #   // link: freestanding      linked without libc, ca's own _start and runtime (RUNTIME,
 #                              built from src/runtime/), no startup files: twice, -static
 #                              and -static-pie, both run
-#   // link: both              checked twice: against libc, then freestanding
+#   // link: libc              against libc only (threads, or libc compared on purpose)
+#   // link: both              checked twice: against libc, then freestanding; what a test
+#                              that runs (exit, trap) does without a link line
 
 ulimit -c 0
 test=$1
@@ -81,6 +83,7 @@ check() {
 }
 
 link=$(sed -n 's|^// link: ||p' "$test")
+[ -z "$link" ] && [ "$kind" != error ] && link=both
 case $link in
 freestanding)
 	check freestanding "$bin" ;;

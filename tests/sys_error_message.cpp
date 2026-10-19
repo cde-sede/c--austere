@@ -1,4 +1,5 @@
 // expect: exit 0
+// link: libc
 #include "1-primitives/memory/string_length.hpp"
 #include "3-system/error/error_message.hpp"
 

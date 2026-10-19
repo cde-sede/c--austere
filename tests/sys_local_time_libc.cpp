@@ -1,4 +1,5 @@
 // expect: exit 0
+// link: libc
 // ca::sys::local_time (own TZif and POSIX TZ reading on linux x86-64) against glibc's
 // localtime_r, for TZ unset, empty, zone names (northern and southern daylight saving, half-
 // and quarter-hour offsets, a zone without daylight saving), ":" names, absolute paths, POSIX

@@ -1,4 +1,5 @@
 // expect: exit 0
+// link: libc
 #include "3-system/file/read.hpp"
 #include "3-system/io/dup2.hpp"
 #include "3-system/io/pipe.hpp"

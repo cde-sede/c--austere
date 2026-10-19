@@ -1,4 +1,5 @@
 // expect: exit 0
+// link: libc
 // ca::sys::realpath (own resolution on linux x86-64) against glibc's realpath: relative and
 // absolute symlinks, chains, a loop, ".." through a symlink, a trailing slash on a file, and
 // missing components; same text, or the same error.

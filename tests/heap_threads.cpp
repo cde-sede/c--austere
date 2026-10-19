@@ -1,4 +1,5 @@
 // expect: exit 0
+// link: libc
 #include "1-primitives/atomic/atomic.hpp"
 #include "4-lifecycle/memory/heap.hpp"
 

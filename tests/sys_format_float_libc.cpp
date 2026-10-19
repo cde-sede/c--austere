@@ -1,4 +1,5 @@
 // expect: exit 0
+// link: libc
 // ca's float text against glibc's snprintf and strtod: every conversion, precisions -1 to 20, #,
 // special values and pseudo-random doubles; the shortest form against the smallest %.Ng
 // (N >= 15, f32: 6) that reads back. Two documented differences are left out: %#g when rounding
