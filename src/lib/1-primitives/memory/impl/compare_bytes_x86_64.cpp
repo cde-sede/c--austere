@@ -68,6 +68,7 @@
 #include "1-primitives/integers/u32.hpp"
 #include "1-primitives/integers/u64.hpp"
 #include "1-primitives/integers/u8.hpp"
+#include "1-primitives/memory/impl/byte_vectors.hpp"
 #include "1-primitives/memory/impl/cpu_features.hpp"
 #include "1-primitives/memory/impl/loose_bytes.hpp"
 
@@ -91,29 +92,9 @@ template <typename T>
 	return ca::impl::loose<T>(from)._value;
 }
 
-[[gnu::always_inline]] static inline auto mask(const ca::impl::bytes16& v) noexcept -> ca::u32 {
-	return static_cast<ca::u32>(__builtin_ia32_pmovmskb128(v));
-}
-
-/* Not always_inline: the generic templates calling it are compiled without AVX2. The AVX2
-   variants are flattened, so it is inlined there. The mask is opaque: clang otherwise tests it
-   with vpxor and vptest (3 uops, then the compare again to locate). */
-[[gnu::target("avx2")]] static inline auto mask(const ca::impl::bytes32& v) noexcept -> ca::u32 {
-
-	ca::u32 bits = static_cast<ca::u32>(__builtin_ia32_pmovmskb256(v));
-	asm("" : "+r"(bits));
-	return bits;
-}
-
-/* 16 or 32 bytes at p into v, which may run past the range but not into the next page: in asm,
-   so the compiler sees no read beyond the range. The 16-byte one is legacy SSE (AVX state is
-   clean at entry); the 32-byte one, as mask, by reference (no vector crosses an ABI). */
-[[gnu::always_inline]] static inline auto peek(const char* const p, ca::impl::bytes16& v) noexcept -> void {
-	asm("movdqu %1, %0" : "=x"(v) : "m"(*reinterpret_cast<const char(*)[16]>(p)));
-}
-
-[[gnu::target("avx2")]] static inline auto peek(const char* const p, ca::impl::bytes32& v) noexcept -> void {
-	asm("vmovdqu %1, %0" : "=x"(v) : "m"(*reinterpret_cast<const char(*)[32]>(p)));
+template <typename V>
+[[gnu::always_inline]] static inline auto mask(const V& v) noexcept -> ca::u32 {
+	return ca::impl::byte_mask(v);
 }
 
 /* Lanes of 0xff where a and b hold the same byte. */
@@ -302,8 +283,8 @@ template <typename V, bool LOCATE>
 	}
 	V x;
 	V y;
-	peek(a, x);
-	peek(b, y);
+	ca::impl::peek(a, x);
+	ca::impl::peek(b, y);
 	const ca::u32 differ = ~mask(__builtin_bit_cast(V, x == y)) & ((1U << count) - 1U);
 	if constexpr (LOCATE) {
 		if (differ == 0U)

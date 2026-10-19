@@ -2,6 +2,7 @@
 #include "1-primitives/memory/impl/compare_bytes.hpp"
 #include "1-primitives/memory/impl/cpu_features.hpp"
 #include "1-primitives/memory/impl/fill_bytes.hpp"
+#include "1-primitives/memory/impl/find_bytes.hpp"
 #include "3-system/memory/mmap_anonymous.hpp"
 #include "3-system/memory/mprotect.hpp"
 #include "3-system/memory/munmap.hpp"
@@ -11,10 +12,14 @@
 extern "C" auto memset(void* to, int value, ca::usz count) noexcept -> void*;
 extern "C" auto memcmp(const void* a, const void* b, ca::usz count) noexcept -> int;
 extern "C" auto bcmp(const void* a, const void* b, ca::usz count) noexcept -> int;
+extern "C" auto memchr(const void* data, int value, ca::usz count) noexcept -> void*;
+extern "C" auto strlen(const char* text) noexcept -> ca::usz;
 
 static auto (*volatile memset_c)(void*, int, ca::usz) noexcept -> void* = &memset;
 static auto (*volatile memcmp_c)(const void*, const void*, ca::usz) noexcept -> int = &memcmp;
 static auto (*volatile bcmp_c)(const void*, const void*, ca::usz) noexcept -> int = &bcmp;
+static auto (*volatile memchr_c)(const void*, int, ca::usz) noexcept -> void* = &memchr;
+static auto (*volatile strlen_c)(const char*) noexcept -> ca::usz = &strlen;
 
 /* Every range ends at a page followed by a PROT_NONE one, or starts right after one: a load or
    store outside [p, p + count) faults. */
@@ -37,6 +42,18 @@ static auto run(char* const low, char* const high, const ca::usz page, const boo
 				return 5;
 			if (avx2 && (ca::impl::compare_bytes_avx2(a, b, count) != 0 || ca::impl::differ_bytes_avx2(a, b, count) != 0))
 				return 6;
+			if (memchr_c(a, 'y', count) != nullptr || ca::impl::find_byte_sse2(a, 'y', count) != nullptr)
+				return 7;
+			if (avx2 && ca::impl::find_byte_avx2(a, 'y', count) != nullptr)
+				return 8;
+			if (count != 0U) {
+				a[count - 1U] = 0;
+				const bool sse2 = strlen_c(a) == count - 1U && ca::impl::string_length_sse2(a) == count - 1U;
+				const bool wide = !avx2 || ca::impl::string_length_avx2(a) == count - 1U;
+				a[count - 1U] = 'x';
+				if (!sse2 || !wide)
+					return 9;
+			}
 		}
 	}
 	return 0;
