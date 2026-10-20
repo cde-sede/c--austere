@@ -1,0 +1,50 @@
+`ca::trace::symbolizer`: turns the addresses of a `ca::trace::backtrace` (layer 3) into function
+names, source files and lines, reading the running executable's own symbol tables and DWARF
+debug information, without libc or external tools.
+
+```c++
+#include "ca/symbolizer.hpp"
+#include "ca/trace.hpp"
+
+[[gnu::noinline]] static auto where(void) noexcept -> ca::trace::backtrace {
+	return ca::trace::backtrace::capture();
+}
+
+auto main(void) -> int {
+	const ca::trace::backtrace here = where();
+	auto symbols = ca::trace::symbolizer::make();
+	if (!symbols)
+		return 1;
+	ca::trace::location found[ca::trace::location::SCOPES];
+	const ca::usz count = symbols->lookup(here.addresses()[0], found);
+	if (count == 0U || !found[count - 1U].function().find(ca::sv::str{"where"}).holds())
+		return 2;
+	return symbols->cleanup() ? 0 : 3;
+}
+```
+
+`lookup(address, out)` writes the functions an address is in, innermost first: the functions the
+compiler inlined there, then the function they were inlined into, which also carries the offset
+from its start. Printed with `{}`, `symbols.of(backtrace.addresses())` reads:
+
+```text
+    #0 ca::trap (/src/lib/1-primitives/debug/trap.hpp:23) inlined
+       deepest+0x1e (/src/test.cpp:8)
+    #1 middle+0x9 (/src/test.cpp:14)
+    #2 0x7f3c2a42a1c9
+```
+
+| Built with | Names | File and line | Inlined functions |
+|---|---|---|---|
+| `-g` | from DWARF, qualified (`ca::trap`) | yes | yes |
+| no `-g` | from the symbol table, mangled (`_ZL7deepestv`) | no | no |
+| stripped | none | no | no |
+
+DWARF 4 and 5 are read (clang and gcc defaults), including indexed strings, addresses and range
+lists; compressed debug sections (`-gz`) and split DWARF (`-gsplit-dwarf`) are not. Names are not
+demangled: DWARF names need no demangling, symbol-table names stay mangled. Addresses in shared
+libraries (libc) are not found and print as they are.
+
+make() maps the whole executable read-only; names, files and lines borrow from that mapping until
+cleanup(). A lookup scans the unit holding the address entry by entry, so it is for reports, not
+hot paths.

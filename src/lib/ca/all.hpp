@@ -219,5 +219,6 @@
 #include "6-resources/print/print.hpp"
 #include "6-resources/print/print_trace.hpp"
 #include "6-resources/print/printf.hpp"
+#include "6-resources/trace/symbolizer.hpp"
 
 #endif // ca_include_all_hpp
