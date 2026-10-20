@@ -75,7 +75,7 @@ c++ -std=c++2c -nostdinc++ -fno-exceptions -fno-rtti -I src/lib prog.cpp -nostdl
 |---|---|---|
 | [1-primitives](1-primitives.md) | 225 | 199/199 |
 | [2-vocabulary](2-vocabulary.md) | 64 | 19/19 |
-| [3-system](3-system.md) | 177 | 0/0 |
+| [3-system](3-system.md) | 180 | 0/0 |
 | [4-lifecycle](4-lifecycle.md) | 34 | 29/29 |
 | [5-collections](5-collections.md) | 65 | 38/38 |
 | [6-resources](6-resources.md) | 14 | 4/4 |
@@ -388,6 +388,7 @@ Layer 3: the boundary with the operating system.
 - [`environment/getenv.hpp`](3-system.md#environmentgetenvhpp) - Value of environment variable name, or nothing when unset.
 - [`environment/setenv.hpp`](3-system.md#environmentsetenvhpp) - Sets environment variable name to value; an existing one is kept unless overwrite.
 - [`environment/unsetenv.hpp`](3-system.md#environmentunsetenvhpp) - Removes environment variable name; a missing one is success.
+- [`environment/impl/variables.hpp`](3-system.md#environmentimplvariableshpp) - The environment without libc, on the C environ array (the kernel's envp, which libca_runtime's _s...
 - [`error/errc.hpp`](3-system.md#errorerrchpp) - errno codes as constant errors, without <errno.h>.
 - [`error/error_message.hpp`](3-system.md#errorerrormessagehpp) - The system's text for an errno error, untranslated ("No such file or directory"); "Unknown error"...
 - [`error/error_name.hpp`](3-system.md#errorerrornamehpp) - The name of error's ca::errc constant ("no_entry"); empty for a code with none.
@@ -527,6 +528,7 @@ Layer 3: the boundary with the operating system.
 - [`process/waitpid.hpp`](3-system.md#processwaitpidhpp) - Waits for child pid to end and reaps it.
 - [`process/impl/native_resource.hpp`](3-system.md#processimplnativeresourcehpp)
 - [`process/impl/native_signal_set.hpp`](3-system.md#processimplnativesignalsethpp)
+- [`process/impl/spawn.hpp`](3-system.md#processimplspawnhpp) - Processes without libc, on raw syscalls: what libca_runtime's fork, execvp, posix_spawn, posix_sp...
 - [`process/impl/wait_status_of.hpp`](3-system.md#processimplwaitstatusofhpp)
 - [`random/getentropy.hpp`](3-system.md#randomgetentropyhpp) - Fills buffer from the kernel's secure random source, any size (fetched 256 bytes at a time).
 - [`syscall/argument.hpp`](3-system.md#syscallargumenthpp) - What a raw syscall takes in a register: an integer, an enum or a pointer.
@@ -543,6 +545,7 @@ Layer 3: the boundary with the operating system.
 - [`thread/thread_key.hpp`](3-system.md#threadthreadkeyhpp) - A per-thread slot from thread_key_create, holding one pointer per thread.
 - [`thread/thread_key_create.hpp`](3-system.md#threadthreadkeycreatehpp) - A new per-thread slot, null in every thread.
 - [`thread/thread_key_set.hpp`](3-system.md#threadthreadkeysethpp) - Stores value in the calling thread's slot of key.
+- [`thread/impl/key_table.hpp`](3-system.md#threadimplkeytablehpp) - Thread keys without libc, for a process of one thread (ca starts none yet): one value per key, pr...
 - [`time/calendar_time.hpp`](3-system.md#timecalendartimehpp) - A moment as a date and time of day in some time zone, by utc_time or local_time.
 - [`time/clock.hpp`](3-system.md#timeclockhpp) - Clocks to read with now().
 - [`time/local_time.hpp`](3-system.md#timelocaltimehpp) - Date and time of seconds since the epoch, in the local time zone (TZ, or /etc/localtime, re-read...

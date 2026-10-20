@@ -115,6 +115,40 @@ Sets environment variable name to value; an existing one is kept unless overwrit
 
 Removes environment variable name; a missing one is success.
 
+## `environment/impl/variables.hpp`
+
+### namespace `impl`
+
+```c++
+namespace impl;
+```
+
+The environment without libc, on the C environ array (the kernel's envp, which libca_runtime's _start points it at): what libca_runtime's getenv, setenv and unsetenv are. In libc mode ca::sys::getenv and the others stay libc's, which owns environ there. Linux x86-64 only. Not thread-safe, as glibc's.
+
+### function `impl::find_variable`
+
+```c++
+[[nodiscard]] auto find_variable(const char* name) noexcept -> char*;
+```
+
+The value of name, or null when unset.
+
+### function `impl::set_variable`
+
+```c++
+[[nodiscard]] auto set_variable(const char* name, const char* value, bool overwrite) noexcept -> ca::result<void>;
+```
+
+Sets name to value, an existing one kept unless overwrite: "NAME=value" copied into pages of its own and, to add a name, the array into a larger one; what it replaces stays allocated, as with glibc. errc::invalid_argument for an empty name or one with '=', errc::out_of_memory.
+
+### function `impl::unset_variable`
+
+```c++
+[[nodiscard]] auto unset_variable(const char* name) noexcept -> ca::result<void>;
+```
+
+Removes every entry of name. errc::invalid_argument as set_variable.
+
 ## `error/`
 
 System error codes and where they come from.
@@ -2628,6 +2662,98 @@ Fills sigset_t native from set.
 ```
 
 The signals 1..64 in sigset_t native.
+
+## `process/impl/spawn.hpp`
+
+### namespace `impl`
+
+```c++
+namespace impl;
+```
+
+Processes without libc, on raw syscalls: what libca_runtime's fork, execvp, posix_spawn, posix_spawnp and posix_spawn_file_actions_* are. In libc mode ca::sys::fork and the others stay libc's (its fork runs atfork handlers and keeps its own state right). Linux x86-64 only.
+
+spawn_process as glibc's posix_spawn: the parent blocks every signal and clones with CLONE_VM and CLONE_VFORK (no copy of the address space; the parent sleeps until the child execs or exits) onto a stack of its own. The child sets caught signals back to their default (a handler of the parent must not run in a child sharing its memory), restores the mask, applies the file actions, execs; a failure leaves its error in shared memory and exits 127, and the parent then reaps the child and returns that error. The child makes raw syscalls only: it shares the parent's memory and thread pointer, so it must not touch thread_local state (sys::last_error).
+
+### struct `impl::spawn_action`
+
+```c++
+struct spawn_action final;
+```
+
+One file action of a spawn: close fd, dup2(fd, target), or open path at fd.
+
+### struct `impl::spawn_list`
+
+```c++
+struct spawn_list final;
+```
+
+The file actions of a spawn, in the storage of a posix_spawn_file_actions_t (glibc's is 80 bytes; this uses 16): a malloc'd array, each path a copy.
+
+### function `impl::spawn_list_init`
+
+```c++
+auto spawn_list_init(ca::sys::impl::spawn_list& list) noexcept -> void;
+```
+
+An empty list.
+
+### function `impl::spawn_list_destroy`
+
+```c++
+auto spawn_list_destroy(ca::sys::impl::spawn_list& list) noexcept -> void;
+```
+
+Frees the list and its paths, leaving it empty.
+
+### function `impl::spawn_list_add_close`
+
+```c++
+[[nodiscard]] auto spawn_list_add_close(ca::sys::impl::spawn_list& list, int fd) noexcept -> ca::result<void>;
+```
+
+Adds closing fd. errc::bad_descriptor for a negative one, errc::out_of_memory.
+
+### function `impl::spawn_list_add_dup2`
+
+```c++
+[[nodiscard]] auto spawn_list_add_dup2(ca::sys::impl::spawn_list& list, int fd, int target) noexcept -> ca::result<void>;
+```
+
+Adds dup2(fd, target), which clears close-on-exec when fd is target. Errors as spawn_list_add_close.
+
+### function `impl::spawn_list_add_open`
+
+```c++
+[[nodiscard]] auto spawn_list_add_open(ca::sys::impl::spawn_list& list, int fd, const char* path, int flags, ca::u32 mode) noexcept -> ca::result<void>;
+```
+
+Adds opening path (copied) with flags and mode as fd. Errors as spawn_list_add_close.
+
+### function `impl::spawn_process`
+
+```c++
+[[nodiscard]] auto spawn_process(const char* path, bool search, const ca::sys::impl::spawn_list* actions, char* const* argv, char* const* envp) noexcept -> ca::result<ca::i32>;
+```
+
+Starts path as a child with argv and envp (null: the environment), looked up in $PATH when search and it has no '/', the actions applied first (null for none); returns its id. The error of what failed in the child, when something did.
+
+### function `impl::execute_searching`
+
+```c++
+[[nodiscard]] auto execute_searching(const char* file, char* const* argv, char* const* envp) noexcept -> ca::error;
+```
+
+execve of file with argv and envp, looked up in $PATH (/bin:/usr/bin when unset; an empty entry is ".") when it has no '/'. Returns only on failure, its error: errc::access_denied when some candidate was denied and none found. Raw syscalls only, so a vfork child may call it.
+
+### function `impl::fork_process`
+
+```c++
+[[nodiscard]] auto fork_process(void) noexcept -> ca::result<ca::i32>;
+```
+
+A copy of the process (clone with SIGCHLD only): the child's id, 0 in the child.
 
 ## `process/impl/wait_status_of.hpp`
 
@@ -5975,6 +6101,40 @@ A new per-thread slot, null in every thread. When a thread other than the main o
 ```
 
 Stores value in the calling thread's slot of key.
+
+## `thread/impl/key_table.hpp`
+
+### namespace `impl`
+
+```c++
+namespace impl;
+```
+
+Thread keys without libc, for a process of one thread (ca starts none yet): one value per key, process-wide. What libca_runtime's pthread_key_create, setspecific and getspecific are; ca::sys::thread_key_create and thread_key_set call those. As glibc's for the main thread, destructors never run. Linux x86-64 only.
+
+### function `impl::create_key`
+
+```c++
+[[nodiscard]] auto create_key(void) noexcept -> ca::result<ca::usz>;
+```
+
+A new key, its value null. errc::try_again once 128 exist.
+
+### function `impl::set_key`
+
+```c++
+[[nodiscard]] auto set_key(ca::usz key, void* value) noexcept -> ca::result<void>;
+```
+
+Sets key's value. errc::invalid_argument for a key never created.
+
+### function `impl::key_value`
+
+```c++
+[[nodiscard]] auto key_value(ca::usz key) noexcept -> void*;
+```
+
+key's value; null for a key never created.
 
 ## `time/`
 

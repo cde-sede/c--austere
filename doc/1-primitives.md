@@ -1377,6 +1377,14 @@ Not always_inline: generic templates calling it are compiled without AVX2; the A
 
 peek at p aligned to the vector size: such a load never crosses a page, so it may cover bytes before and after any range inside it.
 
+### function `impl::broadcast`
+
+```c++
+[[gnu::target("avx2")]] inline auto broadcast(const int value, ca::impl::bytes32& v) noexcept -> void;
+```
+
+The low byte of value in every lane of v: vmovd and vpbroadcastb. A 32-bit word broadcast puts an imul on the path to the first use (memchr 16 - 256 B 7 - 13% slower); V{} + value is vpinsrb lane by lane on gcc. By reference, as peek.
+
 ## `memory/impl/compare_bytes.hpp`
 
 ### alias `compare_bytes_function`

@@ -8,12 +8,12 @@
 #include "1-primitives/integers/u64.hpp"
 #include "1-primitives/integers/usz.hpp"
 #include "1-primitives/memory/copy_bytes.hpp"
+#include "3-system/error/errc.hpp"
+#include "3-system/error/last_error.hpp"
 #include "4-lifecycle/memory/allocation.hpp"
 #include "4-lifecycle/memory/heap.hpp"
 
 #if ca_platform(linux) && ca_architecture(x86_64)
-
-extern "C" auto __errno_location(void) noexcept -> int*;
 
 static constexpr ca::usz HEADER = 16U;
 
@@ -24,7 +24,7 @@ static auto header_of(void* const user) noexcept -> ca::u64* {
 
 static auto out_of_memory(void) noexcept -> void* {
 
-	*__errno_location() = 12;
+	ca::sys::set_last_error(ca::errc::out_of_memory);
 	return nullptr;
 }
 
@@ -71,7 +71,6 @@ extern "C" {
 	}
 
 	auto free(void* const user) noexcept -> void { // ns-leak: ignore
-
 		if (user != nullptr)
 			give_back(user);
 	}
@@ -95,7 +94,7 @@ extern "C" {
 	auto aligned_alloc(const ca::usz alignment, const ca::usz size) noexcept -> void* { // ns-leak: ignore
 
 		if (alignment == 0U || (alignment & (alignment - 1U)) != 0U) [[unlikely]] {
-			*__errno_location() = 22;
+			ca::sys::set_last_error(ca::errc::invalid_argument);
 			return nullptr;
 		}
 		return take(size, alignment > HEADER ? alignment : HEADER, false);
@@ -104,10 +103,10 @@ extern "C" {
 	auto posix_memalign(void** const out, const ca::usz alignment, const ca::usz size) noexcept -> int { // ns-leak: ignore
 
 		if (alignment < sizeof(void*) || (alignment & (alignment - 1U)) != 0U) [[unlikely]]
-			return 22;
+			return ca::errc::invalid_argument.code();
 		void* const block = take(size, alignment > HEADER ? alignment : HEADER, false);
 		if (block == nullptr) [[unlikely]]
-			return 12;
+			return ca::errc::out_of_memory.code();
 		*out = block;
 		return 0;
 	}
