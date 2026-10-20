@@ -3,6 +3,7 @@
 #ifndef ca_include_trace_hpp
 #define ca_include_trace_hpp
 
+#include "3-system/trace/attach.hpp"
 #include "3-system/trace/context.hpp"
 #include "3-system/trace/fail.hpp"
 #include "5-collections/trace/context.hpp"

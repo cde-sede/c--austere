@@ -173,6 +173,7 @@
 #include "3-system/time/sleep_for.hpp"
 #include "3-system/time/utc_seconds.hpp"
 #include "3-system/time/utc_time.hpp"
+#include "3-system/trace/attach.hpp"
 #include "3-system/trace/context.hpp"
 #include "3-system/trace/fail.hpp"
 #include "4-lifecycle/ctx.hpp"

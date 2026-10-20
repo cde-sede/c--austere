@@ -31,6 +31,9 @@
 #                        str_python test, doc); make gen brings them back
 #
 #   make CXX=g++ MODE=release
+#   make MODE=release FRAME_POINTERS=1   keep frame pointers, for full trap backtraces
+#                        (ca::trace::backtrace); on by default in debug; make clean after
+#                        changing it, objects are not rebuilt for it
 #
 # Sources are every .cpp under src/, found recursively. Each compiles to its
 # own .o under the build directory, mirroring the source tree. -MMD -MP emit a
@@ -60,10 +63,16 @@ endif
 
 ifeq ($(MODE),release)
 CXXFLAGS += -O2 -DNDEBUG
+FRAME_POINTERS ?= 0
 else ifeq ($(MODE),debug)
 CXXFLAGS += -g -O1
+FRAME_POINTERS ?= 1
 else
 $(error MODE must be debug or release)
+endif
+
+ifeq ($(FRAME_POINTERS),1)
+CXXFLAGS += -fno-omit-frame-pointer -mno-omit-leaf-frame-pointer
 endif
 
 GENERATORS := gen_traits gen_syscalls gen_unicode gen_float_tables gen_includes gen_str_test autodoc

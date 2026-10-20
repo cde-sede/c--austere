@@ -16,6 +16,8 @@
 #include "2-vocabulary/result.hpp"
 #include "2-vocabulary/sv/str.hpp"
 #include "3-system/error/errc.hpp"
+#include "3-system/trace/attach.hpp"
+#include "3-system/trace/backtrace.hpp"
 #include "3-system/trace/context.hpp"
 #include "3-system/trace/fail.hpp"
 #include "4-lifecycle/outcome.hpp"
@@ -49,21 +51,6 @@ namespace ca {
 				return E{error};
 		}
 
-		/* @DOC recovery::_accept for a context failing with E: takes an error of type E, copied, or
-		   moved when E cannot be copied. */
-		template <typename E>
-		auto accept_context_error(void* const sink, void* const error, const void* const type) noexcept -> bool {
-
-			if (type != ca::impl::type_key<E>)
-				return false;
-			ca::optional<E>& out = *static_cast<ca::optional<E>*>(sink);
-			if constexpr (ca::is_copy_constructible<E>)
-				out.emplace(*static_cast<const E*>(error));
-			else
-				out.emplace(ca::move(*static_cast<E*>(error)));
-			return true;
-		}
-
 		/* @DOC Sets point, makes it the thread's innermost, runs body; true when a trap came back
 		   to point. Opaque to gcc's interprocedural analysis: when body never returns normally, gcc
 		   would otherwise take the landing path for the only exit and assume body's stores never
@@ -86,7 +73,9 @@ namespace ca {
 		/* @DOC The ca::error of a trap without an E: the error of the failed result accessed, its
 		   trace extended with the reason, else not_recoverable with a new trace; the frame where
 		   the trap was (the raise call), or with no location when unknown. Recorded on info the
-		   first time, so the contexts a trap passes and the one taking it share one frame. */
+		   first time, so the contexts a trap passes and the one taking it share one frame, with
+		   the trap's backtrace attached; the first time is always while the trapping frames are
+		   alive (a context passed, or the one taking it, before the trap unwinds). */
 		[[gnu::cold, gnu::noinline]] inline auto traced_error(ca::impl::trap_info& info) noexcept -> ca::error {
 
 			if (!info._traced) {
@@ -94,6 +83,7 @@ namespace ca {
 				const ca::error error = info._code != 0
 				                      ? ca::trace::context(ca::error{info._code, info._trace}, reason, info._where).error()
 				                      : ca::trace::fail(ca::errc::not_recoverable, reason, info._where).error();
+				ca::trace::attach(error, ca::trace::backtrace::walk(info._frame));
 				  info._code = error.code();
 				 info._trace = error.trace();
 				info._traced = true;
@@ -101,15 +91,43 @@ namespace ca {
 			return ca::error{info._code, info._trace};
 		}
 
+		/* @DOC recovery::_take for a context failing with E, before the trap unwinds to it: takes
+		   the trap's error when an E, copied, or moved when E cannot be copied (its trace, if any,
+		   gets the trap's backtrace); else records the trap in the thread's trace
+		   (traced_error). */
+		template <typename E>
+		auto take_context(ca::impl::recovery* const point, ca::impl::trap_info& info) noexcept -> void {
+
+			if (info._payload == nullptr || info._type != ca::impl::type_key<E>) {
+				static_cast<void>(ca::impl::traced_error(info));
+				return;
+			}
+			ca::optional<E>& out = *static_cast<ca::optional<E>*>(point->_sink);
+			if constexpr (ca::is_copy_constructible<E>)
+				out.emplace(*static_cast<const E*>(info._payload));
+			else
+				out.emplace(ca::move(*static_cast<E*>(info._payload)));
+			point->_accepted = true;
+			if (info._trace != 0U)
+				ca::trace::attach(ca::error{info._code, info._trace}, ca::trace::backtrace::walk(info._frame));
+		}
+
 		/* @DOC run_context's Handles for a context without handles: it takes every trap. */
 		struct takes_every_trap final {
-		};
+
+				using self = ca::impl::takes_every_trap;
+
+		}; // struct takes_every_trap
 
 		template <typename Handles, typename Leave>
 		struct context_callbacks final {
+
+				using self = ca::impl::context_callbacks<Handles, Leave>;
+
 				Handles* _handles;
 				Leave* _leave;
-		};
+
+		}; // struct context_callbacks
 
 		/* @DOC recovery::_handles: the context's handles on the trap. */
 		template <typename Handles, typename Leave>
@@ -164,7 +182,7 @@ namespace ca {
 				 point._unwind = &ca::impl::unwind_context<E, Handles, Leave>;
 			}
 			   point._sink = &error;
-			 point._accept = &ca::impl::accept_context_error<E>;
+			   point._take = &ca::impl::take_context<E>;
 			auto body = [&](void) noexcept -> void {
 				if constexpr (ca::is_void<decltype(enter())>)
 					enter();

@@ -168,7 +168,7 @@ the trap, with every frame intact.
 | Piece | Role |
 |---|---|
 | `handles(const ca::trapped&)` | optional: decides at the trap site; `ca::handler{f}` for `ca::with` |
-| `ca::trapped` | the trap: `reason()`, `where()`, `error()`, `as<E>()`, `resumable()` |
+| `ca::trapped` | the trap: `reason()`, `where()`, `error()`, `as<E>()`, `resumable()`, `backtrace()` |
 | `ca::verdict` | `take`, `pass`, `resume` |
 | `leave(error, ca::outcome)` | optional second parameter: `succeeded`, `taken` or `passed` |
 | `ca::ask(reason, error)` | a trap the caller can come back from: true when a context resumed it |

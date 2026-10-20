@@ -67,3 +67,56 @@ thread starts another.
 
 Traps join the same trace: when a trap fails a context (`ca::with`), the context's error carries
 a frame with the trap's reason, and `result::raise` adds an "error raised" frame.
+
+### Backtraces
+
+A trap also leaves the calls that led to it. Before the trap unwinds, while its frames are still
+alive, the context taking it attaches a `trace::backtrace` to the error's trace:
+`trace::of(e).backtrace()` returns its addresses, and the printed trace ends with them. Only the
+first trap a trace meets keeps one, the trap nearest the origin.
+
+| Function | Does |
+|---|---|
+| `trace::backtrace::capture()` | the calls leading to the caller, the caller first |
+| `trap.backtrace()` | in a context's `handles`, the calls leading to the trap (layer 4) |
+| `trace::attach(error, backtrace)` | gives error's trace a backtrace, unless it has one |
+| `record::backtrace()` | the addresses attached to the trace, empty when none |
+
+```c++
+#include "ca/debug.hpp"
+#include "ca/trace.hpp"
+#include "ca/with.hpp"
+
+[[gnu::noinline]] static auto check(const int value) noexcept -> void {
+	if (value < 0)
+		ca::trap("negative");
+}
+
+auto main(void) -> int {
+	auto done = ca::with([](void) noexcept { check(-1); }, [](const ca::error*) noexcept {});
+	if (done)
+		return 1;
+	const ca::trace::record record = ca::trace::of(done.error());
+	if (record.backtrace().empty())
+		return 2;
+	const ca::trace::backtrace here = ca::trace::backtrace::capture();
+	return here.empty() ? 3 : 0;
+}
+```
+
+```text
+State not recoverable
+  trapped: negative
+  backtrace:
+    #0 exe+0x1a2f
+    #1 exe+0x1b88
+    #2 0x7f3c2a42a1c9
+```
+
+The walk follows frame pointers, so code built without them (`-fno-omit-frame-pointer
+-mno-omit-leaf-frame-pointer`; ca's debug builds keep them, `make FRAME_POINTERS=1` in release)
+gives the first frame right and stops or strays after it. Every read goes through the kernel
+(`process_vm_readv`), so a broken chain ends the walk instead of crashing the program. An address
+inside the executable prints relative to where it is loaded, as `addr2line -f -C -e app 0x1a2f`
+takes it; each points inside its call instruction. Linux x86-64 only; elsewhere backtraces are
+empty.

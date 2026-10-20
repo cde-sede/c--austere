@@ -1,6 +1,7 @@
 #ifndef ca_vocabulary_ask_hpp
 #define ca_vocabulary_ask_hpp
 
+#include "1-primitives/debug/frame_address.hpp"
 #include "1-primitives/debug/recovery.hpp"
 #include "1-primitives/debug/source_location.hpp"
 #include "2-vocabulary/error.hpp"
@@ -19,6 +20,7 @@ namespace ca {
 
 			ca::impl::trap_info info{};
 			   info._reason = reason;
+			    info._frame = ca::impl::frame_address();
 			    info._where = where;
 			     info._code = error.code();
 			    info._trace = error.trace();

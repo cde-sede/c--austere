@@ -37,6 +37,7 @@ auto ca::trace::impl::start(const ca::error error, const ca::sv::str message, co
 	   state._code = error.code();
 	   state._size = 0U;
 	state._dropped = 0U;
+	state._backtrace.clear();
 	ca::trace::impl::push(message, where);
 	return ca::error{error.code(), id};
 }

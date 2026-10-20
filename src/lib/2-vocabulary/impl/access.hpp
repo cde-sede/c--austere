@@ -1,6 +1,7 @@
 #ifndef ca_vocabulary_impl_access_hpp
 #define ca_vocabulary_impl_access_hpp
 
+#include "1-primitives/debug/frame_address.hpp"
 #include "1-primitives/debug/recovery.hpp"
 #include "1-primitives/debug/source_location.hpp"
 #include "1-primitives/debug/trap.hpp"
@@ -28,7 +29,6 @@ namespace ca {
 		   moves out when it cannot copy it. */
 		template <typename E>
 		inline auto offer_error(ca::impl::trap_info& info, const E& error) noexcept -> void {
-
 			if constexpr (ca::is_same<E, ca::error>) {
 				 info._code = error.code();
 				info._trace = error.trace();
@@ -55,6 +55,7 @@ namespace ca {
 
 			ca::impl::trap_info info{};
 			info._reason = "value accessed while absent";
+			 info._frame = ca::impl::frame_address();
 			(ca::impl::offer_error(info, error), ...);
 			ca::impl::stop(info);
 		}
@@ -67,6 +68,7 @@ namespace ca {
 
 			ca::impl::trap_info info{};
 			info._reason = "error raised";
+			 info._frame = ca::impl::frame_address();
 			 info._where = where;
 			ca::impl::offer_error(info, error);
 			if constexpr (requires { error.cleanup(); }) {

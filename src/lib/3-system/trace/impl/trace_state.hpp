@@ -6,6 +6,7 @@
 #include "1-primitives/integers/usz.hpp"
 #include "2-vocabulary/error.hpp"
 #include "2-vocabulary/sv/str.hpp"
+#include "3-system/trace/backtrace.hpp"
 #include "3-system/trace/frame.hpp"
 
 
@@ -23,8 +24,9 @@ namespace ca {
 
 			inline constexpr ca::usz CAPACITY = 32U;
 
-			/* @DOC The thread's one trace: the error it follows (id, code) and its first CAPACITY
-			   frames, later ones counted in dropped. */
+			/* @DOC The thread's one trace: the error it follows (id, code), its first CAPACITY
+			   frames, later ones counted in dropped, and the backtrace of the first trap it met
+			   (empty when none). */
 			struct trace_state final {
 
 					using self = ca::trace::impl::trace_state;
@@ -34,6 +36,7 @@ namespace ca {
 					ca::usz _size;
 					ca::usz _dropped;
 					ca::trace::frame _frames[CAPACITY];
+					ca::trace::backtrace _backtrace;
 
 			}; // struct trace_state
 

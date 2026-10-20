@@ -9,9 +9,9 @@ auto main(void) -> int {
 	auto trapped = ca::with([](void) noexcept { ca::trap("boom"); }, [](const ca::error*) noexcept {});
 	if (trapped)
 		return 1;
-	char buffer[256];
+	char buffer[2048];
 	ca::io::memory_writer m{buffer};
 	if (!ca::print_trace(m, trapped.error()))
 		return 2;
-	return m.view() == ca::sv::str{"State not recoverable\n  trapped: boom\n"} ? 0 : 3;
+	return m.view().starts_with(ca::sv::str{"State not recoverable\n  trapped: boom\n  backtrace:\n    #0 exe+0x"}) ? 0 : 3;
 }

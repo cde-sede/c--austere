@@ -7,6 +7,7 @@
 #include "2-vocabulary/error.hpp"
 #include "2-vocabulary/optional.hpp"
 #include "2-vocabulary/sv/str.hpp"
+#include "3-system/trace/backtrace.hpp"
 
 
 // -- CA NAMESPACE -----------------------------------------------------------
@@ -19,8 +20,8 @@ namespace ca {
 	/* @DOC A trap as a context's handles sees it, at the trap site, before anything unwinds: its
 	   reason, where it was (line 0 when unknown), the ca::error of the failed result accessed (or
 	   of ca::ask), the error object itself by type (as<E>, nullptr for another type or for a
-	   ca::error, which error() gives), and whether it can resume (ca::ask). Valid during handles
-	   only. */
+	   ca::error, which error() gives), whether it can resume (ca::ask), and the calls that led
+	   to it (backtrace). Valid during handles only. */
 	class trapped final {
 
 
@@ -72,6 +73,12 @@ namespace ca {
 
 			[[nodiscard]] constexpr auto resumable(void) const noexcept -> bool {
 				return _info->_resumable;
+			}
+
+			/* @DOC The calls leading to the trap, the trap site first (see ca::trace::backtrace):
+			   the frames are still alive while handles runs. */
+			[[nodiscard]] auto backtrace(void) const noexcept -> ca::trace::backtrace {
+				return ca::trace::backtrace::walk(_info->_frame);
 			}
 
 	}; // class trapped

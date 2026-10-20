@@ -51,7 +51,7 @@ namespace ca {
 	   ca::handler is the context's handles: `ca::with(ca::handler{decide}, enter, leave)`;
 	   without one, the context takes every trap. */
 	template <typename E = ca::error, typename Enter, typename Leave, typename... Args>
-		requires (!ca::impl::is_handler<ca::remove_cvref<Enter>>)
+	requires (!ca::impl::is_handler<ca::remove_cvref<Enter>>)
 	[[nodiscard]] auto with(Enter&& enter, Leave&& leave, Args&&... args) noexcept -> ca::result<void, E> {
 
 		ca::impl::takes_every_trap handles{};
