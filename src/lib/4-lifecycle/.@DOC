@@ -155,3 +155,105 @@ A trap skips the destructors of the frames it unwinds: what they owned leaks, so
 where a context releases what `enter` acquired. Inside a context, reading a failed result fails
 the context with that result's error, so a body can be written as straight-line code with `*r`
 and still report the first error that happened.
+
+### Which context takes a trap
+
+A trap runs in two phases. First, at the trap site and before anything unwinds, each context from
+the innermost outward decides on it through `handles(const ca::trapped&) -> ca::verdict`: `take`
+it, `pass` it to an outer context, or `resume` the code (`ca::ask` only). Then every context
+passed runs its `leave`, innermost first, and the trap unwinds to the one that took it. A context
+without `handles` takes every trap, as before. No context taking it stops the program right at
+the trap, with every frame intact.
+
+| Piece | Role |
+|---|---|
+| `handles(const ca::trapped&)` | optional: decides at the trap site; `ca::handler{f}` for `ca::with` |
+| `ca::trapped` | the trap: `reason()`, `where()`, `error()`, `as<E>()`, `resumable()` |
+| `ca::verdict` | `take`, `pass`, `resume` |
+| `leave(error, ca::outcome)` | optional second parameter: `succeeded`, `taken` or `passed` |
+| `ca::ask(reason, error)` | a trap the caller can come back from: true when a context resumed it |
+
+A context passed over still runs `leave`, with outcome `passed`, and its `run` never returns: the
+trap goes on to the outer context, so `leave` must release everything. `handles`, and `leave` when
+passed, run while the trap is in flight and must not trap: that stops the program.
+
+`ca::ask` is for code written to carry on: it returns true when a context resumed it (it fixed the
+cause, check again) and false when none took it (fail the usual way). Contexts without `handles`
+pass it; one that answers `take` unwinds there as for a trap.
+
+```c++
+#include "ca/ask.hpp"
+#include "ca/context_manager.hpp"
+#include "ca/debug.hpp"
+#include "ca/error.hpp"
+#include "ca/handler.hpp"
+#include "ca/outcome.hpp"
+#include "ca/trapped.hpp"
+#include "ca/with.hpp"
+
+struct pool final {
+	int free;
+	int spare;
+};
+
+static auto take(pool& from) noexcept -> ca::result<void> {
+	while (from.free == 0) {
+		if (!ca::ask("pool empty", ca::errc::out_of_memory))
+			return ca::failure{ca::errc::out_of_memory};
+	}
+	--from.free;
+	return {};
+}
+
+struct refill final : ca::context_manager<refill> {
+	pool* from = nullptr;
+	ca::outcome ended = ca::outcome::succeeded;
+
+	auto handles(const ca::trapped& trap) noexcept -> ca::verdict {
+		if (!trap.resumable())
+			return ca::verdict::pass;
+		if (this->from->spare == 0)
+			return ca::verdict::pass;
+		--this->from->spare;
+		++this->from->free;
+		return ca::verdict::resume;
+	}
+
+	auto enter(pool& p, const int count) noexcept -> void {
+		this->from = &p;
+		for (int i = 0; i < count; ++i)
+			take(p).raise();
+	}
+
+	auto leave(const ca::error*, const ca::outcome outcome) noexcept -> void {
+		this->ended = outcome;
+	}
+};
+
+auto main(void) -> int {
+	pool p{1, 1};
+	refill r{};
+	if (!r.run(p, 2) || p.spare != 0 || r.ended != ca::outcome::succeeded)
+		return 1;
+
+	auto outer = ca::with(
+		[&](void) noexcept {
+			static_cast<void>(r.run(p, 1));
+		},
+		[](const ca::error*) noexcept {});
+	if (outer || outer.error() != ca::errc::out_of_memory || r.ended != ca::outcome::passed)
+		return 2;
+
+	auto only_mine = ca::with(
+		ca::handler{[](const ca::trapped& trap) noexcept {
+			return trap.reason() == ca::sv::str{"mine"} ? ca::verdict::take : ca::verdict::pass;
+		}},
+		[](void) noexcept { ca::trap("mine"); },
+		[](const ca::error*) noexcept {});
+	return only_mine ? 3 : 0;
+}
+```
+
+In the second run the pool is empty and `refill` has no spare: it passes the `ask`, `take` returns
+its failure, `raise` traps, `refill` passes that trap too, and the outer context takes it, after
+`refill`'s `leave` saw `passed`.

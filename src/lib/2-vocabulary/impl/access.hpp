@@ -23,52 +23,57 @@ namespace ca {
 			ca::trap("value accessed without a check");
 		}
 
-		/* @DOC Leaves error on the innermost recovery point, for the context to fail with: a
-		   ca::error, or what error() of E returns, as code and trace; any other E offered whole to
-		   the context, which moves it out when it cannot copy it. */
+		/* @DOC Puts error on the trap, for the context taking it to fail with: a ca::error, or what
+		   error() of E returns, as code and trace; any other E offered whole, which the context
+		   moves out when it cannot copy it. */
 		template <typename E>
-		inline auto leave_error(const E& error) noexcept -> void {
+		inline auto offer_error(ca::impl::trap_info& info, const E& error) noexcept -> void {
 
-			ca::impl::recovery* const point = ca::impl::current_recovery;
-			if (point == nullptr)
-				return;
 			if constexpr (ca::is_same<E, ca::error>) {
-				 point->_code = error.code();
-				point->_trace = error.trace();
+				 info._code = error.code();
+				info._trace = error.trace();
 			}
 			else {
 				if constexpr (requires { { error.error() } -> ca::is_same<ca::error>; }) {
-					 point->_code = error.error().code();
-					point->_trace = error.error().trace();
+					 info._code = error.error().code();
+					info._trace = error.error().trace();
 				}
-				point->_accepted = point->_accept(point->_sink, const_cast<E*>(ca::addressof(error)), ca::impl::type_key<E>);
+				info._payload = const_cast<E*>(ca::addressof(error));
+				   info._type = ca::impl::type_key<E>;
 			}
+		}
+
+		template <typename E>
+		auto discard_error(void* const error) noexcept -> void {
+			static_cast<void>(static_cast<E*>(error)->cleanup());
 		}
 
 		/* @DOC The stand-in of the value (the error for a result) goes with the trap, see
-		   leave_error. */
+		   offer_error. */
 		template <typename... E>
 		[[noreturn, gnu::cold, gnu::noinline]] inline auto value_accessed_while_absent(const E&... error) noexcept -> void {
 
-			(ca::impl::leave_error(error), ...);
-			ca::trap("value accessed while absent");
+			ca::impl::trap_info info{};
+			info._reason = "value accessed while absent";
+			(ca::impl::offer_error(info, error), ...);
+			ca::impl::stop(info);
 		}
 
 		/* @DOC result::raise on a failure, at where; the error goes with the trap, see
-		   leave_error. An owned error (the failure raise(on_error) made) that the context did not
-		   take is cleaned up first when it has a cleanup(), since the trap abandons it. */
+		   offer_error. An owned error (the failure raise(on_error) made) that no context takes is
+		   cleaned up first when it has a cleanup(), since the trap abandons it. */
 		template <typename E>
 		[[noreturn, gnu::cold, gnu::noinline]] inline auto error_raised(E& error, const ca::source_location where, const bool owned) noexcept -> void {
 
-			ca::impl::recovery* const point = ca::impl::current_recovery;
-			if (point != nullptr)
-				point->_where = where;
-			ca::impl::leave_error(error);
+			ca::impl::trap_info info{};
+			info._reason = "error raised";
+			 info._where = where;
+			ca::impl::offer_error(info, error);
 			if constexpr (requires { error.cleanup(); }) {
-				if (owned && (point == nullptr || !point->_accepted))
-					static_cast<void>(error.cleanup());
+				if (owned)
+					info._discard = &ca::impl::discard_error<E>;
 			}
-			ca::trap("error raised");
+			ca::impl::stop(info);
 		}
 
 		[[noreturn, gnu::cold, gnu::noinline]] inline auto error_accessed_on_a_success(void) noexcept -> void {

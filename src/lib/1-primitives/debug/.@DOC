@@ -43,8 +43,11 @@ the context are left without running destructors: what they owned leaks. Traps a
 not for expected failures, which return `ca::result`.
 
 The machinery is `recovery.hpp`: each context pushes an `impl::recovery` point (a
-`__builtin_setjmp` buffer) on a per-thread list, and `ca::trap` jumps to the innermost one.
-Nothing below layer 4 manipulates the list.
+`__builtin_setjmp` buffer and the context's callbacks) on a per-thread list. `ca::trap` runs in
+two phases (`impl::raise`): it asks each point from the innermost outward for a `ca::verdict`
+while the trapping frames are still alive, runs the `leave` of every context passed, then jumps
+to the one that took it; with no taker, it stops right at the trap. Nothing below layer 4
+manipulates the list.
 
 ### Optimizer hints
 

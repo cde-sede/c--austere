@@ -1,12 +1,20 @@
 `run_context.hpp`: the one function every context goes through, for `ca::with`,
 `ca::context_manager` and `ca::ctx` alike.
 
-`run_context<E>(enter, leave)` pushes a recovery point (layer 1, `impl::recovery`), runs `enter`,
-pops the point and calls `leave` with nullptr on success or the error otherwise. The error is
-what `enter` returned when it returned a failed `result<void, E>`, or what a trap left on the
-point: the failed result's own error when the trap came from reading one (an E taken whole,
-moved when it cannot be copied, else its `ca::error` made an E), or `errc::not_recoverable` with
-the trap's reason in a new trace frame (`trapped_error`).
+`run_context<E>(handles, enter, leave)` pushes a recovery point (layer 1, `impl::recovery`), runs
+`enter`, pops the point and calls `leave(error, outcome)` with nullptr on success or the error
+otherwise. The error is what `enter` returned when it returned a failed `result<void, E>`, or
+what a trap it took left on the point: the failed result's own error when the trap came from
+reading one (an E taken whole, moved when it cannot be copied, else its `ca::error` made an E),
+or `errc::not_recoverable` with the trap's reason in a new trace frame (`traced_error`).
+
+`handles` is `takes_every_trap` for a context without one: the point then has no `_handles`, and
+the trap machinery takes every trap and passes every `ca::ask` for it. Otherwise the point
+carries `decide_context` (handles on a `ca::trapped`) and `unwind_context`, which runs `leave`
+with outcome `passed` while a trap goes past: with the trap's E as it is, else its `ca::error`
+made an E and cleaned up after. `traced_error` records the reason in the trace once, on the trap,
+so every context the trap meets sees the same error. `leave_state` calls `Self::leave` with the
+outcome when it takes one.
 
 `is_context_error<E>` admits the error types a context may fail with: `ca::error`, or a type made
 from one through `E::of(error)` (as `ca::report` is) or a constructor.
