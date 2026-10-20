@@ -145,22 +145,13 @@ template <typename V>
 	return lanes;
 }
 
-/* value in every byte of a 32-byte vector: vmovd and vpbroadcastb (a word broadcast puts imul
-   on the path to the first compare: memchr 16 - 256 B 7 - 13% slower, mixed sizes 1.06 ->
-   1.02 against glibc; V{} + value is vpinsrb on gcc). */
-[[gnu::target("avx2")]] static inline auto broadcast(const int value, ca::impl::bytes32& lanes) noexcept -> void {
-
-	using words [[gnu::vector_size(16)]] = int;
-	const ca::impl::bytes16 low = __builtin_bit_cast(ca::impl::bytes16, words{value, 0, 0, 0});
-	lanes = __builtin_shufflevector(low, low, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0);
-}
-
-/* value in every byte: broadcast for 32-byte vectors, else as 32-bit words, as fill_bytes. */
+/* value in every byte: broadcast for 32-byte vectors (mixed sizes 1.06 -> 1.02 against glibc),
+   else as 32-bit words, as fill_bytes. */
 template <typename V>
 [[gnu::always_inline]] static inline auto splat(const int value) noexcept -> V {
 	if constexpr (sizeof(V) == 32U) {
 		V lanes;
-		broadcast(value, lanes);
+		ca::impl::broadcast(value, lanes);
 		return lanes;
 	} else {
 		using words [[gnu::vector_size(sizeof(V))]] = ca::u32;

@@ -28,6 +28,9 @@
    | and its ladder on mixed sizes         |                                      |        |       |
    | rep stosb from 2 KiB (glibc's)        | from 32 KiB: the loop is faster up   | 90     | 67    |
    |                                       | to 28 KiB here (2 KiB)               |        |       |
+   | the word pattern's imul before the    | vmovd, vpbroadcastb (shufflevector): | 13.4   | 10.1  |
+   | first store (gcc 100 B; clang mix     | clang mix 17.9 -> 17.1               |        |       |
+   | 1.01, its fixed sizes 1 cycle better) |                                      |        |       |
 
    bench/memset.cpp, ca / glibc cycles (glibc through its PLT), clang and gcc: 16 B - 1 MiB and
    streaming 0.55 - 1.14, mixed sizes 0.99 - 1.09. Known gap: 1 - 7 B up to 1.22.
@@ -42,6 +45,7 @@
 #include "1-primitives/integers/u32.hpp"
 #include "1-primitives/integers/u64.hpp"
 #include "1-primitives/integers/u8.hpp"
+#include "1-primitives/memory/impl/byte_vectors.hpp"
 #include "1-primitives/memory/impl/cpu_features.hpp"
 #include "1-primitives/memory/impl/loose_bytes.hpp"
 
@@ -70,13 +74,18 @@ template <typename T>
 	reinterpret_cast<ca::impl::aligned_bytes<T>*>(to)->_value = value;
 }
 
-/* value in every byte, broadcast as 32-bit words: gcc builds a byte broadcast of 32 lanes one
-   vpinsrb at a time. */
+/* value in every byte: ca::impl::broadcast for 32-byte vectors, else as 32-bit words (gcc
+   builds a byte broadcast of V{} + value one vpinsrb at a time). */
 template <typename V>
 [[gnu::always_inline]] static inline auto splat(const int value) noexcept -> V {
-
-	using words [[gnu::vector_size(sizeof(V))]] = ca::u32;
-	return __builtin_bit_cast(V, words{} + static_cast<ca::u8>(value) * 0x01010101U);
+	if constexpr (sizeof(V) == 32U) {
+		V lanes;
+		ca::impl::broadcast(value, lanes);
+		return lanes;
+	} else {
+		using words [[gnu::vector_size(sizeof(V))]] = ca::u32;
+		return __builtin_bit_cast(V, words{} + static_cast<ca::u8>(value) * 0x01010101U);
+	}
 }
 
 static auto address(const void* const pointer) noexcept -> ca::usz {

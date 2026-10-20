@@ -55,6 +55,16 @@ namespace ca {
 			asm("vmovdqa %1, %0" : "=x"(v) : "m"(*reinterpret_cast<const char(*)[32]>(p)));
 		}
 
+		/* @DOC The low byte of value in every lane of v: vmovd and vpbroadcastb. A 32-bit word
+		   broadcast puts an imul on the path to the first use (memchr 16 - 256 B 7 - 13%
+		   slower); V{} + value is vpinsrb lane by lane on gcc. By reference, as peek. */
+		[[gnu::target("avx2")]] inline auto broadcast(const int value, ca::impl::bytes32& v) noexcept -> void {
+
+			using words [[gnu::vector_size(16)]] = int;
+			const ca::impl::bytes16 low = __builtin_bit_cast(ca::impl::bytes16, words{value, 0, 0, 0});
+			v = __builtin_shufflevector(low, low, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0);
+		}
+
 	} // namespace impl
 
 #endif
