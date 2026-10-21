@@ -14,10 +14,10 @@ auto main(void) -> int {
 		return 1;
 	if (m.size() != 2U || m["name"] != "ca-lib" || !m.contains(ca::sv::str{"language"}) || m.contains("missing"))
 		return 2;
-	auto key = ca::str::from("a key long enough to live on the heap");
+	auto key = ca::str::make("a key long enough to live on the heap");
 	if (!key || !m.set(ca::move(*key), "moved in") || m["a key long enough to live on the heap"] != "moved in")
 		return 3;
-	auto owned = ca::str::from("name");
+	auto owned = ca::str::make("name");
 	if (!owned || m[*owned] != "ca-lib" || !owned->cleanup())
 		return 4;
 	for (int i = 0; i < 200; ++i) {

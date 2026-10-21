@@ -14,7 +14,7 @@ static auto count(const ca::fs::path& root, const char* pattern, const bool recu
 }
 
 auto main(void) -> int {
-	auto root = ca::fs::path::from("build/fs_path_files.tmp");
+	auto root = ca::fs::path::make("build/fs_path_files.tmp");
 	if (!root)
 		return 1;
 	auto deep = root->join("a/b/c");

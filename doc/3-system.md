@@ -2013,7 +2013,7 @@ Processes and signals: starting programs, waiting for them, identities, resource
 
 `argv` and `envp` are null-terminated arrays of mutable C strings, as POSIX takes them; a null `envp` passes the current environment. A `wait_status` tells how the child ended: `exit_code()` and `signal()` are optionals, `succeeded()` means exit code 0.
 
-`spawn_actions` lists descriptor changes the child applies before running the program (dup2, close, open), so a child's standard streams can be redirected without fork. It follows ca's explicit lifecycle: `init()` before use, `cleanup()` after, and it is neither copyable nor movable.
+`spawn_actions` lists descriptor changes the child applies before running the program (dup2, close, open), so a child's standard streams can be redirected without fork. It follows ca's explicit lifecycle: `make()` builds it, `cleanup()` frees it; it moves but does not copy.
 
 ```c++
 #include "ca/file.hpp"
@@ -2033,11 +2033,11 @@ auto main(void) -> int {
 	auto ends = ca::sys::pipe(ca::fs::cloexec_t::OPEN_VALUE);
 	if (!ends)
 		return 1;
-	ca::sys::spawn_actions actions;
-	if (!actions.init() || !actions.add_dup2(ends->write_end(), 1))
+	auto actions = ca::sys::spawn_actions::make();
+	if (!actions || !actions->add_dup2(ends->write_end(), 1))
 		return 2;
-	auto child = ca::sys::posix_spawnp("sh", argv, nullptr, &actions);
-	if (!child || !actions.cleanup() || !ca::sys::close(ends->write_end()))
+	auto child = ca::sys::posix_spawnp("sh", argv, nullptr, &*actions);
+	if (!child || !actions->cleanup() || !ca::sys::close(ends->write_end()))
 		return 3;
 
 	char out[16]{};
@@ -2505,7 +2505,32 @@ Waits for one signal of set to be pending, takes it, and returns its number. Blo
 class spawn_actions final;
 ```
 
-Descriptor changes posix_spawn applies in the child, in order, before it runs the program (posix_spawn_file_actions_t). init before use; cleanup after; the destructor only destroys as a failsafe. Neither copyable nor movable.
+Descriptor changes posix_spawn applies in the child, in order, before it runs the program (posix_spawn_file_actions_t). From make(); cleanup() frees them. Move-only: the list holds no pointer to itself (glibc, musl, libca_runtime), so moving copies its bytes and leaves the source empty.
+
+### function `spawn_actions::spawn_actions`
+
+```c++
+spawn_actions(void) noexcept
+: _storage{}, _live{false};
+```
+
+Not live: what moving and cleanup() leave. make() builds a live one.
+
+### function `spawn_actions::make`
+
+```c++
+[[nodiscard]] static auto make(void) noexcept -> ca::result<self>;
+```
+
+An empty list, live.
+
+### function `spawn_actions::operator=`
+
+```c++
+auto operator=(self&& other) noexcept -> self&;
+```
+
+Takes other's list. Traps when this one is live, its release being fallible: cleanup() first.
 
 ### function `spawn_actions::is_live`
 
@@ -2513,15 +2538,7 @@ Descriptor changes posix_spawn applies in the child, in order, before it runs th
 [[nodiscard]] constexpr auto is_live(void) const noexcept -> bool;
 ```
 
-Whether init succeeded and cleanup has not run.
-
-### function `spawn_actions::init`
-
-```c++
-[[nodiscard]] auto init(void) noexcept -> ca::result<void>;
-```
-
-Starts an empty list. errc::invalid_argument when already live.
+Whether make() built it and cleanup() has not run.
 
 ### function `spawn_actions::add_dup2`
 
@@ -2553,7 +2570,7 @@ In the child, path is opened as fd (raw open flags and mode). path must outlive 
 [[nodiscard]] auto cleanup(void) noexcept -> ca::result<void>;
 ```
 
-Frees the list. errc::invalid_argument when not live.
+Frees the list: not live after, even on failure. One not live succeeds.
 
 ## `process/try_waitpid.hpp`
 
@@ -6458,6 +6475,103 @@ Each thread holds one trace, of at most 32 frames; later frames are counted in `
 
 Traps join the same trace: when a trap fails a context (`ca::with`), the context's error carries a frame with the trap's reason, and `result::raise` adds an "error raised" frame.
 
+### Backtraces
+
+A trap also leaves the calls that led to it. Before the trap unwinds, while its frames are still alive, the context taking it attaches a `trace::backtrace` to the error's trace: `trace::of(e).backtrace()` returns its addresses, and the printed trace ends with them. Only the first trap a trace meets keeps one, the trap nearest the origin.
+
+| Function | Does |
+|---|---|
+| `trace::backtrace::capture()` | the calls leading to the caller, the caller first |
+| `trap.backtrace()` | in a context's `handles`, the calls leading to the trap (layer 4) |
+| `trace::attach(error, backtrace)` | gives error's trace a backtrace, unless it has one |
+| `record::backtrace()` | the addresses attached to the trace, empty when none |
+
+```c++
+#include "ca/debug.hpp"
+#include "ca/trace.hpp"
+#include "ca/with.hpp"
+
+[[gnu::noinline]] static auto check(const int value) noexcept -> void {
+	if (value < 0)
+		ca::trap("negative");
+}
+
+auto main(void) -> int {
+	auto done = ca::with([](void) noexcept { check(-1); }, [](const ca::error*) noexcept {});
+	if (done)
+		return 1;
+	const ca::trace::record record = ca::trace::of(done.error());
+	if (record.backtrace().empty())
+		return 2;
+	const ca::trace::backtrace here = ca::trace::backtrace::capture();
+	return here.empty() ? 3 : 0;
+}
+```
+
+```text
+State not recoverable
+  trapped: negative
+  backtrace:
+    #0 exe+0x1a2f
+    #1 exe+0x1b88
+    #2 0x7f3c2a42a1c9
+```
+
+The walk follows frame pointers, so code built without them (`-fno-omit-frame-pointer -mno-omit-leaf-frame-pointer`; ca's debug builds keep them, `make FRAME_POINTERS=1` in release) gives the first frame right and stops or strays after it. Every read goes through the kernel (`process_vm_readv`), so a broken chain ends the walk instead of crashing the program. An address inside the executable prints relative to where it is loaded, as `addr2line -f -C -e app 0x1a2f` takes it; each points inside its call instruction. Linux x86-64 only; elsewhere backtraces are empty.
+
+## `trace/attach.hpp`
+
+### function `attach`
+
+```c++
+auto attach(ca::error error, const ca::trace::backtrace& backtrace) noexcept -> void;
+```
+
+Gives error's trace backtrace, unless it has one already (the one nearest the origin stays) or error does not carry the thread's trace. A context taking a trap attaches the trap's backtrace this way.
+
+## `trace/backtrace.hpp`
+
+### struct `impl::executable_range`
+
+```c++
+struct executable_range final;
+```
+
+Where the running executable is mapped: load bias (0 when not position-independent) and the range its segments span; all 0 when unknown.
+
+### class `backtrace`
+
+```c++
+class backtrace final;
+```
+
+The calls leading to a point, innermost first: one address per frame, inside its call instruction (the return address minus one), ready for addr2line. Taken by walking frame pointers, each read checked by the kernel (process_vm_readv), so a broken chain ends the walk instead of crashing it; at most CAPACITY frames. Code built without frame pointers (-fno-omit-frame-pointer) cuts the chain short or adds wrong frames past the first. Linux only; empty elsewhere. Prints with `{}`, addresses inside the executable relative to its load address (`exe+0x1a2b`, as addr2line -e takes them).
+
+### function `backtrace::capture`
+
+```c++
+[[nodiscard, gnu::noinline]] static auto capture(void) noexcept -> self;
+```
+
+The calls leading to the caller of capture, the caller first.
+
+### function `backtrace::walk`
+
+```c++
+[[nodiscard]] static auto walk(const void* frame) noexcept -> self;
+```
+
+The calls from the frame record at frame (a live frame's ca::impl::frame_address), its return address first.
+
+### function `backtrace::display`
+
+```c++
+template <typename W>
+auto display(W& out) const noexcept -> void;
+```
+
+One line per frame, each on a new line: `    #0 exe+0x1a2b`, or the absolute address outside the executable.
+
 ## `trace/context.hpp`
 
 ### function `context`
@@ -6496,6 +6610,80 @@ class frame final;
 
 One step of a trace: what was being done (may be empty), and where.
 
+## `trace/location.hpp`
+
+### class `location`
+
+```c++
+class location final;
+```
+
+One function an address is in, as the debug information of the executable tells it: the function's name and the scopes around it (namespaces, classes, the enclosing function of a local class), outermost first; the source file and line; the offset from the function's start (the outermost function of an address only); whether the compiler inlined it into the next location. Names come from DWARF when the program was built with -g, else from the symbol table (mangled); file and line need -g. Text borrows from the ca::trace::symbolizer that made it. Prints with `{}`: `ca::trap (src/trap.hpp:23) inlined`, `deepest+0x1e (test.cpp:8)`.
+
+### function `location::function`
+
+```c++
+[[nodiscard]] constexpr auto function(void) const noexcept -> ca::sv::str;
+```
+
+The function's own name, empty when unknown.
+
+### function `location::scopes`
+
+```c++
+[[nodiscard]] constexpr auto scopes(void) const noexcept -> ca::borrowed_slice<const ca::sv::str>;
+```
+
+The scopes around the function, outermost first; the innermost SCOPES - 1 when deeper.
+
+### function `location::file`
+
+```c++
+[[nodiscard]] constexpr auto file(void) const noexcept -> ca::sv::str;
+```
+
+The source file, as the compiler named it: relative to directory() unless absolute. Empty when unknown.
+
+### function `location::directory`
+
+```c++
+[[nodiscard]] constexpr auto directory(void) const noexcept -> ca::sv::str;
+```
+
+The file's directory, relative to compilation_directory() unless absolute; empty when file() is absolute.
+
+### function `location::compilation_directory`
+
+```c++
+[[nodiscard]] constexpr auto compilation_directory(void) const noexcept -> ca::sv::str;
+```
+
+Where the compiler ran, which relative directories start from.
+
+### function `location::line`
+
+```c++
+[[nodiscard]] constexpr auto line(void) const noexcept -> ca::u32;
+```
+
+0 when unknown.
+
+### function `location::offset`
+
+```c++
+[[nodiscard]] constexpr auto offset(void) const noexcept -> ca::optional<ca::usz>;
+```
+
+From the function's start, for the outermost function of an address.
+
+### function `location::inlined`
+
+```c++
+[[nodiscard]] constexpr auto inlined(void) const noexcept -> bool;
+```
+
+Whether the compiler inlined this function into the next location.
+
 ## `trace/of.hpp`
 
 ### function `of`
@@ -6514,7 +6702,7 @@ error with its trace, when it is the thread's current one; with no frames otherw
 class record final;
 ```
 
-An error and the frames of its trace, origin first, borrowed from the thread's trace: valid until the thread starts another one. Prints with `{}`: ``` No such file or directory at open_config (app.cpp:12): opening config at load (app.cpp:40): loading settings ```
+An error and the frames of its trace, origin first, and the backtrace of the first trap it met, borrowed from the thread's trace: valid until the thread starts another one. Prints with `{}`: ``` No such file or directory at open_config (app.cpp:12): opening config at load (app.cpp:40): loading settings ```
 
 ### function `record::dropped`
 
@@ -6524,12 +6712,54 @@ An error and the frames of its trace, origin first, borrowed from the thread's t
 
 Frames past the thread's capacity, lost.
 
+### function `record::backtrace`
+
+```c++
+[[nodiscard]] constexpr auto backtrace(void) const noexcept -> ca::borrowed_slice<const ca::usz>;
+```
+
+The calls leading to the first trap the trace met (see ca::trace::backtrace), empty when none.
+
 ## `trace/impl/`
 
 The per-thread trace behind `ca::trace`.
 
 - `trace_state.hpp`: the thread's one trace, a `constinit thread_local` record of the error it follows (its trace number and code) and its first `CAPACITY` frames (32), later ones only counted in `dropped`. `start` replaces it for a new error and returns that error numbered with it; `push` appends a frame. Trace numbers come from one process-wide atomic counter, never 0, so an error from an older trace or from another thread is recognized as stale rather than shown with the wrong frames.
 - `display_trace.hpp`: the text form of a trace, shared by `ca::print_trace`, the `{}` formatting of a `trace::record` and `ca::report`: the error's message, then one line per frame, origin first, `  at function (file:line): message`, or `  trapped: message` for a frame without a location (a trap that left for a context), and a last line counting dropped frames. It writes through any `W` with `put(char)` and `put(sv::str)`, so layer 3 needs no formatter.
+
+## `trace/impl/debug_info.hpp`
+
+### struct `impl::debug_image`
+
+```c++
+struct debug_image final;
+```
+
+The sections of an ELF64 little-endian file symbolization reads, each a view into the file, empty when absent or compressed: symbol tables and their strings, and the DWARF 4 and 5 sections for units, lines, strings, addresses and ranges.
+
+### function `impl::read_image`
+
+```c++
+[[nodiscard]] auto read_image(ca::span<const ca::byte> file) noexcept -> ca::optional<ca::trace::impl::debug_image>;
+```
+
+The sections of file, an ELF64 little-endian image; none when it is not one.
+
+### function `impl::locate`
+
+```c++
+[[nodiscard]] auto locate(const ca::trace::impl::debug_image& image, ca::u64 address, ca::span<ca::trace::location> out) noexcept -> ca::usz;
+```
+
+The functions address (a link-time address of image) is in, innermost first: the inlined ones, then the function they were inlined into; how many it wrote into out, 0 when image knows nothing of address. Names from DWARF, else from the symbol tables; file and line from DWARF.
+
+### struct `impl::location_access`
+
+```c++
+struct location_access final;
+```
+
+Writes a location's fields, for locate.
 
 ## `trace/impl/display_trace.hpp`
 
@@ -6550,7 +6780,7 @@ The error's message, then one line per frame, origin first: `  at function (file
 struct trace_state final;
 ```
 
-The thread's one trace: the error it follows (id, code) and its first CAPACITY frames, later ones counted in dropped.
+The thread's one trace: the error it follows (id, code), its first CAPACITY frames, later ones counted in dropped, and the backtrace of the first trap it met (empty when none).
 
 ### function `impl::start`
 

@@ -25,7 +25,7 @@ auto main(void) -> int {
 		return 1;
 	if (ca::hash(color::red) != ca::hash(3))
 		return 2;
-	auto text = ca::str::from("hello, hash");
+	auto text = ca::str::make("hello, hash");
 	if (!text || ca::hash(*text) != ca::hash(ca::sv::str{"hello, hash"}) || ca::hash(*text) == ca::hash(ca::sv::str{"hello, hasH"}))
 		return 3;
 	char buffer[200];

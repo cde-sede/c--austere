@@ -143,7 +143,7 @@ auto main(void) -> int {
 
 ### slice and deque
 
-A `slice<T, A>` is an owned run of fixed length: `make(n, args...)` builds n elements from args, `from(view)` copies a view. A `deque<T, A>` is a ring buffer with O(1) `append`, `prepend`, `pop` and `pop_front`; `as_slices()` exposes its contents as the two contiguous runs of the ring.
+A `slice<T, A>` is an owned run of fixed length: `make(n, args...)` builds n elements from args, `make(view)` copies a view. A `deque<T, A>` is a ring buffer with O(1) `append`, `prepend`, `pop` and `pop_front`; `as_slices()` exposes its contents as the two contiguous runs of the ring.
 
 ```c++
 #include "ca/borrowed_slice.hpp"
@@ -155,7 +155,7 @@ auto main(void) -> int {
 	if (!sevens || sevens->count(7) != 4U)
 		return 1;
 	const int raw[] = {4, 3, 2, 1};
-	auto copied = ca::slice<int>::from(raw);
+	auto copied = ca::slice<int>::make(raw);
 	if (!copied || !(*copied == ca::borrowed_slice{raw}))
 		return 2;
 
@@ -1142,7 +1142,7 @@ Layout: the size (a usz), then room for N elements, in the object itself: no poi
 | swap_pop(i), pop() | O(1) | |
 | remove(value) | O(size) | find, then pop(i) |
 | resize, clear, cleanup | O(abs(n - size)) | O(1) for trivially destructible T without cleanup() |
-| clone, from(view) | O(n) | one memcpy for trivially copyable T |
+| clone, make(view) | O(n) | one memcpy for trivially copyable T |
 | find, count, contains, compare, == | O(n) | memchr/memcmp for code units, element loops otherwise |
 
 Nothing grows: what does not fit fails with errc::no_space and changes nothing. That is the point of it: bounded memory known at compile time, never a failed allocation, a place on the stack or inside another object for short lists of non-trivial elements (a function's arguments, a node's children, the last N events).
@@ -1206,10 +1206,10 @@ inline_array(self&& other) noexcept requires (!ca::is_trivially_copyable<T> && c
 
 Relocates other's elements; other is left empty.
 
-### function `inline_array::from`
+### function `inline_array::make`
 
 ```c++
-[[nodiscard]] static auto from(const ca::borrowed_slice<const T> view) noexcept -> ca::result<self>
+[[nodiscard]] static auto make(const ca::borrowed_slice<const T> view) noexcept -> ca::result<self>
 requires ca::is_clonable<T> || ca::is_copy_constructible<T>;
 ```
 
@@ -1356,7 +1356,7 @@ The elements, as a view: what the shared methods work on.
 [[nodiscard]] auto clone(void) const noexcept -> ca::result<self> requires ca::is_clonable<T> || ca::is_copy_constructible<T>;
 ```
 
-A copy; see from.
+A copy; see make.
 
 ## `array/slice.hpp`
 
@@ -1368,7 +1368,7 @@ Layout: three pointers (data, end, and the end of the block, which the allocator
 |---|---|---|
 | operator[], get, first, last | O(1) | one compare |
 | size, empty, begin, end, data, view | O(1) | |
-| make(n, args...), from(view), clone | O(n) | one allocation; one memcpy for trivially copyable T in from and clone |
+| make(n, args...), make(view), clone | O(n) | one allocation; one memcpy for trivially copyable T in make(view) and clone |
 | into_slice (dynamic_array) | O(1) | takes the array's block as is, no copy, no shrink |
 | find, count, contains, compare, == | O(n) | memchr/memcmp for code units, element loops otherwise |
 | find(other), find_last(other) | O(n * m) | |
@@ -1392,7 +1392,7 @@ template <typename T, ca::is_allocator A = ca::heap>
 class slice final : public ca::impl::slice_methods<ca::slice<T, A>, T, const T>;
 ```
 
-Fixed-length run of T it owns, in memory from A: what a sequence becomes once its length stops changing (Rust's Box<[T]>). Made by make(n, args...), from(view) or dynamic_array::into_slice; those acquire memory and can fail. The sequence methods (cut, find, compare, fill, reverse) come from ca::impl::slice_methods and return borrowed_slices into it. Clean up with cleanup(); the destructor is a failsafe that frees silently. operator[] traps out of range; get allows the doubt. A stateful A has no default construction and moves with the elements.
+Fixed-length run of T it owns, in memory from A: what a sequence becomes once its length stops changing (Rust's Box<[T]>). Made by make(n, args...), make(view) or dynamic_array::into_slice; those acquire memory and can fail. The sequence methods (cut, find, compare, fill, reverse) come from ca::impl::slice_methods and return borrowed_slices into it. Clean up with cleanup(); the destructor is a failsafe that frees silently. operator[] traps out of range; get allows the doubt. A stateful A has no default construction and moves with the elements.
 
 ### alias `slice::rebind`
 
@@ -1430,10 +1430,10 @@ requires ca::is_constructible<T, const Args&...>
 
 count elements, each built from args (value-initialized without), in memory from allocator.
 
-### function `slice::from`
+### function `slice::make_in`
 
 ```c++
-[[nodiscard]] static auto from(const A& allocator, const ca::borrowed_slice<const T> view) noexcept -> ca::result<self>
+[[nodiscard]] static auto make_in(const A& allocator, const ca::borrowed_slice<const T> view) noexcept -> ca::result<self>
 requires ca::is_clonable<T> || ca::is_copy_constructible<T>;
 ```
 
@@ -1477,7 +1477,7 @@ The elements, as a view: what the shared methods work on.
 [[nodiscard]] auto clone(void) const noexcept -> ca::result<self> requires ca::is_clonable<T> || ca::is_copy_constructible<T>;
 ```
 
-A copy in memory from the same allocator; see from.
+A copy in memory from the same allocator; see make_in(allocator, view).
 
 ### function `slice::clone_in`
 
@@ -2410,7 +2410,7 @@ These never touch the file system: `name()`, `stem()`, `suffix()`, `parent()`, `
 #include "ca/sv.hpp"
 
 auto main(void) -> int {
-	auto p = ca::fs::path::from("//usr/./lib//archive.tar.gz/");
+	auto p = ca::fs::path::make("//usr/./lib//archive.tar.gz/");
 	if (!p || p->view() != ca::sv::str{"/usr/lib/archive.tar.gz"})
 		return 1;
 	if (p->name() != ca::sv::str{"archive.tar.gz"} || p->stem() != ca::sv::str{"archive.tar"})
@@ -2446,7 +2446,7 @@ The others make the system calls their names say: `exists`, `is_file`, `is_direc
 #include "ca/sv.hpp"
 
 auto main(void) -> int {
-	auto root = ca::fs::path::from("path_example");
+	auto root = ca::fs::path::make("path_example");
 	if (!root)
 		return 1;
 	auto deep = root->join("a/b");
@@ -2489,7 +2489,7 @@ Layout: a pointer to a NUL-terminated block from A and a size, 16 bytes on 64-bi
 | components | O(n) total, lazy | none |
 | relative_to, is_relative_to, == | O(n) memcmp | none |
 | match | O(n * m) worst case per component, no backtracking across components | none |
-| from, join, push, with_name, with_stem, with_suffix, clone | O(n) single pass | one heap block |
+| make, join, push, with_name, with_stem, with_suffix, clone | O(n) single pass | one heap block |
 | filesystem queries | one syscall | none |
 | iterdir, glob | one syscall per entry | one heap block per result, plus the array |
 
@@ -2505,8 +2505,8 @@ Baseline std::filesystem::path (libstdc++); ca over ca::heap; operations on 4 pa
 
 | Case | clang 18 | gcc 13 | Notes |
 |---|---|---|---|
-| from, messy input, 1e6 | 0.094x | 0.13x | std: constructor + lexically_normal |
-| from, clean input, 1e6 | 0.34x | 0.49x | std: constructor only, no normalization |
+| make, messy input, 1e6 | 0.094x | 0.13x | std: constructor + lexically_normal |
+| make, clean input, 1e6 | 0.34x | 0.49x | std: constructor only, no normalization |
 | join of a file name, 1e6 | 0.070x | 0.081x | std: operator/ |
 | name + stem + suffix, 1e6 | 0.26x | 0.33x | |
 | parent, 1e6 | 0.042x | 0.050x | |
@@ -2572,21 +2572,13 @@ constexpr explicit basic_path(const A& allocator) noexcept
 
 ".", without allocating; what it builds comes from allocator.
 
-### function `basic_path::from`
-
-```c++
-[[nodiscard]] static auto from(const A& allocator, const ca::sv::str text) noexcept -> ca::result<self>;
-```
-
-text, normalized, in memory from allocator.
-
 ### function `basic_path::make_in`
 
 ```c++
 [[nodiscard]] static auto make_in(const A& allocator, const ca::sv::str text) noexcept -> ca::result<self>;
 ```
 
-from, for ca::make_in.
+text, normalized, in memory from allocator.
 
 ### function `basic_path::cwd`
 
@@ -3335,6 +3327,14 @@ Alignment of the ring: one cache line.
 
 A ring of at least capacity bytes (> 0), rounded up to a power of two, from allocator.
 
+### function `ring_buffer::operator=`
+
+```c++
+auto operator=(self&& other) noexcept -> self&;
+```
+
+Takes other's ring and allocator; the previous ring is freed.
+
 ### function `ring_buffer::size`
 
 ```c++
@@ -3605,7 +3605,7 @@ auto main(void) -> int {
 
 ### Intrusive lists
 
-An element joins an `intrusive_list<T, Tag>` by deriving `ca::list_link<T, Tag>` once per list it can be in; the Tag tells the links apart, so one object can sit in several lists at once (a task in a run queue and in a timer list). The list stores nothing per element and allocates nothing, so no operation can fail. Misuse traps: linking an element that is already linked, removing one that is not, or destroying an element while it is still linked.
+An element joins an `intrusive_list<T, Tag>` by deriving `ca::list_link<T, Tag>` once per list it can be in; the Tag tells the links apart, so one object can sit in several lists at once (a task in a run queue and in a timer list). The list stores nothing per element and allocates nothing, so no operation can fail. Misuse traps: linking an element that is already linked, or removing one that is not. Links and lists are trivially destructible, so a trap can unwind past them (see `ca::context_manager`): an element leaves its list before it is destroyed, and a list is cleared before it goes away, unchecked.
 
 ```c++
 #include "ca/intrusive_list.hpp"
@@ -3666,7 +3666,7 @@ Locality: as ca::list, a dependent load per element; when the elements sit in an
 
 Where it earns its place: free lists, LRU caches, run queues, timers and any object that must be found and unlinked in O(1) from a pointer to it, or be in several lists at once, without an allocation that could fail.
 
-Rules, checked: an element is in at most one list per Tag (linking a linked element traps); remove() takes elements of this list (removing an unlinked one traps); an element must leave its list before it is destroyed (its link's destructor traps otherwise). The list's destructor unlinks what it still holds. Copying or moving an element gives an unlinked one; relocating a linked element by bytes would corrupt the list, so list_link is not trivially copyable.
+Rules, checked: an element is in at most one list per Tag (linking a linked element traps); remove() takes elements of this list (removing an unlinked one traps). Unchecked, for trivial destructors (a trap unwinds past them, see ca::context_manager): an element leaves its list before it is destroyed, and a list is cleared before it goes away. Copying or moving an element gives an unlinked one; relocating a linked element by bytes would corrupt the list, so list_link is not trivially copyable.
 
 Copy and move: the list is move-only; moving takes three words, the elements stay where they are. TRIVIALLY_RELOCATABLE: no element points at the list object.
 
@@ -3721,7 +3721,7 @@ template <typename T, typename Tag = void>
 class intrusive_list final;
 ```
 
-Doubly linked list of elements it does not own, linked through the list_link<T, Tag> they derive from: no allocation, nothing can fail, an element unlinks in O(1) from a reference to it. Elements must stay in place while linked and leave before they die (both checked by traps). first, last, pop and pop_front allow the doubt; dereferencing end() traps. The destructor unlinks the remaining elements.
+Doubly linked list of elements it does not own, linked through the list_link<T, Tag> they derive from: no allocation, nothing can fail, an element unlinks in O(1) from a reference to it. Elements must stay in place while linked and leave before they die, unchecked. first, last, pop and pop_front allow the doubt; dereferencing end() traps. Trivially destructible, so a trap may unwind past it: clear() before the list goes away, or its elements stay linked (linking one again then traps).
 
 ### variable `intrusive_list::TRIVIALLY_RELOCATABLE`
 
@@ -3730,14 +3730,6 @@ static constexpr bool TRIVIALLY_RELOCATABLE = true;
 ```
 
 Two link pointers and the size; no element points at the list object.
-
-### function `intrusive_list::~intrusive_list`
-
-```c++
-constexpr ~intrusive_list(void) noexcept;
-```
-
-Unlinks the remaining elements.
 
 ### function `intrusive_list::operator=`
 
@@ -4197,7 +4189,7 @@ template <typename T, typename Tag = void>
 class list_link;
 ```
 
-The two links T carries to be in an intrusive_list<T, Tag>: derive T from it, publicly, once per Tag for each list an element may be in at the same time. A copy or move starts unlinked; destroying a linked one traps, in every build.
+The two links T carries to be in an intrusive_list<T, Tag>: derive T from it, publicly, once per Tag for each list an element may be in at the same time. A copy or move starts unlinked. Trivially destructible, so a trap may unwind past it: an element leaves its list before it is destroyed, which nothing checks.
 
 ### function `list_link::list_link`
 
@@ -4216,14 +4208,6 @@ constexpr list_link(const self&) noexcept
 ```
 
 Unlinked: links belong to the element's place, not its value.
-
-### function `list_link::~list_link`
-
-```c++
-constexpr ~list_link(void) noexcept;
-```
-
-Traps when still linked: unlink the element first.
 
 ### function `list_link::operator=`
 
@@ -4331,7 +4315,7 @@ auto main(void) -> int {
 
 ### Keys
 
-Keys are looked up through `lookup_of<K>`: `K::view_type` when K has one, so a `hashmap<ca::str, V>` is searched with an `sv::str` (or a literal) and never builds a string to look one up. `set` and `setdefault` build the key only when it is absent, converting a literal or a view with `K::from` when needed. `ca::hash` hashes integers and enums by value, pointers, text by its code units (so a `str` hashes as its view) and any type with a `hash() const -> u64` member; `ca::is_hashable` lists them.
+Keys are looked up through `lookup_of<K>`: `K::view_type` when K has one, so a `hashmap<ca::str, V>` is searched with an `sv::str` (or a literal) and never builds a string to look one up. `set` and `setdefault` build the key only when it is absent, converting a literal or a view with `K::make` when needed. `ca::hash` hashes integers and enums by value, pointers, text by its code units (so a `str` hashes as its view) and any type with a `hash() const -> u64` member; `ca::is_hashable` lists them.
 
 ```c++
 #include "ca/hash.hpp"
@@ -4375,8 +4359,8 @@ auto main(void) -> int {
 	if (!grade || grade->key != 80 || grades.first().value_or(*grade).key != 70)
 		return 2;
 
-	auto a = ca::set<int>::from(ca::array{1, 2, 3, 4});
-	auto b = ca::set<int>::from(ca::array{3, 4, 5});
+	auto a = ca::set<int>::make(ca::array{1, 2, 3, 4});
+	auto b = ca::set<int>::make(ca::array{3, 4, 5});
 	if (!a || !b)
 		return 3;
 	auto common = a->intersection(*b);
@@ -5185,10 +5169,10 @@ constexpr explicit set(const A& allocator) noexcept
 
 Empty, drawing memory from allocator.
 
-### function `set::from`
+### function `set::make`
 
 ```c++
-[[nodiscard]] static auto from(const ca::borrowed_slice<const K> keys) noexcept -> ca::result<self>
+[[nodiscard]] static auto make(const ca::borrowed_slice<const K> keys) noexcept -> ca::result<self>
 requires ca::is_stateless_allocator<A> && ca::impl::is_buildable_from<K, const K&>;
 ```
 
@@ -5445,7 +5429,7 @@ The two structures under the maps, and what they share.
 
 ### Shared
 
-- `key.hpp`: `lookup_of<K>`, the type keys are looked up by (`K::view_type` when K has one, else `const K&`); `key_order` (`compare()` when available, else `<`); `make_from`, which builds a key only when an insertion needs one, by constructor, `clone()` or `K::from`; `clean`, which runs a key's or value's `cleanup()` keeping the first error.
+- `key.hpp`: `lookup_of<K>`, the type keys are looked up by (`K::view_type` when K has one, else `const K&`); `key_order` (`compare()` when available, else `<`); `make_from`, which builds a key only when an insertion needs one, by constructor, `clone()` or `K::make`; `clean`, which runs a key's or value's `cleanup()` keeping the first error.
 - `range.hpp`: a begin and an end for range-for, what `keys()`, `values()` and `items()` return.
 
 ## `map/impl/btree_node.hpp`
@@ -5739,11 +5723,11 @@ template <typename T, typename Q>
 concept is_buildable_from = ca::is_constructible<T, Q>
     || (ca::is_same<ca::remove_cvref<Q>, T> && ca::is_clonable<T>)
     || requires(Q&& source) {
-        { T::from(ca::forward<Q>(source)) } -> ca::is_same<ca::result<T>>;
+        { T::make(ca::forward<Q>(source)) } -> ca::is_same<ca::result<T>>;
     };
 ```
 
-A T can be built from a Q: by a constructor, by clone() from a T, or by a fallible T::from(Q) -> result\<T> (a str from a literal or a view).
+A T can be built from a Q: by a constructor, by clone() from a T, or by a fallible T::make(Q) -> result\<T> (a str from a literal or a view).
 
 ### function `impl::make_from`
 
@@ -5806,7 +5790,7 @@ Every string converts to its view (`sv::str` for `str`), and has every read-only
 #include "ca/u16str.hpp"
 
 auto main(void) -> int {
-	auto s = ca::str::from("  Hello, World  ");
+	auto s = ca::str::make("  Hello, World  ");
 	if (!s)
 		return 1;
 	ca::str& text = *s;
@@ -5815,7 +5799,7 @@ auto main(void) -> int {
 
 	auto shout = text.upper();
 	auto swapped = text.replace("World", "ca");
-	auto boxed = ca::str::from("ok");
+	auto boxed = ca::str::make("ok");
 	if (!shout || *shout != ca::sv::str{"  HELLO, WORLD  "})
 		return 3;
 	if (!swapped || swapped->strip() != ca::sv::str{"Hello, ca"})
@@ -5831,7 +5815,7 @@ auto main(void) -> int {
 	if (text != ca::sv::str{">> Hello, World!"} || text.c_str()[text.size()] != '\0')
 		return 8;
 
-	auto wide = ca::u16str::from(ca::sv::str{"café"});
+	auto wide = ca::u16str::make(ca::sv::str{"café"});
 	if (!wide || wide->size() != 4U || (*wide)[3] != u'é')
 		return 9;
 	return text.cleanup() && shout->cleanup() && swapped->cleanup() && boxed->cleanup() && centered->cleanup()
@@ -5839,7 +5823,7 @@ auto main(void) -> int {
 }
 ```
 
-`from` builds a string from a view of the same unit type, or transcodes from another encoding (`u16str::from(sv::str{...})`), invalid sequences becoming U+FFFD. Case mappings are the full Unicode ones, so `upper()` of "straße" is "STRASSE", and `case_fold()` is the right key for caseless comparison.
+`make` builds a string from a view of the same unit type, or transcodes from another encoding (`u16str::make(sv::str{...})`), invalid sequences becoming U+FFFD. Case mappings are the full Unicode ones, so `upper()` of "straße" is "STRASSE", and `case_fold()` is the right key for caseless comparison.
 
 ### join and collect
 
@@ -5906,8 +5890,8 @@ Baseline std::string (libstdc++, glibc malloc); ca over ca::heap: bench/string.c
 
 | Case | clang 18 | gcc 13 | Notes |
 |---|---|---|---|
-| from() of 10 chars, 1e6 | 1.00x | 1.01x | inline in both; built inside the result: returning it copies nothing |
-| from() of 22 chars, 1e6 | 0.049x | 0.081x | std::string allocates past 15 |
+| make() of 10 chars, 1e6 | 1.00x | 1.01x | inline in both; built inside the result: returning it copies nothing |
+| make() of 22 chars, 1e6 | 0.049x | 0.081x | std::string allocates past 15 |
 | push 1e7 chars | 1.04x | 0.89x | |
 | append 1e6 6-char words | 1.20x | 0.92x | |
 | ca::format vs std::format, short result, 1e6 | 0.63x | 0.54x | |
@@ -5965,31 +5949,23 @@ explicit basic_str(const A& allocator) noexcept
 
 Empty, drawing memory from allocator.
 
-### function `basic_str::from`
-
-```c++
-[[nodiscard]] static auto from(const A& allocator, const view_type text) noexcept -> ca::result<self>;
-```
-
-A copy of text, in memory from allocator (none when it fits inline).
-
-### function `basic_str::from`
-
-```c++
-template <ca::is_character D>
-requires (!ca::is_same<D, C>)
-[[nodiscard]] static auto from(const A& allocator, const ca::sv::basic<D> text) noexcept -> ca::result<self>;
-```
-
-text transcoded from another encoding (invalid sequences become U+FFFD): Python's str(bytes, encoding).
-
 ### function `basic_str::make_in`
 
 ```c++
 [[nodiscard]] static auto make_in(const A& allocator, const view_type text) noexcept -> ca::result<self>;
 ```
 
-from, for ca::make_in.
+A copy of text, in memory from allocator (none when it fits inline).
+
+### function `basic_str::make_in`
+
+```c++
+template <ca::is_character D>
+requires (!ca::is_same<D, C>)
+[[nodiscard]] static auto make_in(const A& allocator, const ca::sv::basic<D> text) noexcept -> ca::result<self>;
+```
+
+text transcoded from another encoding (invalid sequences become U+FFFD): Python's str(bytes, encoding).
 
 ### function `basic_str::operator=`
 
@@ -6337,10 +6313,10 @@ static constexpr ca::usz CAPACITY = N;
 
 Most code units held, NUL excluded.
 
-### function `inline_str::from`
+### function `inline_str::make`
 
 ```c++
-[[nodiscard]] static constexpr auto from(const view_type text) noexcept -> ca::result<self>;
+[[nodiscard]] static constexpr auto make(const view_type text) noexcept -> ca::result<self>;
 ```
 
 A copy of text; errc::no_space when it is longer than N.

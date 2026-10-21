@@ -55,7 +55,7 @@ auto main(void) -> int {
 
 Keys are looked up through `lookup_of<K>`: `K::view_type` when K has one, so a `hashmap<ca::str, V>`
 is searched with an `sv::str` (or a literal) and never builds a string to look one up. `set` and
-`setdefault` build the key only when it is absent, converting a literal or a view with `K::from`
+`setdefault` build the key only when it is absent, converting a literal or a view with `K::make`
 when needed. `ca::hash` hashes integers and enums by value, pointers, text by its code units (so
 a `str` hashes as its view) and any type with a `hash() const -> u64` member; `ca::is_hashable`
 lists them.
@@ -105,8 +105,8 @@ auto main(void) -> int {
 	if (!grade || grade->key != 80 || grades.first().value_or(*grade).key != 70)
 		return 2;
 
-	auto a = ca::set<int>::from(ca::array{1, 2, 3, 4});
-	auto b = ca::set<int>::from(ca::array{3, 4, 5});
+	auto a = ca::set<int>::make(ca::array{1, 2, 3, 4});
+	auto b = ca::set<int>::make(ca::array{3, 4, 5});
 	if (!a || !b)
 		return 3;
 	auto common = a->intersection(*b);

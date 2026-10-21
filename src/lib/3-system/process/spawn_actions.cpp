@@ -44,13 +44,14 @@ static auto native(ca::byte* const storage) noexcept -> posix_spawn_file_actions
 // 		static_cast<void>(this->cleanup());
 // }
 
-[[nodiscard]] auto ca::sys::spawn_actions::init(void) noexcept -> ca::result<void> {
+[[nodiscard]] auto ca::sys::spawn_actions::make(void) noexcept -> ca::result<self> {
 
-	if (_live) [[unlikely]]
-		return ca::failure{ca::errc::invalid_argument};
-	auto done = check(::posix_spawn_file_actions_init(native(_storage)));
-	_live = static_cast<bool>(done);
-	return done;
+	self actions{};
+	auto done = check(::posix_spawn_file_actions_init(native(actions._storage)));
+	if (!done) [[unlikely]]
+		return done.propagate();
+	actions._live = true;
+	return actions;
 }
 
 [[nodiscard]] auto ca::sys::spawn_actions::add_dup2(const int from, const int to) noexcept -> ca::result<void> {
@@ -76,8 +77,8 @@ static auto native(ca::byte* const storage) noexcept -> posix_spawn_file_actions
 
 [[nodiscard]] auto ca::sys::spawn_actions::cleanup(void) noexcept -> ca::result<void> {
 
-	if (!_live) [[unlikely]]
-		return ca::failure{ca::errc::invalid_argument};
+	if (!_live)
+		return ca::result<void>{};
 	_live = false;
 	return check(::posix_spawn_file_actions_destroy(native(_storage)));
 }

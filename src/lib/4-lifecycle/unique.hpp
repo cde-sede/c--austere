@@ -28,8 +28,8 @@ namespace ca {
 
 	// -- UNIQUE -------------------------------------------------------------
 
-	/* @DOC Sole owner of one T in memory from A, or of nothing; from make_in (ca::make_in<unique<T>>
-	   over any allocator). Move-only; the allocator moves with the object. cleanup() runs T's cleanup() when T is cleanable, then its
+	/* @DOC Sole owner of one T in memory from A, or of nothing; from make, or make_in
+	   (ca::make_in<unique<T>> over any allocator). Move-only; the allocator moves with the object. cleanup() runs T's cleanup() when T is cleanable, then its
 	   destructor, then gives the memory back; the destructor is a failsafe doing the same
 	   silently. Holding a stateless allocator, as wide as a pointer. */
 	template <typename T, ca::is_allocator A = ca::heap>
@@ -108,8 +108,8 @@ namespace ca {
 				return self{object, allocator};
 			}
 
-			/* @DOC A T built from args as make builds it, in memory from allocator. Fails without
-			   building when the allocation does; a failed constructor gives its memory back first. */
+			/* @DOC A T built from args as ca::make builds it, in memory from allocator. Fails without
+			   building when the allocation does; a failed make gives its memory back first. */
 			template <typename... Args>
 			requires ca::impl::is_makeable<T, Args...>
 			[[nodiscard]] static auto make_in(const A& allocator, Args&&... args) noexcept -> ca::result<self> {
@@ -118,18 +118,19 @@ namespace ca {
 				if (!block) [[unlikely]]
 					return block.propagate();
 				T* const object = static_cast<T*>(block->data());
-				if constexpr (ca::impl::has_reporting_constructor<T, Args...>) {
-					ca::error error{};
-					ca::construct_at(object, error, ca::forward<Args>(args)...);
-					if (!error.ok()) [[unlikely]] {
-						ca::destroy_at(object);
-						allocator.deallocate(block->with_size(sizeof(T)), alignof(T));
-						return ca::failure{error};
-					}
+				auto made = ca::impl::make_at(object, ca::forward<Args>(args)...);
+				if (!made) [[unlikely]] {
+					allocator.deallocate(block->with_size(sizeof(T)), alignof(T));
+					return made.propagate();
 				}
-				else
-					ca::construct_at(object, ca::forward<Args>(args)...);
 				return self{object, allocator};
+			}
+
+			/* @DOC make_in over A{}. */
+			template <typename... Args>
+			requires ca::is_stateless_allocator<A> && ca::impl::is_makeable<T, Args...>
+			[[nodiscard]] static auto make(Args&&... args) noexcept -> ca::result<self> {
+				return self::make_in(A{}, ca::forward<Args>(args)...);
 			}
 
 

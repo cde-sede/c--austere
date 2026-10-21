@@ -38,23 +38,23 @@
 #if ca_platform(linux) && ca_architecture(x86_64)
 
 /* The program's main, by its symbol: main may not be declared extern "C". */
-auto program_main(int argc, char** argv, char** envp) -> int asm("main");
+auto program_main(int argc, char** argv, char** envp) noexcept -> int asm("main"); // ns-leak: ignore
 
-extern "C" [[noreturn]] auto exit(int status) noexcept -> void;
+extern "C" [[noreturn]] auto exit(int status) noexcept -> void; // ns-leak: ignore
 
-extern "C" char** environ;
+extern "C" char** environ; // ns-leak: ignore
 
-using init_function = void (*)(int, char**, char**);
+using init_function = void (*)(int, char**, char**); // ns-leak: ignore
 
-extern "C" [[gnu::visibility("hidden")]] init_function __preinit_array_start[];
-extern "C" [[gnu::visibility("hidden")]] init_function __preinit_array_end[];
-extern "C" [[gnu::visibility("hidden")]] init_function __init_array_start[];
-extern "C" [[gnu::visibility("hidden")]] init_function __init_array_end[];
+extern "C" [[gnu::visibility("hidden")]] init_function __preinit_array_start[]; // ns-leak: ignore
+extern "C" [[gnu::visibility("hidden")]] init_function __preinit_array_end[]; // ns-leak: ignore
+extern "C" [[gnu::visibility("hidden")]] init_function __init_array_start[]; // ns-leak: ignore
+extern "C" [[gnu::visibility("hidden")]] init_function __init_array_end[]; // ns-leak: ignore
 
 /* The dynamic section, only in a static PIE (weak: null in a static non-PIE program), and the
    ELF header, at the load address in a PIE. */
-extern "C" [[gnu::visibility("hidden"), gnu::weak]] const Elf64_Dyn _DYNAMIC[];
-extern "C" [[gnu::visibility("hidden")]] const Elf64_Ehdr __ehdr_start;
+extern "C" [[gnu::visibility("hidden"), gnu::weak]] const Elf64_Dyn _DYNAMIC[]; // ns-leak: ignore
+extern "C" [[gnu::visibility("hidden")]] const Elf64_Ehdr __ehdr_start; // ns-leak: ignore
 
 static constexpr ca::usz CONTROL_BLOCK = 256U;
 static constexpr ca::isz ARCH_SET_FS = 0x1002;
@@ -75,6 +75,7 @@ template <typename... As>
 }
 
 [[gnu::no_stack_protector]] static auto copy(char* to, const char* from, ca::usz count) noexcept -> void {
+
 	for (; count != 0U; --count)
 		*to++ = *from++;
 	asm("" : : "r"(to) : "memory");

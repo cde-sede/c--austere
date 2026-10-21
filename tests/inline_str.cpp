@@ -9,7 +9,7 @@ static_assert(ca::is_trivially_copyable<ca::inline_str<8, char16_t>>);
 
 constexpr auto build(void) noexcept -> bool {
 
-	auto s = ca::inline_str<13>::from("hello");
+	auto s = ca::inline_str<13>::make("hello");
 	if (!s || !s->append(", you") || s->size() != 10U || *s != ca::sv::str{"hello, you"})
 		return false;
 	if (s->append("!!!!") || *s != ca::sv::str{"hello, you"})
@@ -62,5 +62,5 @@ auto main(void) -> int {
 	if (s.resize(9U))
 		return 5;
 	copy.clear();
-	return copy.empty() && fails_with(ca::inline_str<3>::from("four"), ca::errc::no_space) ? 0 : 6;
+	return copy.empty() && fails_with(ca::inline_str<3>::make("four"), ca::errc::no_space) ? 0 : 6;
 }

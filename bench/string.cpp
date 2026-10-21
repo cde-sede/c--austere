@@ -152,7 +152,7 @@ NI static auto digits(void) -> void {
 NI static auto construct_short(void) -> void {
 	size_t sum = 0;
 	for (int i = 0; i < COUNT; ++i) {
-		auto s = ca::str::from("ten chars!");
+		auto s = ca::str::make("ten chars!");
 		sum += s->size() + static_cast<unsigned char>((*s)[static_cast<ca::usz>(i % 10)]);
 		static_cast<void>(s->cleanup());
 	}
@@ -162,7 +162,7 @@ NI static auto construct_short(void) -> void {
 NI static auto construct_medium(void) -> void {
 	size_t sum = 0;
 	for (int i = 0; i < COUNT; ++i) {
-		auto s = ca::str::from("twenty-two characters!");
+		auto s = ca::str::make("twenty-two characters!");
 		sum += s->size() + static_cast<unsigned char>((*s)[static_cast<ca::usz>(i % 22)]);
 		static_cast<void>(s->cleanup());
 	}
@@ -198,7 +198,7 @@ NI static auto format(void) -> void {
 NI static auto array_of_strings(void) -> void {
 	ca::dynamic_array<ca::str> list;
 	for (int i = 0; i < COUNT; ++i) {
-		auto s = ca::str::from(i % 2 == 0 ? "short" : "a string longer than inline");
+		auto s = ca::str::make(i % 2 == 0 ? "short" : "a string longer than inline");
 		static_cast<void>(list.append(static_cast<ca::str&&>(*s)));
 	}
 	sink = list.size();
@@ -206,7 +206,7 @@ NI static auto array_of_strings(void) -> void {
 }
 
 NI static auto find(void) -> void {
-	auto haystack = ca::str::from(text);
+	auto haystack = ca::str::make(text);
 	size_t sum = 0;
 	for (int i = 0; i < 20; ++i) {
 		const auto at = haystack->view().find(ca::sv::str{"not there at all"});
@@ -241,7 +241,7 @@ NI static auto split_fields(void) -> void {
 
 NI static auto upper(void) -> void {
 	size_t sum = 0;
-	auto text = ca::str::from(csv);
+	auto text = ca::str::make(csv);
 	for (int i = 0; i < 20; ++i) {
 		auto out = text->upper();
 		sum += out->size() + static_cast<unsigned char>((*out)[7]);
@@ -267,8 +267,8 @@ auto main(void) -> int {
 		return 1;
 	make_text();
 	section("str");
-	bench("from() of 10 chars, 1e6", "inline in both; built inside the result: returning it copies nothing", construct_short);
-	bench("from() of 22 chars, 1e6", "std::string allocates past 15", construct_medium);
+	bench("make() of 10 chars, 1e6", "inline in both; built inside the result: returning it copies nothing", construct_short);
+	bench("make() of 22 chars, 1e6", "std::string allocates past 15", construct_medium);
 	bench("push 1e7 chars", push);
 	bench("append 1e6 6-char words", append);
 	bench("ca::format vs std::format, short result, 1e6", format);

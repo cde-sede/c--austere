@@ -260,6 +260,8 @@ def strip_attrs(t):
 			if j < 0:
 				break
 			t = t[j + 1:].strip()
+		elif (m := re.match(r'extern\s*"[^"]*"', t)):
+			t = t[m.end():].strip()
 		else:
 			break
 	return t
@@ -976,7 +978,7 @@ def _(d, c):
 		if not d.at.file_scope and not (SNAKE.fullmatch(d.name) or UPPER.fullmatch(d.name)):
 			return at(d.li, what='variable', name=d.name)
 		return None
-	if d.what == 'function' and d.special:
+	if d.what == 'function' and (d.special or d.at.kind == 'linkage'):
 		return None
 	if d.what in ('alias', 'concept', 'function', 'class', 'struct', 'union', 'enum') and d.name:
 		if not SNAKE.fullmatch(d.name):
@@ -1212,7 +1214,7 @@ def classify(s, t):
 	m = re.match(r'(?:inline\s+)?namespace\b\s*([\w:]*)', t)
 	if m:
 		return Kind('namespace', m.group(1))
-	if re.match(r'extern\s*"', t):
+	if re.fullmatch(r'extern\s*"[^"]*"', t):
 		return Kind('linkage')
 	if re.match(r'enum\b', rest):
 		return Kind('enum')

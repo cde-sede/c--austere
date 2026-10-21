@@ -11,7 +11,7 @@
    | components | O(n) total, lazy | none |
    | relative_to, is_relative_to, == | O(n) memcmp | none |
    | match | O(n * m) worst case per component, no backtracking across components | none |
-   | from, join, push, with_name, with_stem, with_suffix, clone | O(n) single pass | one heap block |
+   | make, join, push, with_name, with_stem, with_suffix, clone | O(n) single pass | one heap block |
    | filesystem queries | one syscall | none |
    | iterdir, glob | one syscall per entry | one heap block per result, plus the array |
 
@@ -36,8 +36,8 @@
 
    | Case | clang 18 | gcc 13 | Notes |
    |---|---|---|---|
-   | from, messy input, 1e6 | 0.094x | 0.13x | std: constructor + lexically_normal |
-   | from, clean input, 1e6 | 0.34x | 0.49x | std: constructor only, no normalization |
+   | make, messy input, 1e6 | 0.094x | 0.13x | std: constructor + lexically_normal |
+   | make, clean input, 1e6 | 0.34x | 0.49x | std: constructor only, no normalization |
    | join of a file name, 1e6 | 0.070x | 0.081x | std: operator/ |
    | name + stem + suffix, 1e6 | 0.26x | 0.33x | |
    | parent, 1e6 | 0.042x | 0.050x | |
@@ -293,17 +293,12 @@ namespace ca {
 				// }
 
 				/* @DOC text, normalized, in memory from allocator. */
-				[[nodiscard]] static auto from(const A& allocator, const ca::sv::str text) noexcept -> ca::result<self> {
+				[[nodiscard]] static auto make_in(const A& allocator, const ca::sv::str text) noexcept -> ca::result<self> {
 					return self::_compose(allocator, ca::sv::str{}, text);
 				}
 
-				[[nodiscard]] static auto from(const ca::sv::str text) noexcept -> ca::result<self> requires ca::is_stateless_allocator<A> {
-					return self::from(A{}, text);
-				}
-
-				/* @DOC from, for ca::make_in. */
-				[[nodiscard]] static auto make_in(const A& allocator, const ca::sv::str text) noexcept -> ca::result<self> {
-					return self::from(allocator, text);
+				[[nodiscard]] static auto make(const ca::sv::str text) noexcept -> ca::result<self> requires ca::is_stateless_allocator<A> {
+					return self::make_in(A{}, text);
 				}
 
 				/* @DOC The working directory. */
@@ -315,7 +310,7 @@ namespace ca {
 						char* const text = static_cast<char*>(buffer->data());
 						auto length = ca::sys::getcwd(ca::span{text, size});
 						if (length) {
-							auto built = self::from(allocator, ca::sv::str{text, *length});
+							auto built = self::make_in(allocator, ca::sv::str{text, *length});
 							allocator.deallocate(*buffer, 1U);
 							return built;
 						}
@@ -335,7 +330,7 @@ namespace ca {
 					const auto home = ca::sys::getenv("HOME");
 					if (!home)
 						return ca::failure{ca::errc::no_entry};
-					return self::from(allocator, *home);
+					return self::make_in(allocator, *home);
 				}
 
 				[[nodiscard]] static auto home(void) noexcept -> ca::result<self> requires ca::is_stateless_allocator<A> {
@@ -540,7 +535,7 @@ namespace ca {
 					auto resolved = ca::sys::realpath(this->c_str());
 					if (!resolved)
 						return resolved.propagate();
-					auto built = self::from(_allocator, ca::sv::str{*resolved});
+					auto built = self::make_in(_allocator, ca::sv::str{*resolved});
 					ca::sys::free(*resolved);
 					return built;
 				}
@@ -606,7 +601,7 @@ namespace ca {
 						return made;
 					ca::error error = made.error();
 					if (error == ca::errc::no_entry) {
-						auto up = self::from(_allocator, this->parent());
+						auto up = self::make_in(_allocator, this->parent());
 						if (!up)
 							return up.propagate();
 						const bool top = *up == *this;
@@ -672,7 +667,7 @@ namespace ca {
 							return length.propagate();
 						}
 						if (*length < size) {
-							auto built = self::from(_allocator, ca::sv::str{text, *length});
+							auto built = self::make_in(_allocator, ca::sv::str{text, *length});
 							_allocator.deallocate(*buffer, 1U);
 							return built;
 						}

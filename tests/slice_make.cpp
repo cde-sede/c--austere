@@ -15,7 +15,7 @@ auto main(void) -> int {
 	if (!zeros || (*zeros)[2] != 0 || !none || none->data() != nullptr)
 		return 2;
 	const int values[4] = {4, 3, 2, 1};
-	auto copy = ca::slice<int>::from(values);
+	auto copy = ca::slice<int>::make(values);
 	if (!copy || !(*copy == ca::borrowed_slice{values}))
 		return 3;
 	copy->reverse();

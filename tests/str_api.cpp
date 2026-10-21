@@ -47,16 +47,16 @@ static auto join_and_collect(void) noexcept -> int {
 
 static auto wide(void) noexcept -> int {
 
-	auto w = ca::u16str::from(u"  Hello, wide  ");
+	auto w = ca::u16str::make(u"  Hello, wide  ");
 	if (!w || w->strip() != ca::sv::u16{u"Hello, wide"} || !w->contains(u"wide"))
 		return 10;
 	auto upper = w->upper();
 	if (!upper || *upper != ca::sv::u16{u"  HELLO, WIDE  "})
 		return 11;
-	auto from_utf8 = ca::u16str::from(ca::sv::str{"caf\xc3\xa9 \xf0\x9f\x98\x80"});
+	auto from_utf8 = ca::u16str::make(ca::sv::str{"caf\xc3\xa9 \xf0\x9f\x98\x80"});
 	if (!from_utf8 || *from_utf8 != ca::sv::u16{u"caf\xe9 \xd83d\xde00"} || from_utf8->code_point_count() != 6U)
 		return 12;
-	auto to_utf8 = ca::str::from(ca::sv::u32{U"\x1F600!"});
+	auto to_utf8 = ca::str::make(ca::sv::u32{U"\x1F600!"});
 	if (!to_utf8 || *to_utf8 != ca::sv::str{"\xf0\x9f\x98\x80!"})
 		return 13;
 	return w->cleanup() && upper->cleanup() && from_utf8->cleanup() && to_utf8->cleanup() ? 0 : 14;
@@ -64,7 +64,7 @@ static auto wide(void) noexcept -> int {
 
 static auto multibyte(void) noexcept -> int {
 
-	auto s = ca::str::from("caf\xc3\xa9  ");
+	auto s = ca::str::make("caf\xc3\xa9  ");
 	if (!s || s->strip_end() != ca::sv::str{"caf\xc3\xa9"})
 		return 20;
 	auto upper = s->upper();
@@ -72,13 +72,13 @@ static auto multibyte(void) noexcept -> int {
 		return 21;
 	if (ca::sv::str{"\xc3\xa9x\xc3\xa9"}.strip("\xc3\xa9") != ca::sv::str{"x"})
 		return 22;
-	auto centered = ca::str::from("\xc3\xa9");
+	auto centered = ca::str::make("\xc3\xa9");
 	if (!centered)
 		return 23;
 	auto wide_center = centered->center(3U, U'\x2014');
 	if (!wide_center || *wide_center != ca::sv::str{"\xe2\x80\x94\xc3\xa9\xe2\x80\x94"})
 		return 24;
-	auto bad = ca::str::from("a\xffz");
+	auto bad = ca::str::make("a\xffz");
 	if (!bad)
 		return 25;
 	auto bad_upper = bad->upper();
@@ -89,7 +89,7 @@ static auto multibyte(void) noexcept -> int {
 
 static auto fixed(void) noexcept -> int {
 
-	auto tag = ca::inline_str<16>::from(" x,y ");
+	auto tag = ca::inline_str<16>::make(" x,y ");
 	if (!tag || tag->strip() != ca::sv::str{"x,y"} || tag->count(",") != 1U || tag->is_alpha())
 		return 30;
 	ca::usz parts = 0U;

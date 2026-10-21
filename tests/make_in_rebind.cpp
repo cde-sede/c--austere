@@ -38,7 +38,7 @@ auto main(void) -> int {
 		if (!renamed || renamed->name() != ca::sv::str{"z.md"})
 			return 6;
 
-		auto root = arena_path::from(allocator, ca::sv::str{"/"});
+		auto root = arena_path::make_in(allocator, ca::sv::str{"/"});
 		if (!root)
 			return 7;
 		auto entries = root->iterdir();

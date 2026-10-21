@@ -41,7 +41,8 @@ auto main(void) -> int {
 
 ### Options
 
-`open(path, options, mode)` takes an option set: readable when no access option is given, `mode`
+`open(path, options, mode)` (`make` under its generic name, what `ca::make` calls) takes an
+option set: readable when no access option is given, `mode`
 applying with `create`. Contradictions fail to compile (`exclusive` without `create`, `truncate`
 on a read-only file), and an option the platform lacks (`clofork` on Linux) fails with
 `errc::not_supported` before anything happens.

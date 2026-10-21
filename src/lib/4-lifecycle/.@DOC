@@ -1,25 +1,46 @@
 Layer 4: how objects are created, owned, copied and destroyed without exceptions, and where
 their memory comes from (`memory/`).
 
-### Explicit cleanup
+### Acquisition, initialisation, cleanup
 
-ca has no RAII for resources. A type owning resources (memory, descriptors, mappings) is
-`ca::is_cleanable`: it has `cleanup() -> result<void>`, which releases everything it owns and can
-report a failure, such as a close or a flush that failed. Its destructor remains only as a
-failsafe that releases silently what a skipped `cleanup()` left. Assigning over a cleanable object
-that still owns something traps, so a forgotten cleanup shows up instead of hiding a lost error.
+ca has no RAII for resources: a constructor cannot return a failure, so nothing that can fail
+happens in one. An object goes through three steps, each reporting its own failure.
 
-Construction follows the same rule. `ca::make<T>(args...)` builds a T and returns a
-`result<T>`: when T has a constructor taking `ca::error&` first, the constructor reports failure
-through it and `make` returns that error, destroying the half-built object. Constructors only
-initialize; acquiring a resource is a fallible function or factory (`arena::make`,
-`fs::descriptor::open`).
+- Acquisition: `T::make(args...) -> result<T>` does what can fail (allocating, opening, copying),
+  then builds the T with a constructor that cannot fail. `ca::make<T>(args...)` calls it; a type
+  without one is built by its constructor, `T(ca::error&, args...)` when it has one (the
+  constructor reports through the error and `make` returns it), else `T(args...)`. An
+  allocator-aware type also has `make_in(allocator, args...)`, which `ca::make_in` calls.
+- Initialisation: constructors only initialize. They acquire nothing.
+- Cleanup: a type owning resources (memory, descriptors, mappings) is `ca::is_cleanable`: its
+  `cleanup() -> result<void>` releases everything it owns and reports a failure, such as a close
+  or a flush that failed. Its destructor remains only as a failsafe that releases silently what a
+  skipped `cleanup()` left.
+
+`make` and `make_in` are the acquisition step of every ca type, the names `ca::make` and
+`ca::make_in` call: `arena::make()`, `str::make(text)`, `slice<T>::make(view)`. When acquiring
+does more than build the object, a wrapper of `make` names what happens: `fs::descriptor::open(
+path, options)` opens a file, `io::buffered_reader::over(fd, ...)` borrows a descriptor and
+`adopt(descriptor, ...)` takes one. A factory that is not `make` has its own name when its
+arguments do not say what it builds from: `path::cwd()`, `path::home()`, `hashmap::from_keys(
+keys, value)` (Python's dict.fromkeys), `report::of(error)`. `fs::descriptor::adopt(fd)` and
+`unique<T>::adopt(object, allocator)` take ownership of something already acquired and cannot
+fail.
+
+Moving onto a ca owner that still holds something whose release can fail (a descriptor, bytes
+not yet flushed, elements with a `cleanup()`) traps, so a forgotten cleanup shows up instead of
+hiding a lost error; an owner holding only memory, which frees without failing, frees it. This is
+how ca's own types behave, not a requirement on yours: containers never assign over a live
+element (they move-construct, and swap or reverse assign only onto an element just moved from).
 
 ```c++
 #include "ca/error.hpp"
+#include "ca/integers.hpp"
 #include "ca/is_cleanable.hpp"
 #include "ca/make.hpp"
 #include "ca/result.hpp"
+#include "ca/slice.hpp"
+#include "ca/utility.hpp"
 
 class counter final {
 	private:
@@ -36,25 +57,46 @@ class counter final {
 		[[nodiscard]] auto tick(void) noexcept -> bool {
 			return ++_count <= _limit;
 		}
+};
+
+class buffer final {
+	private:
+		ca::slice<char> _bytes;
+
+		explicit buffer(ca::slice<char>&& bytes) noexcept
+		: _bytes{ca::move(bytes)} {
+		}
+
+	public:
+		[[nodiscard]] static auto make(const ca::usz size) noexcept -> ca::result<buffer> {
+			auto bytes = ca::slice<char>::make(size);
+			if (!bytes)
+				return bytes.propagate();
+			return buffer{ca::move(*bytes)};
+		}
+
+		[[nodiscard]] auto size(void) const noexcept -> ca::usz {
+			return _bytes.size();
+		}
 
 		[[nodiscard]] auto cleanup(void) noexcept -> ca::result<void> {
-			_count = 0;
-			return {};
+			return _bytes.cleanup();
 		}
 };
 
-static_assert(ca::is_cleanable<counter>);
+static_assert(!ca::is_cleanable<counter> && ca::is_cleanable<buffer>);
 
 auto main(void) -> int {
 	auto bad = ca::make<counter>(0);
 	if (bad || bad.error() != ca::errc::invalid_argument)
 		return 1;
 	auto made = ca::make<counter>(2);
-	if (!made)
+	if (!made || !made->tick() || !made->tick() || made->tick())
 		return 2;
-	counter& c = *made;
-	const bool ticks = c.tick() && c.tick() && !c.tick();
-	return ticks && c.cleanup() ? 0 : 3;
+	auto bytes = ca::make<buffer>(64U);
+	if (!bytes || bytes->size() != 64U)
+		return 3;
+	return bytes->cleanup() ? 0 : 4;
 }
 ```
 
@@ -64,7 +106,7 @@ that may fail (it allocates), which containers use instead of a copy constructor
 ### Owning one object
 
 `ca::unique<T, A>` owns one T in memory from allocator A (`ca::heap` by default), like
-`std::unique_ptr` but built through `ca::make_in`, cleaned with `cleanup()` (which runs T's own
+`std::unique_ptr` but built through `make` or `ca::make_in`, cleaned with `cleanup()` (which runs T's own
 cleanup first), and cloned with `clone()`. Over a stateless allocator it is one pointer wide.
 
 `ca::make_in<T>(source, args...)` builds an allocator-aware T over any allocator or allocator

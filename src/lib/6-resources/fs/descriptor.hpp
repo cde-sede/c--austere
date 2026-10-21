@@ -136,7 +136,7 @@ namespace ca {
 				/* @DOC Opens path with options (readable when no access option is given); mode
 				   applies with create. errc::not_supported when an option is unavailable here. */
 				template <typename... Os>
-				[[nodiscard]] static auto open(const char* const path, const ca::option_set<Os...> options = {}, const ca::u32 mode = 0666U) noexcept
+				[[nodiscard]] static auto make(const char* const path, const ca::option_set<Os...> options = {}, const ca::u32 mode = 0666U) noexcept
 				-> ca::result<self> {
 
 					self::_check_open(options);
@@ -152,9 +152,22 @@ namespace ca {
 				}
 
 				template <typename A, typename... Os>
+				[[nodiscard]] static auto make(const ca::fs::basic_path<A>& path, const ca::option_set<Os...> options = {}, const ca::u32 mode = 0666U) noexcept
+				-> ca::result<self> {
+					return self::make(path.c_str(), options, mode);
+				}
+
+				/* @DOC make, named for what it does. */
+				template <typename... Os>
+				[[nodiscard]] static auto open(const char* const path, const ca::option_set<Os...> options = {}, const ca::u32 mode = 0666U) noexcept
+				-> ca::result<self> {
+					return self::make(path, options, mode);
+				}
+
+				template <typename A, typename... Os>
 				[[nodiscard]] static auto open(const ca::fs::basic_path<A>& path, const ca::option_set<Os...> options = {}, const ca::u32 mode = 0666U) noexcept
 				-> ca::result<self> {
-					return self::open(path.c_str(), options, mode);
+					return self::make(path.c_str(), options, mode);
 				}
 
 				/* @DOC Takes ownership of fd, which must be open or -1. */

@@ -55,7 +55,7 @@ static auto parts(const ca::sv::partitioned<char> parted) noexcept -> ca::sv::st
 
 static auto owned(const ca::sv::str text) noexcept -> ca::str {
 
-	auto made = ca::str::from(text);
+	auto made = ca::str::make(text);
 	return made ? static_cast<ca::str&&>(*made) : ca::str{};
 }
 

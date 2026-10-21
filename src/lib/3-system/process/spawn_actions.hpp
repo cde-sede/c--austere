@@ -5,6 +5,9 @@
 #include "1-primitives/integers/byte.hpp"
 #include "1-primitives/integers/u32.hpp"
 #include "1-primitives/integers/usz.hpp"
+#include "1-primitives/memory/copy_bytes.hpp"
+#include "1-primitives/utility/exchange.hpp"
+#include "2-vocabulary/impl/access.hpp"
 #include "2-vocabulary/result.hpp"
 
 
@@ -34,8 +37,9 @@ namespace ca {
 
 
 		/* @DOC Descriptor changes posix_spawn applies in the child, in order, before it runs the
-		   program (posix_spawn_file_actions_t). init before use; cleanup after; the destructor only
-		   destroys as a failsafe. Neither copyable nor movable. */
+		   program (posix_spawn_file_actions_t). From make(); cleanup() frees them. Move-only: the
+		   list holds no pointer to itself (glibc, musl, libca_runtime), so moving copies its
+		   bytes and leaves the source empty. */
 		class spawn_actions final {
 
 
@@ -61,33 +65,52 @@ namespace ca {
 
 				// -- public lifecycle ---------------------------------------
 
+				/* @DOC Not live: what moving and cleanup() leave. make() builds a live one. */
 				spawn_actions(void) noexcept
 				: _storage{}, _live{false} {
 				}
 
 				spawn_actions(const self&) = delete;
 
+				spawn_actions(self&& other) noexcept
+				: _storage{}, _live{ca::exchange(other._live, false)} {
+					ca::copy_bytes(_storage, other._storage, sizeof(_storage));
+				}
+
 				// Failsafe for a skipped cleanup(): frees the list, ignoring errors.
 				// ~spawn_actions(void) noexcept;
+
+				/* @DOC An empty list, live. */
+				[[nodiscard]] static auto make(void) noexcept -> ca::result<self>;
 
 
 				// -- assignment operators -----------------------------------
 
 				auto operator=(const self&) -> self& = delete;
 
+				/* @DOC Takes other's list. Traps when this one is live, its release being fallible:
+				   cleanup() first. */
+				auto operator=(self&& other) noexcept -> self& {
+
+					if (this == &other)
+						return *this;
+					if (_live) [[unlikely]]
+						ca::impl::assigned_over_an_uncleaned_object();
+					ca::copy_bytes(_storage, other._storage, sizeof(_storage));
+					_live = ca::exchange(other._live, false);
+					return *this;
+				}
+
 
 				// -- accessors ----------------------------------------------
 
-				/* @DOC Whether init succeeded and cleanup has not run. */
+				/* @DOC Whether make() built it and cleanup() has not run. */
 				[[nodiscard]] constexpr auto is_live(void) const noexcept -> bool {
 					return _live;
 				}
 
 
 				// -- methods ------------------------------------------------
-
-				/* @DOC Starts an empty list. errc::invalid_argument when already live. */
-				[[nodiscard]] auto init(void) noexcept -> ca::result<void>;
 
 				/* @DOC In the child, fd to becomes a copy of from, without close-on-exec. */
 				[[nodiscard]] auto add_dup2(int from, int to) noexcept -> ca::result<void>;
@@ -99,7 +122,7 @@ namespace ca {
 				   the spawn. */
 				[[nodiscard]] auto add_open(int fd, const char* path, int flags, ca::u32 mode) noexcept -> ca::result<void>;
 
-				/* @DOC Frees the list. errc::invalid_argument when not live. */
+				/* @DOC Frees the list: not live after, even on failure. One not live succeeds. */
 				[[nodiscard]] auto cleanup(void) noexcept -> ca::result<void>;
 
 		}; // class spawn_actions

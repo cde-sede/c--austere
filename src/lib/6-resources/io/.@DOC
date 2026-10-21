@@ -99,7 +99,8 @@ auto main(void) -> int {
 
 `buffered_writer<A>` and `buffered_reader<A>` own their buffer, from allocator A, and can own their
 descriptor too: `over(fd, ...)` borrows it, `adopt(descriptor, ...)` takes an `fs::descriptor`
-and closes it in `cleanup()`. `resize(capacity)` swaps the buffer (0 makes a writer unbuffered).
+and closes it in `cleanup()`. Both are `make`, which picks by the argument (a borrowed fd or
+`const fs::descriptor&`, a moved `fs::descriptor&&`), as `ca::make` and `ca::make_in` call it. `resize(capacity)` swaps the buffer (0 makes a writer unbuffered).
 `writer()` and `reader()` give the inner object for code that takes an `io::writer&` or
 `io::reader&`.
 

@@ -6,6 +6,9 @@
 #   ./compile.sh file.cpp [out]      release; out defaults to file name without .cpp
 #   MODE=debug ./compile.sh file.cpp
 #   CXX=g++ ./compile.sh file.cpp
+#   FREESTANDING=1 ./compile.sh file.cpp
+#                                    links nothing but ca: no libc, no libgcc, no crt files;
+#                                    a static-pie started by ca's runtime (libca_runtime.a)
 
 set -e
 
@@ -33,17 +36,29 @@ esac
 
 make -j$(nproc) -s -C "$root" CXX="$CXX" MODE="$MODE"
 
+build="$root/build/$(basename "$CXX")-$MODE"
 
-echo $CXX -std=$std -nostdinc++ -fno-exceptions -fno-rtti \
+if [ -n "$FREESTANDING" ]; then
+	set -x
+	$CXX -std=$std -nostdinc++ -fno-exceptions -fno-rtti -fno-omit-frame-pointer -mno-omit-leaf-frame-pointer \
+		-Wall -Wextra -Wpedantic -Werror $modeflags \
+		-I"$root/src/lib" \
+		"$src" -o "$out" \
+		-nostdlib -static-pie -Wl,-u,_start \
+		-Wl,--start-group "$build/libca.a" "$build/libca_runtime.a" -Wl,--end-group
+	exit
+fi
+
+echo $CXX -std=$std -nostdinc++ -fno-exceptions -fno-rtti -fno-omit-frame-pointer -mno-omit-leaf-frame-pointer \
 	-Wall -Wextra -Wpedantic -Werror -pthread $modeflags \
 	-I"$root/src/lib" \
 	"$src" -o "$out" \
-	"$root/build/$(basename "$CXX")-$MODE/libca.a" \
+	"$build/libca.a" \
 	-nostdinc++ -pthread $ldextra
 
-$CXX -std=$std -nostdinc++ -fno-exceptions -fno-rtti \
+$CXX -std=$std -nostdinc++ -fno-exceptions -fno-rtti -fno-omit-frame-pointer -mno-omit-leaf-frame-pointer \
 	-Wall -Wextra -Wpedantic -Werror -pthread $modeflags \
 	-I"$root/src/lib" \
 	"$src" -o "$out" \
-	"$root/build/$(basename "$CXX")-$MODE/libca.a" \
+	"$build/libca.a" \
 	-nostdinc++ -pthread $ldextra

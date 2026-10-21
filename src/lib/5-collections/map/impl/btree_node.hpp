@@ -5,6 +5,7 @@
 #include "1-primitives/integers/usz.hpp"
 #include "1-primitives/traits/is_const.hpp"
 #include "1-primitives/traits/is_same.hpp"
+#include "1-primitives/traits/is_trivially_destructible.hpp"
 #include "1-primitives/traits/remove_cv.hpp"
 #include "2-vocabulary/impl/access.hpp"
 #include "5-collections/map/item.hpp"
@@ -49,6 +50,8 @@ namespace ca {
 				}
 
 				btree_node(const self&) = delete;
+
+				~btree_node(void) noexcept requires ca::is_trivially_destructible<K> && ca::is_trivially_destructible<V> = default;
 
 				~btree_node(void) noexcept {
 				}

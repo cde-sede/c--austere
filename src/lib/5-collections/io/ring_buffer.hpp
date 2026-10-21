@@ -148,7 +148,21 @@ namespace ca {
 
 				auto operator=(const self&) -> self& = delete;
 
-				auto operator=(self&&) -> self& = delete;
+				/* @DOC Takes other's ring and allocator; the previous ring is freed. */
+				auto operator=(self&& other) noexcept -> self& {
+
+					if (this == &other)
+						return *this;
+					self::_free(_allocator, _data, _capacity);
+					     _data = ca::exchange(other._data, nullptr);
+					 _capacity = ca::exchange(other._capacity, 0U);
+					     _head = ca::exchange(other._head, 0U);
+					     _tail = ca::exchange(other._tail, 0U);
+					  _pending = ca::exchange(other._pending, 0U);
+					    _error = other._error;
+					_allocator = other._allocator;
+					return *this;
+				}
 
 
 				// -- accessors ----------------------------------------------

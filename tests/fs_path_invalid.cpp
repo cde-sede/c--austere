@@ -4,10 +4,10 @@
 #include "5-collections/fs/path.hpp"
 
 auto main(void) -> int {
-	auto nul = ca::fs::path::from(ca::sv::str{"a\0b", 3U});
+	auto nul = ca::fs::path::make(ca::sv::str{"a\0b", 3U});
 	if (nul || nul.error() != ca::errc::invalid_argument)
 		return 1;
-	auto p = ca::fs::path::from("a/b.txt");
+	auto p = ca::fs::path::make("a/b.txt");
 	if (!p)
 		return 2;
 	if (p->with_name("x/y") || p->with_name("") || p->with_name(".") || p->with_suffix("txt") || p->with_suffix(".") || p->with_stem("a/b"))

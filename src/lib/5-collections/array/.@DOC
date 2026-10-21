@@ -102,7 +102,7 @@ auto main(void) -> int {
 ### slice and deque
 
 A `slice<T, A>` is an owned run of fixed length: `make(n, args...)` builds n elements from args,
-`from(view)` copies a view. A `deque<T, A>` is a ring buffer with O(1) `append`, `prepend`, `pop`
+`make(view)` copies a view. A `deque<T, A>` is a ring buffer with O(1) `append`, `prepend`, `pop`
 and `pop_front`; `as_slices()` exposes its contents as the two contiguous runs of the ring.
 
 ```c++
@@ -115,7 +115,7 @@ auto main(void) -> int {
 	if (!sevens || sevens->count(7) != 4U)
 		return 1;
 	const int raw[] = {4, 3, 2, 1};
-	auto copied = ca::slice<int>::from(raw);
+	auto copied = ca::slice<int>::make(raw);
 	if (!copied || !(*copied == ca::borrowed_slice{raw}))
 		return 2;
 

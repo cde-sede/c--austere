@@ -18,7 +18,7 @@ These never touch the file system: `name()`, `stem()`, `suffix()`, `parent()`, `
 #include "ca/sv.hpp"
 
 auto main(void) -> int {
-	auto p = ca::fs::path::from("//usr/./lib//archive.tar.gz/");
+	auto p = ca::fs::path::make("//usr/./lib//archive.tar.gz/");
 	if (!p || p->view() != ca::sv::str{"/usr/lib/archive.tar.gz"})
 		return 1;
 	if (p->name() != ca::sv::str{"archive.tar.gz"} || p->stem() != ca::sv::str{"archive.tar"})
@@ -59,7 +59,7 @@ directories.
 #include "ca/sv.hpp"
 
 auto main(void) -> int {
-	auto root = ca::fs::path::from("path_example");
+	auto root = ca::fs::path::make("path_example");
 	if (!root)
 		return 1;
 	auto deep = root->join("a/b");

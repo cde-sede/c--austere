@@ -69,8 +69,8 @@ template <typename... As>
 	return ca::syscall::impl::enter(number, ca::syscall::impl::word(arguments)...);
 }
 
-static auto failed(const ca::isz result) noexcept -> bool {
-	return result < 0 && result > -4096;
+static auto failed(const ca::isz returned) noexcept -> bool {
+	return returned < 0 && returned > -4096;
 }
 
 /* clone onto stack (its top), child running entry(argument) then exiting with its result. */

@@ -1,7 +1,6 @@
 #ifndef ca_collections_list_list_link_hpp
 #define ca_collections_list_list_link_hpp
 
-#include "2-vocabulary/impl/access.hpp"
 #include "5-collections/list/impl/merge_sort_links.hpp"
 
 
@@ -22,7 +21,8 @@ namespace ca {
 
 	/* @DOC The two links T carries to be in an intrusive_list<T, Tag>: derive T from it,
 	   publicly, once per Tag for each list an element may be in at the same time. A copy or move
-	   starts unlinked; destroying a linked one traps, in every build. */
+	   starts unlinked. Trivially destructible, so a trap may unwind past it: an element leaves
+	   its list before it is destroyed, which nothing checks. */
 	template <typename T, typename Tag = void> // final: ignore
 	class list_link {
 
@@ -67,12 +67,6 @@ namespace ca {
 			/* @DOC Unlinked: links belong to the element's place, not its value. */
 			constexpr list_link(const self&) noexcept
 			: _previous{nullptr}, _next{this} {
-			}
-
-			/* @DOC Traps when still linked: unlink the element first. */
-			constexpr ~list_link(void) noexcept {
-				if (_next != this) [[unlikely]]
-					ca::impl::element_destroyed_while_linked();
 			}
 
 

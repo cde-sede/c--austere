@@ -110,10 +110,6 @@ namespace ca {
 			ca::trap("element not linked");
 		}
 
-		[[noreturn, gnu::cold, gnu::noinline]] inline auto element_destroyed_while_linked(void) noexcept -> void {
-			ca::trap("element destroyed while linked");
-		}
-
 		[[noreturn, gnu::cold, gnu::noinline]] inline auto key_not_found(void) noexcept -> void {
 			ca::trap("key not found");
 		}

@@ -58,7 +58,7 @@ static auto growth(void) noexcept -> int {
 
 static auto ownership(void) noexcept -> int {
 
-	auto made = ca::str::from("a string long enough to live on the heap");
+	auto made = ca::str::make("a string long enough to live on the heap");
 	if (!made)
 		return 20;
 	ca::str moved = ca::move(*made);
@@ -78,7 +78,7 @@ static auto ownership(void) noexcept -> int {
 		return 25;
 	ca::dynamic_array<ca::str> list;
 	for (int i = 0; i < 100; ++i) {
-		auto item = ca::str::from(i % 2 == 0 ? ca::sv::str{"short"} : ca::sv::str{"a longer string, allocated"});
+		auto item = ca::str::make(i % 2 == 0 ? ca::sv::str{"short"} : ca::sv::str{"a longer string, allocated"});
 		if (!item || !list.append(ca::move(*item)))
 			return 26;
 	}
@@ -94,11 +94,11 @@ static auto encodings(void) noexcept -> int {
 		return 30;
 	if (w.size() != 6U || w != ca::sv::u16{u"caf\u00e9\U0001F600"})
 		return 31;
-	auto u = ca::u32str::from(U"0123456789");
+	auto u = ca::u32str::make(U"0123456789");
 	if (!u || u->size() != 10U || (*u)[9] != U'9' || u->c_str()[10] != U'\0')
 		return 32;
-	auto e = ca::u8str::from(u8"\u00e9");
-	auto l = ca::wstr::from(L"wide");
+	auto e = ca::u8str::make(u8"\u00e9");
+	auto l = ca::wstr::make(L"wide");
 	if (!e || e->size() != 2U || !l || l->view().find(L'd') != 2U)
 		return 33;
 	return w.cleanup() && u->cleanup() && e->cleanup() && l->cleanup() ? 0 : 34;

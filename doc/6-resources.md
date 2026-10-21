@@ -95,7 +95,7 @@ auto main(void) -> int {
 
 ### Options
 
-`open(path, options, mode)` takes an option set: readable when no access option is given, `mode` applying with `create`. Contradictions fail to compile (`exclusive` without `create`, `truncate` on a read-only file), and an option the platform lacks (`clofork` on Linux) fails with `errc::not_supported` before anything happens.
+`open(path, options, mode)` (`make` under its generic name, what `ca::make` calls) takes an option set: readable when no access option is given, `mode` applying with `create`. Contradictions fail to compile (`exclusive` without `create`, `truncate` on a read-only file), and an option the platform lacks (`clofork` on Linux) fails with `errc::not_supported` before anything happens.
 
 After opening, `d |= options` turns options on, `d &= ~options` off, and `test(options)` checks them. Each option knows its domain, so only the fcntl calls the domains need are made: one F_SETFD for `cloexec`, one F_SETFL for `nonblock` and `append`. `set` and `clear` are the fallible forms, all or nothing (an earlier domain rolls back when a later one fails), and report an unsupported option as `errc::not_supported`; the operators trap on failure and refuse an unsupported option at compile time. Open-time options (`create`, `truncate`) cannot change afterwards, and `d &= options` without the `~` is deleted, since it would clear every other flag: both are compile errors.
 
@@ -123,6 +123,16 @@ static constexpr bool TRIVIALLY_RELOCATABLE = true;
 
 One int, no self-reference: containers move descriptors with memcpy.
 
+### function `descriptor::make`
+
+```c++
+template <typename... Os>
+[[nodiscard]] static auto make(const char* const path, const ca::option_set<Os...> options = {}, const ca::u32 mode = 0666U) noexcept
+-> ca::result<self>;
+```
+
+Opens path with options (readable when no access option is given); mode applies with create. errc::not_supported when an option is unavailable here.
+
 ### function `descriptor::open`
 
 ```c++
@@ -131,7 +141,7 @@ template <typename... Os>
 -> ca::result<self>;
 ```
 
-Opens path with options (readable when no access option is given); mode applies with create. errc::not_supported when an option is unavailable here.
+make, named for what it does.
 
 ### function `descriptor::adopt`
 
@@ -439,7 +449,7 @@ auto main(void) -> int {
 
 ### Owned buffers
 
-`buffered_writer<A>` and `buffered_reader<A>` own their buffer, from allocator A, and can own their descriptor too: `over(fd, ...)` borrows it, `adopt(descriptor, ...)` takes an `fs::descriptor` and closes it in `cleanup()`. `resize(capacity)` swaps the buffer (0 makes a writer unbuffered). `writer()` and `reader()` give the inner object for code that takes an `io::writer&` or `io::reader&`.
+`buffered_writer<A>` and `buffered_reader<A>` own their buffer, from allocator A, and can own their descriptor too: `over(fd, ...)` borrows it, `adopt(descriptor, ...)` takes an `fs::descriptor` and closes it in `cleanup()`. Both are `make`, which picks by the argument (a borrowed fd or `const fs::descriptor&`, a moved `fs::descriptor&&`), as `ca::make` and `ca::make_in` call it. `resize(capacity)` swaps the buffer (0 makes a writer unbuffered). `writer()` and `reader()` give the inner object for code that takes an `io::writer&` or `io::reader&`.
 
 ```c++
 #include "ca/buffered_writer.hpp"
@@ -484,7 +494,7 @@ template <ca::is_allocator A = ca::heap>
 class buffered_reader final;
 ```
 
-ca::io::reader whose buffer comes from allocator A, sized by the caller and resizable; over a borrowed descriptor (an int or a ca::fs::descriptor that outlives it) or an adopted one (moved in), closed by cleanup(). Build with over/adopt, or make_in<buffered_reader<>>(arena, file, capacity). Cleanup is cleanup() (free, close: the close error); the destructor is a failsafe doing the same silently.
+ca::io::reader whose buffer comes from allocator A, sized by the caller and resizable; over a borrowed descriptor (an int or a ca::fs::descriptor that outlives it) or an adopted one (moved in), closed by cleanup(). Build with over(fd) / adopt(file), or make / make_in(allocator, file, capacity), ca::make_in<buffered_reader<>>(arena, ...). Cleanup is cleanup() (free, close: the close error); the destructor is a failsafe doing the same silently.
 
 ### variable `buffered_reader::ALIGNMENT`
 
@@ -494,30 +504,45 @@ static constexpr ca::usz ALIGNMENT = 64U;
 
 Alignment of the buffer: one cache line.
 
-### function `buffered_reader::over`
+### function `buffered_reader::make_in`
 
 ```c++
-[[nodiscard]] static auto over(const A& allocator, const int fd, const ca::usz capacity) noexcept -> ca::result<self>;
+[[nodiscard]] static auto make_in(const A& allocator, const int fd, const ca::usz capacity) noexcept -> ca::result<self>;
 ```
 
 Over fd, borrowed, with a capacity-byte buffer (> 0) from allocator.
 
-### function `buffered_reader::adopt`
+### function `buffered_reader::make_in`
 
 ```c++
-[[nodiscard]] static auto adopt(const A& allocator, ca::fs::descriptor&& file, const ca::usz capacity) noexcept -> ca::result<self>;
+[[nodiscard]] static auto make_in(const A& allocator, ca::fs::descriptor&& file, const ca::usz capacity) noexcept -> ca::result<self>;
 ```
 
 Takes file, closed by cleanup(); on failure file is closed too.
 
-### function `buffered_reader::make_in`
+### function `buffered_reader::over`
 
 ```c++
-template <typename F>
-[[nodiscard]] static auto make_in(const A& allocator, F&& file, const ca::usz capacity) noexcept -> ca::result<self>;
+[[nodiscard]] static auto over(const int fd, const ca::usz capacity) noexcept -> ca::result<self> requires ca::is_stateless_allocator<A>;
 ```
 
-over or adopt, for ca::make_in.
+make over a borrowed descriptor, named for it.
+
+### function `buffered_reader::adopt`
+
+```c++
+[[nodiscard]] static auto adopt(ca::fs::descriptor&& file, const ca::usz capacity) noexcept -> ca::result<self> requires ca::is_stateless_allocator<A>;
+```
+
+make taking file, named for it.
+
+### function `buffered_reader::operator=`
+
+```c++
+auto operator=(self&& other) noexcept -> self&;
+```
+
+Takes other's buffer and descriptor; the previous buffer is freed. Traps when this one still owns a descriptor, whose close could fail: cleanup() first.
 
 ### function `buffered_reader::reader`
 
@@ -568,7 +593,7 @@ template <ca::is_allocator A = ca::heap>
 class buffered_writer final;
 ```
 
-ca::io::writer whose buffer comes from allocator A, sized by the caller and resizable; over a borrowed descriptor (an int or a ca::fs::descriptor that outlives it) or an adopted one (a ca::fs::descriptor moved in), closed by cleanup(). Build with over/adopt, or make_in<buffered_writer<>>(arena, fd, mode, capacity). A writer itself: print and format_to write into it. Cleanup is cleanup() (flush, free, close: first error); the destructor is a failsafe doing the same silently.
+ca::io::writer whose buffer comes from allocator A, sized by the caller and resizable; over a borrowed descriptor (an int or a ca::fs::descriptor that outlives it) or an adopted one (a ca::fs::descriptor moved in), closed by cleanup(). Build with over(fd) / adopt(file), or make / make_in(allocator, file, mode, capacity), ca::make_in<buffered_writer<>>(arena, ...). A writer itself: print and format_to write into it. Cleanup is cleanup() (flush, free, close: first error); the destructor is a failsafe doing the same silently.
 
 ### variable `buffered_writer::ALIGNMENT`
 
@@ -578,33 +603,49 @@ static constexpr ca::usz ALIGNMENT = 64U;
 
 Alignment of the buffer: one cache line.
 
-### function `buffered_writer::over`
+### function `buffered_writer::make_in`
 
 ```c++
-[[nodiscard]] static auto over(const A& allocator, const int fd, const ca::io::buffering mode, const ca::usz capacity) noexcept
+[[nodiscard]] static auto make_in(const A& allocator, const int fd, const ca::io::buffering mode, const ca::usz capacity) noexcept
 -> ca::result<self>;
 ```
 
 Over fd, borrowed, with a capacity-byte buffer from allocator.
 
-### function `buffered_writer::adopt`
+### function `buffered_writer::make_in`
 
 ```c++
-[[nodiscard]] static auto adopt(const A& allocator, ca::fs::descriptor&& file, const ca::io::buffering mode, const ca::usz capacity) noexcept
+[[nodiscard]] static auto make_in(const A& allocator, ca::fs::descriptor&& file, const ca::io::buffering mode, const ca::usz capacity) noexcept
 -> ca::result<self>;
 ```
 
 Takes file, closed by cleanup(); on failure file is closed too.
 
-### function `buffered_writer::make_in`
+### function `buffered_writer::over`
 
 ```c++
-template <typename F>
-[[nodiscard]] static auto make_in(const A& allocator, F&& file, const ca::io::buffering mode, const ca::usz capacity) noexcept
--> ca::result<self>;
+[[nodiscard]] static auto over(const int fd, const ca::io::buffering mode, const ca::usz capacity) noexcept
+-> ca::result<self> requires ca::is_stateless_allocator<A>;
 ```
 
-over or adopt, for ca::make_in.
+make over a borrowed descriptor, named for it.
+
+### function `buffered_writer::adopt`
+
+```c++
+[[nodiscard]] static auto adopt(ca::fs::descriptor&& file, const ca::io::buffering mode, const ca::usz capacity) noexcept
+-> ca::result<self> requires ca::is_stateless_allocator<A>;
+```
+
+make taking file, named for it.
+
+### function `buffered_writer::operator=`
+
+```c++
+auto operator=(self&& other) noexcept -> self&;
+```
+
+Takes other's buffer and descriptor; the previous buffer is freed. Traps when this one has bytes pending or owns a descriptor, whose flush or close could fail: cleanup() first.
 
 ### function `buffered_writer::writer`
 
@@ -1206,3 +1247,105 @@ requires (ca::is_displayable<Args> && ...)
 ```
 
 print with C % syntax (see printf_string), typed and checked at compile time, no varargs: `ca::printf("%-8s|%5.2f\n", name, ratio)`. Same targets, buffering and errors (per call and sticky) as print.
+
+## `trace/`
+
+`ca::trace::symbolizer`: turns the addresses of a `ca::trace::backtrace` (layer 3) into function names, source files and lines, reading the running executable's own symbol tables and DWARF debug information, without libc or external tools.
+
+```c++
+#include "ca/symbolizer.hpp"
+#include "ca/trace.hpp"
+
+[[gnu::noinline]] static auto where(void) noexcept -> ca::trace::backtrace {
+	return ca::trace::backtrace::capture();
+}
+
+auto main(void) -> int {
+	const ca::trace::backtrace here = where();
+	auto symbols = ca::trace::symbolizer::make();
+	if (!symbols)
+		return 1;
+	ca::trace::location found[ca::trace::location::SCOPES];
+	const ca::usz count = symbols->lookup(here.addresses()[0], found);
+	if (count == 0U || !found[count - 1U].function().find(ca::sv::str{"where"}).holds())
+		return 2;
+	return symbols->cleanup() ? 0 : 3;
+}
+```
+
+`lookup(address, out)` writes the functions an address is in, innermost first: the functions the compiler inlined there, then the function they were inlined into, which also carries the offset from its start. Printed with `{}`, `symbols.of(backtrace.addresses())` reads:
+
+```text
+#0 ca::trap (/src/lib/1-primitives/debug/trap.hpp:23) inlined
+   deepest+0x1e (/src/test.cpp:8)
+#1 middle+0x9 (/src/test.cpp:14)
+#2 0x7f3c2a42a1c9
+```
+
+| Built with | Names | File and line | Inlined functions |
+|---|---|---|---|
+| `-g` | from DWARF, qualified (`ca::trap`) | yes | yes |
+| no `-g` | from the symbol table, mangled (`_ZL7deepestv`) | no | no |
+| stripped | none | no | no |
+
+DWARF 4 and 5 are read (clang and gcc defaults), including indexed strings, addresses and range lists; compressed debug sections (`-gz`) and split DWARF (`-gsplit-dwarf`) are not. Names are not demangled: DWARF names need no demangling, symbol-table names stay mangled. Addresses in shared libraries (libc) are not found and print as they are.
+
+make() maps the whole executable read-only; names, files and lines borrow from that mapping until cleanup(). A lookup scans the unit holding the address entry by entry, so it is for reports, not hot paths.
+
+## `trace/symbolizer.hpp`
+
+### class `symbolizer`
+
+```c++
+class symbolizer final;
+```
+
+The running executable's symbols and debug information, mapped from /proc/self/exe: lookup turns an address of a ca::trace::backtrace into the functions it is in, innermost first (inlined ones, then the function they were inlined into), each with its source file and line when the program was built with -g; of(addresses) prints a whole backtrace that way with `{}`. Addresses outside the executable (shared libraries) are not found. Mapped once by make(); clean up with cleanup().
+
+### function `symbolizer::make`
+
+```c++
+[[nodiscard]] static auto make(void) noexcept -> ca::result<self>;
+```
+
+Maps the running executable and reads where its sections are.
+
+### function `symbolizer::operator=`
+
+```c++
+auto operator=(self&& other) noexcept -> self&;
+```
+
+Takes other's mapping. Traps when this one still holds one: cleanup() first.
+
+### function `symbolizer::lookup`
+
+```c++
+[[nodiscard]] auto lookup(ca::usz address, ca::span<ca::trace::location> out) const noexcept -> ca::usz;
+```
+
+The functions address is in, innermost first, into out; how many, 0 when unknown. Names, files and lines borrow from this symbolizer.
+
+### function `symbolizer::of`
+
+```c++
+[[nodiscard]] auto of(ca::borrowed_slice<const ca::usz> addresses) const noexcept -> ca::trace::symbolized;
+```
+
+addresses (a backtrace's) symbolized, for printing with `{}`.
+
+### function `symbolizer::cleanup`
+
+```c++
+[[nodiscard]] auto cleanup(void) noexcept -> ca::result<void>;
+```
+
+Unmaps the executable; locations it gave become dangling.
+
+### class `symbolized`
+
+```c++
+class symbolized final;
+```
+
+A backtrace as a symbolizer reads it, printed with `{}` one frame per line, inlined functions first: ``` #0 ca::trap (src/lib/1-primitives/debug/trap.hpp:23) inlined deepest+0x1e (test.cpp:8) #1 middle+0x9 (test.cpp:14) ``` Borrows the symbolizer and the addresses.

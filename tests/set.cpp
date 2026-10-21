@@ -26,8 +26,8 @@ static auto basics(void) noexcept -> int {
 		return 2;
 	if (!s.discard(1) || s.discard(1) || s.remove(2).value_or(0) != 2 || !s.empty())
 		return 3;
-	auto a = ca::set<int>::from(ca::array{1, 2, 3, 4, 2});
-	auto b = ca::set<int>::from(ca::array{3, 4, 5});
+	auto a = ca::set<int>::make(ca::array{1, 2, 3, 4, 2});
+	auto b = ca::set<int>::make(ca::array{3, 4, 5});
 	if (!a || !b || !holds(*a, ca::array{1, 2, 3, 4}))
 		return 4;
 	auto both = a->union_with(*b);

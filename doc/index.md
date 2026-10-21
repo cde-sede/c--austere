@@ -73,13 +73,13 @@ c++ -std=c++2c -nostdinc++ -fno-exceptions -fno-rtti -I src/lib prog.cpp -nostdl
 
 | Layer | Headers | Documented entities |
 |---|---|---|
-| [1-primitives](1-primitives.md) | 225 | 199/199 |
-| [2-vocabulary](2-vocabulary.md) | 64 | 19/19 |
-| [3-system](3-system.md) | 180 | 0/0 |
-| [4-lifecycle](4-lifecycle.md) | 34 | 29/29 |
+| [1-primitives](1-primitives.md) | 227 | 199/199 |
+| [2-vocabulary](2-vocabulary.md) | 65 | 20/20 |
+| [3-system](3-system.md) | 184 | 0/0 |
+| [4-lifecycle](4-lifecycle.md) | 37 | 31/31 |
 | [5-collections](5-collections.md) | 65 | 38/38 |
-| [6-resources](6-resources.md) | 14 | 4/4 |
-| [ca](ca.md) | 111 | 0/0 |
+| [6-resources](6-resources.md) | 15 | 4/4 |
+| [ca](ca.md) | 116 | 0/0 |
 
 ## [1-primitives](1-primitives.md)
 
@@ -111,11 +111,13 @@ Layer 1: what the language and the compiler give, wrapped once.
 - [`config/has_builtin.hpp`](1-primitives.md#confighasbuiltinhpp) - `ca_has_builtin(x)`: `__has_builtin(x)`, or 0 where unsupported.
 - [`config/platform.hpp`](1-primitives.md#configplatformhpp) - 1 if the target OS is `os` (`linux`, `macos`), else 0.
 - [`debug/assume.hpp`](1-primitives.md#debugassumehpp) - Lets the optimizer assume condition; undefined if false.
+- [`debug/frame_address.hpp`](1-primitives.md#debugframeaddresshpp)
 - [`debug/is_constant_folded.hpp`](1-primitives.md#debugisconstantfoldedhpp) - True when the optimizer proves value is a constant at this call site, after inlining (__builtin_c...
 - [`debug/recovery.hpp`](1-primitives.md#debugrecoveryhpp)
 - [`debug/source_location.hpp`](1-primitives.md#debugsourcelocationhpp) - A place in the source: file as given to the compiler, enclosing function name, line.
-- [`debug/trap.hpp`](1-primitives.md#debugtraphpp) - Leaves for the thread's innermost context (ca::context_manager, ca::with), which fails with reaso...
+- [`debug/trap.hpp`](1-primitives.md#debugtraphpp) - Leaves for the innermost context that takes it (ca::context_manager, ca::with), which fails with...
 - [`debug/unreachable.hpp`](1-primitives.md#debugunreachablehpp) - Marks a point as unreachable; reaching it is undefined.
+- [`debug/verdict.hpp`](1-primitives.md#debugverdicthpp) - What a context's handles answers for a trap, while every frame is still alive: pass it to an oute...
 - [`floats/f32.hpp`](1-primitives.md#floatsf32hpp) - IEEE 754 binary32; fails to compile otherwise.
 - [`floats/f64.hpp`](1-primitives.md#floatsf64hpp) - IEEE 754 binary64; fails to compile otherwise.
 - [`floats/impl/exact_decimal.hpp`](1-primitives.md#floatsimplexactdecimalhpp)
@@ -315,6 +317,7 @@ Layer 1: what the language and the compiler give, wrapped once.
 
 Layer 2: the value types every signature in ca is written with.
 
+- [`ask.hpp`](2-vocabulary.md#askhpp) - A trap the calling code can come back from, for a point written to carry on: the contexts decide...
 - [`borrowed_slice.hpp`](2-vocabulary.md#borrowedslicehpp) - Sequence of size() T it does not own, for element work: cut, search, compare, fill, reverse (ca::...
 - [`error.hpp`](2-vocabulary.md#errorhpp) - Error code, 0 meaning success.
 - [`fail.hpp`](2-vocabulary.md#failhpp) - ca::failure{ca::error{code}}.
@@ -557,11 +560,15 @@ Layer 3: the boundary with the operating system.
 - [`time/impl/calendar_of.hpp`](3-system.md#timeimplcalendarofhpp)
 - [`time/impl/civil.hpp`](3-system.md#timeimplcivilhpp)
 - [`time/impl/time_zone.hpp`](3-system.md#timeimpltimezonehpp)
+- [`trace/attach.hpp`](3-system.md#traceattachhpp) - Gives error's trace backtrace, unless it has one already (the one nearest the origin stays) or er...
+- [`trace/backtrace.hpp`](3-system.md#tracebacktracehpp) - The calls leading to a point, innermost first: one address per frame, inside its call instruction...
 - [`trace/context.hpp`](3-system.md#tracecontexthpp) - Adds a frame here (the caller) to error's trace and returns error to return: `if (!r) return ca::...
 - [`trace/fail.hpp`](3-system.md#tracefailhpp) - Starts the thread's trace with error, first frame here (the caller), and returns it to return: `r...
 - [`trace/frame.hpp`](3-system.md#traceframehpp) - Error traces: where an error came from and what each caller was doing.
+- [`trace/location.hpp`](3-system.md#tracelocationhpp) - One function an address is in, as the debug information of the executable tells it: the function'...
 - [`trace/of.hpp`](3-system.md#traceofhpp) - error with its trace, when it is the thread's current one; with no frames otherwise.
-- [`trace/record.hpp`](3-system.md#tracerecordhpp) - An error and the frames of its trace, origin first, borrowed from the thread's trace: valid until...
+- [`trace/record.hpp`](3-system.md#tracerecordhpp) - An error and the frames of its trace, origin first, and the backtrace of the first trap it met, b...
+- [`trace/impl/debug_info.hpp`](3-system.md#traceimpldebuginfohpp)
 - [`trace/impl/display_trace.hpp`](3-system.md#traceimpldisplaytracehpp)
 - [`trace/impl/trace_state.hpp`](3-system.md#traceimpltracestatehpp)
 
@@ -571,12 +578,15 @@ Layer 4: how objects are created, owned, copied and destroyed without exceptions
 
 - [`context_manager.hpp`](4-lifecycle.md#contextmanagerhpp) - CRTP base of a context, Python's with statement without exceptions.
 - [`ctx.hpp`](4-lifecycle.md#ctxhpp) - A context run on a state of its own: ca::ctx\<Self>::run(args...) builds a Self (a ca::context_man...
+- [`handler.hpp`](4-lifecycle.md#handlerhpp) - Marks a callable as the handles of a ca::with context: `ca::with(ca::handler{decide}, enter, leav...
 - [`is_cleanable.hpp`](4-lifecycle.md#iscleanablehpp) - Types owning resources.
 - [`is_clonable.hpp`](4-lifecycle.md#isclonablehpp) - Types with explicit, fallible copy: clone() const -> result\<T>.
-- [`make.hpp`](4-lifecycle.md#makehpp) - Builds a T from args: T(error&, args...) when T has it, else T(args...).
+- [`make.hpp`](4-lifecycle.md#makehpp) - Builds a T from args, every failure in the result: through T::make(args...) when T has it (its ac...
 - [`make_in.hpp`](4-lifecycle.md#makeinhpp) - Builds the allocator-aware T over source's allocator: T rebound to allocator_of\<R>, source an all...
-- [`unique.hpp`](4-lifecycle.md#uniquehpp) - Sole owner of one T in memory from A, or of nothing; from make_in (ca::make_in<unique\<T>> over an...
-- [`with.hpp`](4-lifecycle.md#withhpp) - ca::context_manager from two callables, the state in what they capture: enter(args...) inside a n...
+- [`outcome.hpp`](4-lifecycle.md#outcomehpp) - How a context ended, for a leave that asks (leave(error, outcome)): enter succeeded (error is nul...
+- [`trapped.hpp`](4-lifecycle.md#trappedhpp) - A trap as a context's handles sees it, at the trap site, before anything unwinds: its reason, whe...
+- [`unique.hpp`](4-lifecycle.md#uniquehpp) - Sole owner of one T in memory from A, or of nothing; from make, or make_in (ca::make_in<unique\<T>...
+- [`with.hpp`](4-lifecycle.md#withhpp) - ca::context_manager from callables, the state in what they capture: enter(args...) inside a new c...
 - [`impl/run_context.hpp`](4-lifecycle.md#implruncontexthpp)
 - [`memory/allocate_n.hpp`](4-lifecycle.md#memoryallocatenhpp) - Uninitialized room for count T, aligned for T; size() / sizeof(T) of them are usable.
 - [`memory/allocate_zeroed.hpp`](4-lifecycle.md#memoryallocatezeroedhpp) - allocate, with every usable byte zero: allocator.allocate_zeroed when it has one (fresh pages ski...
@@ -692,6 +702,7 @@ Layer 6: objects backed by the operating system, and the services a program uses
 - [`print/print.hpp`](6-resources.md#printprinthpp) - Prints args, `{}` syntax (see format_string), checked at compile time: `ca::print("{} items in {}...
 - [`print/print_trace.hpp`](6-resources.md#printprinttracehpp) - Prints error and its thread trace (see ca::trace::record), then a newline: `ca::print_trace(r.err...
 - [`print/printf.hpp`](6-resources.md#printprintfhpp) - print with C % syntax (see printf_string), typed and checked at compile time, no varargs: `ca::pr...
+- [`trace/symbolizer.hpp`](6-resources.md#tracesymbolizerhpp) - The running executable's symbols and debug information, mapped from /proc/self/exe: lookup turns...
 
 ## [ca](ca.md)
 
@@ -699,6 +710,7 @@ The include facade: what programs include.
 
 - [`all.hpp`](ca.md#allhpp) - `#include "ca/all.hpp"`: the whole library.
 - [`array.hpp`](ca.md#arrayhpp) - `#include "ca/array.hpp"`: 5-collections/array/.
+- [`ask.hpp`](ca.md#askhpp) - `#include "ca/ask.hpp"`: 2-vocabulary/ask.hpp.
 - [`atomic.hpp`](ca.md#atomichpp) - `#include "ca/atomic.hpp"`: 1-primitives/atomic/.
 - [`basic_str.hpp`](ca.md#basicstrhpp) - `#include "ca/basic_str.hpp"`: 5-collections/string/basic_str.hpp.
 - [`bit.hpp`](ca.md#bithpp) - `#include "ca/bit.hpp"`: 1-primitives/bit/.
@@ -730,6 +742,7 @@ The include facade: what programs include.
 - [`format_string.hpp`](ca.md#formatstringhpp) - `#include "ca/format_string.hpp"`: 5-collections/format/format_string.hpp.
 - [`format_to.hpp`](ca.md#formattohpp) - `#include "ca/format_to.hpp"`: 5-collections/format/format_to.hpp.
 - [`fs.hpp`](ca.md#fshpp) - `#include "ca/fs.hpp"`: 3-system/fs/, 5-collections/fs/, 6-resources/fs/.
+- [`handler.hpp`](ca.md#handlerhpp) - `#include "ca/handler.hpp"`: 4-lifecycle/handler.hpp.
 - [`hash.hpp`](ca.md#hashhpp) - `#include "ca/hash.hpp"`: 1-primitives/hash/, 5-collections/map/hash.hpp.
 - [`hashmap.hpp`](ca.md#hashmaphpp) - `#include "ca/hashmap.hpp"`: 5-collections/map/hashmap.hpp.
 - [`in.hpp`](ca.md#inhpp) - `#include "ca/in.hpp"`: 6-resources/io/in.hpp.
@@ -767,6 +780,7 @@ The include facade: what programs include.
 - [`option_set.hpp`](ca.md#optionsethpp) - `#include "ca/option_set.hpp"`: 2-vocabulary/option_set.hpp.
 - [`optional.hpp`](ca.md#optionalhpp) - `#include "ca/optional.hpp"`: 2-vocabulary/optional.hpp.
 - [`out.hpp`](ca.md#outhpp) - `#include "ca/out.hpp"`: 6-resources/io/out.hpp.
+- [`outcome.hpp`](ca.md#outcomehpp) - `#include "ca/outcome.hpp"`: 4-lifecycle/outcome.hpp.
 - [`path.hpp`](ca.md#pathhpp) - `#include "ca/path.hpp"`: 5-collections/fs/path.hpp.
 - [`print.hpp`](ca.md#printhpp) - `#include "ca/print.hpp"`: 6-resources/print/.
 - [`print_trace.hpp`](ca.md#printtracehpp) - `#include "ca/print_trace.hpp"`: 6-resources/print/print_trace.hpp.
@@ -791,13 +805,15 @@ The include facade: what programs include.
 - [`string.hpp`](ca.md#stringhpp) - `#include "ca/string.hpp"`: 5-collections/string/.
 - [`string_writer.hpp`](ca.md#stringwriterhpp) - `#include "ca/string_writer.hpp"`: 5-collections/io/string_writer.hpp.
 - [`sv.hpp`](ca.md#svhpp) - `#include "ca/sv.hpp"`: 2-vocabulary/sv/.
+- [`symbolizer.hpp`](ca.md#symbolizerhpp) - `#include "ca/symbolizer.hpp"`: 6-resources/trace/symbolizer.hpp.
 - [`syscall.hpp`](ca.md#syscallhpp) - `#include "ca/syscall.hpp"`: 3-system/syscall/.
 - [`text.hpp`](ca.md#texthpp) - `#include "ca/text.hpp"`: 1-primitives/text/, 3-system/text/.
 - [`text_writer.hpp`](ca.md#textwriterhpp) - `#include "ca/text_writer.hpp"`: 5-collections/format/text_writer.hpp.
 - [`thread.hpp`](ca.md#threadhpp) - `#include "ca/thread.hpp"`: 3-system/thread/.
 - [`time.hpp`](ca.md#timehpp) - `#include "ca/time.hpp"`: 3-system/time/.
-- [`trace.hpp`](ca.md#tracehpp) - `#include "ca/trace.hpp"`: 3-system/trace/, 5-collections/trace/.
+- [`trace.hpp`](ca.md#tracehpp) - `#include "ca/trace.hpp"`: 3-system/trace/, 5-collections/trace/, 6-resources/trace/.
 - [`traits.hpp`](ca.md#traitshpp) - `#include "ca/traits.hpp"`: 1-primitives/traits/.
+- [`trapped.hpp`](ca.md#trappedhpp) - `#include "ca/trapped.hpp"`: 4-lifecycle/trapped.hpp.
 - [`u16str.hpp`](ca.md#u16strhpp) - `#include "ca/u16str.hpp"`: 5-collections/string/u16str.hpp.
 - [`u32str.hpp`](ca.md#u32strhpp) - `#include "ca/u32str.hpp"`: 5-collections/string/u32str.hpp.
 - [`u8str.hpp`](ca.md#u8strhpp) - `#include "ca/u8str.hpp"`: 5-collections/string/u8str.hpp.

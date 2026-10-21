@@ -165,6 +165,16 @@ static_assert(ca::is_same<decltype(ca::fs::append | ca::fs::append), ca::option_
 
 `ca::in_place` selects in-place construction where a type has both a value constructor and one taking constructor arguments.
 
+## `ask.hpp`
+
+### function `ask`
+
+```c++
+[[nodiscard]] inline auto ask(const char* const reason, const ca::error error = {}, const ca::source_location where = ca::source_location::current()) noexcept -> bool;
+```
+
+A trap the calling code can come back from, for a point written to carry on: the contexts decide as for ca::trap. true when one resumed it (it fixed the cause: check again), false when none took it (fail the usual way); when one takes it, it unwinds there like a trap. Handlers see error, if any, as its error. reason is a literal.
+
 ## `borrowed_slice.hpp`
 
 ### class `impl::slice_methods`
@@ -1046,14 +1056,14 @@ auto main(void) -> int {
 
 ## `impl/access.hpp`
 
-### function `impl::leave_error`
+### function `impl::offer_error`
 
 ```c++
 template <typename E>
-inline auto leave_error(const E& error) noexcept -> void;
+inline auto offer_error(ca::impl::trap_info& info, const E& error) noexcept -> void;
 ```
 
-Leaves error on the innermost recovery point, for the context to fail with: a ca::error, or what error() of E returns, as code and trace; any other E offered whole to the context, which moves it out when it cannot copy it.
+Puts error on the trap, for the context taking it to fail with: a ca::error, or what error() of E returns, as code and trace; any other E offered whole, which the context moves out when it cannot copy it.
 
 ### function `impl::value_accessed_while_absent`
 
@@ -1062,7 +1072,7 @@ template <typename... E>
 [[noreturn, gnu::cold, gnu::noinline]] inline auto value_accessed_while_absent(const E&... error) noexcept -> void;
 ```
 
-The stand-in of the value (the error for a result) goes with the trap, see leave_error.
+The stand-in of the value (the error for a result) goes with the trap, see offer_error.
 
 ### function `impl::error_raised`
 
@@ -1071,7 +1081,7 @@ template <typename E>
 [[noreturn, gnu::cold, gnu::noinline]] inline auto error_raised(E& error, const ca::source_location where, const bool owned) noexcept -> void;
 ```
 
-result::raise on a failure, at where; the error goes with the trap, see leave_error. An owned error (the failure raise(on_error) made) that the context did not take is cleaned up first when it has a cleanup(), since the trap abandons it.
+result::raise on a failure, at where; the error goes with the trap, see offer_error. An owned error (the failure raise(on_error) made) that no context takes is cleaned up first when it has a cleanup(), since the trap abandons it.
 
 ## `impl/unit.hpp`
 

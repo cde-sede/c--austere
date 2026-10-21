@@ -14,6 +14,7 @@
 #include "1-primitives/memory/construct_at.hpp"
 #include "1-primitives/memory/destroy_at.hpp"
 #include "1-primitives/utility/move.hpp"
+#include "2-vocabulary/impl/access.hpp"
 #include "2-vocabulary/result.hpp"
 #include "2-vocabulary/span.hpp"
 #include "2-vocabulary/sv/str.hpp"
@@ -41,8 +42,8 @@ namespace ca {
 
 		/* @DOC ca::io::reader whose buffer comes from allocator A, sized by the caller and
 		   resizable; over a borrowed descriptor (an int or a ca::fs::descriptor that outlives it)
-		   or an adopted one (moved in), closed by cleanup(). Build with over/adopt, or
-		   make_in<buffered_reader<>>(arena, file, capacity). Cleanup is cleanup() (free, close:
+		   or an adopted one (moved in), closed by cleanup(). Build with over(fd) / adopt(file), or
+		   make / make_in(allocator, file, capacity), ca::make_in<buffered_reader<>>(arena, ...). Cleanup is cleanup() (free, close:
 		   the close error); the destructor is a failsafe doing the same silently. */
 		template <ca::is_allocator A = ca::heap>
 		class buffered_reader final {
@@ -96,41 +97,45 @@ namespace ca {
 				// }
 
 				/* @DOC Over fd, borrowed, with a capacity-byte buffer (> 0) from allocator. */
-				[[nodiscard]] static auto over(const A& allocator, const int fd, const ca::usz capacity) noexcept -> ca::result<self> {
+				[[nodiscard]] static auto make_in(const A& allocator, const int fd, const ca::usz capacity) noexcept -> ca::result<self> {
 					return self::_build(allocator, ca::fs::descriptor::adopt(-1), fd, capacity);
 				}
 
-				[[nodiscard]] static auto over(const A& allocator, const ca::fs::descriptor& file, const ca::usz capacity) noexcept -> ca::result<self> {
+				[[nodiscard]] static auto make_in(const A& allocator, const ca::fs::descriptor& file, const ca::usz capacity) noexcept -> ca::result<self> {
 					return self::_build(allocator, ca::fs::descriptor::adopt(-1), file.native(), capacity);
 				}
 
-				[[nodiscard]] static auto over(const int fd, const ca::usz capacity) noexcept -> ca::result<self> requires ca::is_stateless_allocator<A> {
-					return self::over(A{}, fd, capacity);
-				}
-
-				[[nodiscard]] static auto over(const ca::fs::descriptor& file, const ca::usz capacity) noexcept -> ca::result<self> requires ca::is_stateless_allocator<A> {
-					return self::over(A{}, file, capacity);
-				}
-
 				/* @DOC Takes file, closed by cleanup(); on failure file is closed too. */
-				[[nodiscard]] static auto adopt(const A& allocator, ca::fs::descriptor&& file, const ca::usz capacity) noexcept -> ca::result<self> {
+				[[nodiscard]] static auto make_in(const A& allocator, ca::fs::descriptor&& file, const ca::usz capacity) noexcept -> ca::result<self> {
 
 					const int fd = file.native();
 					return self::_build(allocator, ca::move(file), fd, capacity);
 				}
 
-				[[nodiscard]] static auto adopt(ca::fs::descriptor&& file, const ca::usz capacity) noexcept -> ca::result<self> requires ca::is_stateless_allocator<A> {
-					return self::adopt(A{}, ca::move(file), capacity);
+				[[nodiscard]] static auto make(const int fd, const ca::usz capacity) noexcept -> ca::result<self> requires ca::is_stateless_allocator<A> {
+					return self::make_in(A{}, fd, capacity);
 				}
 
-				/* @DOC over or adopt, for ca::make_in. */
-				template <typename F>
-				[[nodiscard]] static auto make_in(const A& allocator, F&& file, const ca::usz capacity) noexcept -> ca::result<self> {
+				[[nodiscard]] static auto make(const ca::fs::descriptor& file, const ca::usz capacity) noexcept -> ca::result<self> requires ca::is_stateless_allocator<A> {
+					return self::make_in(A{}, file, capacity);
+				}
 
-					if constexpr (requires { self::adopt(allocator, static_cast<F&&>(file), capacity); })
-						return self::adopt(allocator, static_cast<F&&>(file), capacity);
-					else
-						return self::over(allocator, file, capacity);
+				[[nodiscard]] static auto make(ca::fs::descriptor&& file, const ca::usz capacity) noexcept -> ca::result<self> requires ca::is_stateless_allocator<A> {
+					return self::make_in(A{}, ca::move(file), capacity);
+				}
+
+				/* @DOC make over a borrowed descriptor, named for it. */
+				[[nodiscard]] static auto over(const int fd, const ca::usz capacity) noexcept -> ca::result<self> requires ca::is_stateless_allocator<A> {
+					return self::make(fd, capacity);
+				}
+
+				[[nodiscard]] static auto over(const ca::fs::descriptor& file, const ca::usz capacity) noexcept -> ca::result<self> requires ca::is_stateless_allocator<A> {
+					return self::make(file, capacity);
+				}
+
+				/* @DOC make taking file, named for it. */
+				[[nodiscard]] static auto adopt(ca::fs::descriptor&& file, const ca::usz capacity) noexcept -> ca::result<self> requires ca::is_stateless_allocator<A> {
+					return self::make(ca::move(file), capacity);
 				}
 
 
@@ -138,7 +143,21 @@ namespace ca {
 
 				auto operator=(const self&) -> self& = delete;
 
-				auto operator=(self&&) -> self& = delete;
+				/* @DOC Takes other's buffer and descriptor; the previous buffer is freed. Traps when
+				   this one still owns a descriptor, whose close could fail: cleanup() first. */
+				auto operator=(self&& other) noexcept -> self& {
+
+					if (this == &other)
+						return *this;
+					if (_owned.is_open()) [[unlikely]]
+						ca::impl::assigned_over_an_uncleaned_object();
+					self::_free(_allocator, _reader.buffer());
+					ca::destroy_at(&_reader);
+					ca::construct_at(&_reader, ca::move(other._reader));
+					    _owned = ca::move(other._owned);
+					_allocator = other._allocator;
+					return *this;
+				}
 
 
 				// -- accessors ----------------------------------------------

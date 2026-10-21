@@ -13,10 +13,10 @@
 
 #if ca_platform(linux) && ca_architecture(x86_64)
 
-using fini_function = void (*)(void);
+using fini_function = void (*)(void); // ns-leak: ignore
 
-extern "C" [[gnu::visibility("hidden")]] fini_function __fini_array_start[];
-extern "C" [[gnu::visibility("hidden")]] fini_function __fini_array_end[];
+extern "C" [[gnu::visibility("hidden")]] fini_function __fini_array_start[]; // ns-leak: ignore
+extern "C" [[gnu::visibility("hidden")]] fini_function __fini_array_end[]; // ns-leak: ignore
 
 namespace ca {
 

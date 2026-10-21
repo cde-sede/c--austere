@@ -22,9 +22,9 @@ namespace std { // ns-leak: ignore
 
 } // namespace std
 
-extern "C" auto malloc(ca::usz size) noexcept -> void*;
-extern "C" auto free(void* block) noexcept -> void;
-extern "C" auto posix_memalign(void** out, ca::usz alignment, ca::usz size) noexcept -> int;
+extern "C" auto malloc(ca::usz size) noexcept -> void*; // ns-leak: ignore
+extern "C" auto free(void* block) noexcept -> void; // ns-leak: ignore
+extern "C" auto posix_memalign(void** out, ca::usz alignment, ca::usz size) noexcept -> int; // ns-leak: ignore
 
 static constexpr ca::i32 DONE = 1;
 static constexpr ca::i32 PENDING = 0x100;
@@ -73,7 +73,7 @@ static auto allocate(const ca::usz size) noexcept -> void* {
 	return block;
 }
 
-static auto allocate(const ca::usz size, const std::align_val_t alignment) noexcept -> void* {
+static auto allocate(const ca::usz size, const std::align_val_t alignment) noexcept -> void* { // no-std: ignore
 
 	void* block = nullptr;
 	if (posix_memalign(&block, static_cast<ca::usz>(alignment), size) != 0) [[unlikely]]
@@ -124,51 +124,51 @@ extern "C" {
 
 } // extern "C"
 
-auto operator new(const ca::usz size) -> void* {
+auto operator new(const ca::usz size) -> void* { // ns-leak, noexcept: ignore
 	return allocate(size);
 }
 
-auto operator new[](const ca::usz size) -> void* {
+auto operator new[](const ca::usz size) -> void* { // ns-leak, noexcept: ignore
 	return allocate(size);
 }
 
-auto operator new(const ca::usz size, const std::align_val_t alignment) -> void* {
+auto operator new(const ca::usz size, const std::align_val_t alignment) -> void* { // ns-leak, noexcept, no-std: ignore
 	return allocate(size, alignment);
 }
 
-auto operator new[](const ca::usz size, const std::align_val_t alignment) -> void* {
+auto operator new[](const ca::usz size, const std::align_val_t alignment) -> void* { // ns-leak, noexcept, no-std: ignore
 	return allocate(size, alignment);
 }
 
-auto operator delete(void* const block) noexcept -> void {
+auto operator delete(void* const block) noexcept -> void { // ns-leak: ignore
 	free(block);
 }
 
-auto operator delete[](void* const block) noexcept -> void {
+auto operator delete[](void* const block) noexcept -> void { // ns-leak: ignore
 	free(block);
 }
 
-auto operator delete(void* const block, ca::usz) noexcept -> void {
+auto operator delete(void* const block, ca::usz) noexcept -> void { // ns-leak: ignore
 	free(block);
 }
 
-auto operator delete[](void* const block, ca::usz) noexcept -> void {
+auto operator delete[](void* const block, ca::usz) noexcept -> void { // ns-leak: ignore
 	free(block);
 }
 
-auto operator delete(void* const block, std::align_val_t) noexcept -> void {
+auto operator delete(void* const block, std::align_val_t) noexcept -> void { // ns-leak, no-std: ignore
 	free(block);
 }
 
-auto operator delete[](void* const block, std::align_val_t) noexcept -> void {
+auto operator delete[](void* const block, std::align_val_t) noexcept -> void { // ns-leak, no-std: ignore
 	free(block);
 }
 
-auto operator delete(void* const block, ca::usz, std::align_val_t) noexcept -> void {
+auto operator delete(void* const block, ca::usz, std::align_val_t) noexcept -> void { // ns-leak, no-std: ignore
 	free(block);
 }
 
-auto operator delete[](void* const block, ca::usz, std::align_val_t) noexcept -> void {
+auto operator delete[](void* const block, ca::usz, std::align_val_t) noexcept -> void { // ns-leak, no-std: ignore
 	free(block);
 }
 

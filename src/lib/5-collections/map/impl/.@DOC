@@ -24,6 +24,6 @@ showing each entry through a projection (`item<const K&, V&>`, a key, or a value
 
 - `key.hpp`: `lookup_of<K>`, the type keys are looked up by (`K::view_type` when K has one, else
   `const K&`); `key_order` (`compare()` when available, else `<`); `make_from`, which builds a key
-  only when an insertion needs one, by constructor, `clone()` or `K::from`; `clean`, which runs a
+  only when an insertion needs one, by constructor, `clone()` or `K::make`; `clean`, which runs a
   key's or value's `cleanup()` keeping the first error.
 - `range.hpp`: a begin and an end for range-for, what `keys()`, `values()` and `items()` return.

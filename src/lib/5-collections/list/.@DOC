@@ -49,8 +49,10 @@ auto main(void) -> int {
 An element joins an `intrusive_list<T, Tag>` by deriving `ca::list_link<T, Tag>` once per list it
 can be in; the Tag tells the links apart, so one object can sit in several lists at once (a task in
 a run queue and in a timer list). The list stores nothing per element and allocates nothing, so
-no operation can fail. Misuse traps: linking an element that is already linked, removing one that
-is not, or destroying an element while it is still linked.
+no operation can fail. Misuse traps: linking an element that is already linked, or removing one
+that is not. Links and lists are trivially destructible, so a trap can unwind past them (see
+`ca::context_manager`): an element leaves its list before it is destroyed, and a list is cleared
+before it goes away, unchecked.
 
 ```c++
 #include "ca/intrusive_list.hpp"

@@ -16,7 +16,7 @@
    | swap_pop(i), pop() | O(1) | |
    | remove(value) | O(size) | find, then pop(i) |
    | resize, clear, cleanup | O(abs(n - size)) | O(1) for trivially destructible T without cleanup() |
-   | clone, from(view) | O(n) | one memcpy for trivially copyable T |
+   | clone, make(view) | O(n) | one memcpy for trivially copyable T |
    | find, count, contains, compare, == | O(n) | memchr/memcmp for code units, element loops otherwise |
 
    Nothing grows: what does not fit fails with errc::no_space and changes nothing. That is the
@@ -178,7 +178,7 @@ namespace ca {
 			/* @DOC A copy of the elements of view: clone() of each when T has one, else the copy
 			   constructor. errc::no_space when view holds more than N. On a failed element clone, the
 			   partial copy is destroyed and that error returned. */
-			[[nodiscard]] static auto from(const ca::borrowed_slice<const T> view) noexcept -> ca::result<self>
+			[[nodiscard]] static auto make(const ca::borrowed_slice<const T> view) noexcept -> ca::result<self>
 			requires ca::is_clonable<T> || ca::is_copy_constructible<T> {
 
 				self copy{};
@@ -470,9 +470,9 @@ namespace ca {
 				return ca::borrowed_slice<const T>{_slots, _size};
 			}
 
-			/* @DOC A copy; see from. */
+			/* @DOC A copy; see make. */
 			[[nodiscard]] auto clone(void) const noexcept -> ca::result<self> requires ca::is_clonable<T> || ca::is_copy_constructible<T> {
-				return self::from(this->view());
+				return self::make(this->view());
 			}
 
 

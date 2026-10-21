@@ -98,7 +98,7 @@ namespace ca {
 			}
 
 			/* @DOC A copy of text; errc::no_space when it is longer than N. */
-			[[nodiscard]] static constexpr auto from(const view_type text) noexcept -> ca::result<self> {
+			[[nodiscard]] static constexpr auto make(const view_type text) noexcept -> ca::result<self> {
 
 				self out{};
 				auto assigned = out.assign(text);

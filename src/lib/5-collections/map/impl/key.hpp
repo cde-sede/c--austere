@@ -71,12 +71,12 @@ namespace ca {
 		// -- MAKE FROM ------------------------------------------------------
 
 		/* @DOC A T can be built from a Q: by a constructor, by clone() from a T, or by a fallible
-		   T::from(Q) -> result<T> (a str from a literal or a view). */
+		   T::make(Q) -> result<T> (a str from a literal or a view). */
 		template <typename T, typename Q>
 		concept is_buildable_from = ca::is_constructible<T, Q>
 			|| (ca::is_same<ca::remove_cvref<Q>, T> && ca::is_clonable<T>)
 			|| requires(Q&& source) {
-				{ T::from(ca::forward<Q>(source)) } -> ca::is_same<ca::result<T>>;
+				{ T::make(ca::forward<Q>(source)) } -> ca::is_same<ca::result<T>>;
 			};
 
 		/* @DOC A T built from source, the cheapest way is_buildable_from allows. */
@@ -89,7 +89,7 @@ namespace ca {
 			else if constexpr (ca::is_same<ca::remove_cvref<Q>, T> && ca::is_clonable<T>)
 				return source.clone();
 			else
-				return T::from(ca::forward<Q>(source));
+				return T::make(ca::forward<Q>(source));
 		}
 
 		/* @DOC A copy of value: clone() when T has one, else the copy constructor. */

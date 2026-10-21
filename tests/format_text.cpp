@@ -7,7 +7,7 @@
 enum class color : unsigned char { red = 3 };
 
 auto main(void) -> int {
-	auto p = ca::fs::path::from("a/b");
+	auto p = ca::fs::path::make("a/b");
 	if (!p)
 		return 1;
 	char array[8] = {'x', 'y', '\0', 'z'};

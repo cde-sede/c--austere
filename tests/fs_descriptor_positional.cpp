@@ -4,7 +4,7 @@
 
 static auto drop(const char* const name) noexcept -> void {
 
-	auto path = ca::fs::path::from(name);
+	auto path = ca::fs::path::make(name);
 	if (path) {
 		static_cast<void>(path->unlink());
 		static_cast<void>(path->cleanup());
@@ -34,8 +34,8 @@ auto main(void) -> int {
 	if (!d->chown(ca::sys::unchanged_id, ca::sys::unchanged_id))
 		return 6;
 
-	auto file = ca::fs::path::from("build/fs_descriptor_positional.tmp");
-	auto link = ca::fs::path::from("build/fs_descriptor_positional.link");
+	auto file = ca::fs::path::make("build/fs_descriptor_positional.tmp");
+	auto link = ca::fs::path::make("build/fs_descriptor_positional.link");
 	if (!file || !link || !link->hardlink_to(*file))
 		return 7;
 	auto linked = link->stat();

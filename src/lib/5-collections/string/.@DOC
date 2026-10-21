@@ -25,7 +25,7 @@ produce new text return a new string in a `result`: `upper`, `lower`, `title`, `
 #include "ca/u16str.hpp"
 
 auto main(void) -> int {
-	auto s = ca::str::from("  Hello, World  ");
+	auto s = ca::str::make("  Hello, World  ");
 	if (!s)
 		return 1;
 	ca::str& text = *s;
@@ -34,7 +34,7 @@ auto main(void) -> int {
 
 	auto shout = text.upper();
 	auto swapped = text.replace("World", "ca");
-	auto boxed = ca::str::from("ok");
+	auto boxed = ca::str::make("ok");
 	if (!shout || *shout != ca::sv::str{"  HELLO, WORLD  "})
 		return 3;
 	if (!swapped || swapped->strip() != ca::sv::str{"Hello, ca"})
@@ -50,7 +50,7 @@ auto main(void) -> int {
 	if (text != ca::sv::str{">> Hello, World!"} || text.c_str()[text.size()] != '\0')
 		return 8;
 
-	auto wide = ca::u16str::from(ca::sv::str{"café"});
+	auto wide = ca::u16str::make(ca::sv::str{"café"});
 	if (!wide || wide->size() != 4U || (*wide)[3] != u'é')
 		return 9;
 	return text.cleanup() && shout->cleanup() && swapped->cleanup() && boxed->cleanup() && centered->cleanup()
@@ -58,8 +58,8 @@ auto main(void) -> int {
 }
 ```
 
-`from` builds a string from a view of the same unit type, or transcodes from another encoding
-(`u16str::from(sv::str{...})`), invalid sequences becoming U+FFFD. Case mappings are the full
+`make` builds a string from a view of the same unit type, or transcodes from another encoding
+(`u16str::make(sv::str{...})`), invalid sequences becoming U+FFFD. Case mappings are the full
 Unicode ones, so `upper()` of "straße" is "STRASSE", and `case_fold()` is the right key for
 caseless comparison.
 

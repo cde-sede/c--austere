@@ -38,8 +38,8 @@
 
    | Case | clang 18 | gcc 13 | Notes |
    |---|---|---|---|
-   | from() of 10 chars, 1e6 | 1.00x | 1.01x | inline in both; built inside the result: returning it copies nothing |
-   | from() of 22 chars, 1e6 | 0.049x | 0.081x | std::string allocates past 15 |
+   | make() of 10 chars, 1e6 | 1.00x | 1.01x | inline in both; built inside the result: returning it copies nothing |
+   | make() of 22 chars, 1e6 | 0.049x | 0.081x | std::string allocates past 15 |
    | push 1e7 chars | 1.04x | 0.89x | |
    | append 1e6 6-char words | 1.20x | 0.92x | |
    | ca::format vs std::format, short result, 1e6 | 0.63x | 0.54x | |
@@ -214,7 +214,7 @@ namespace ca {
 			// }
 
 			/* @DOC A copy of text, in memory from allocator (none when it fits inline). */
-			[[nodiscard]] static auto from(const A& allocator, const view_type text) noexcept -> ca::result<self> {
+			[[nodiscard]] static auto make_in(const A& allocator, const view_type text) noexcept -> ca::result<self> {
 
 				const ca::usz count = text.size();
 				if (count <= INLINE_CAPACITY) [[likely]]
@@ -227,15 +227,15 @@ namespace ca {
 				return out;
 			}
 
-			[[nodiscard]] static auto from(const view_type text) noexcept -> ca::result<self> requires ca::is_stateless_allocator<A> {
-				return self::from(A{}, text);
+			[[nodiscard]] static auto make(const view_type text) noexcept -> ca::result<self> requires ca::is_stateless_allocator<A> {
+				return self::make_in(A{}, text);
 			}
 
 			/* @DOC text transcoded from another encoding (invalid sequences become U+FFFD):
 			   Python's str(bytes, encoding). */
 			template <ca::is_character D>
 			requires (!ca::is_same<D, C>)
-			[[nodiscard]] static auto from(const A& allocator, const ca::sv::basic<D> text) noexcept -> ca::result<self> {
+			[[nodiscard]] static auto make_in(const A& allocator, const ca::sv::basic<D> text) noexcept -> ca::result<self> {
 
 				const ca::usz size = ca::unicode::transcoded_size<C>(text);
 				self out{allocator};
@@ -248,13 +248,8 @@ namespace ca {
 
 			template <ca::is_character D>
 			requires (!ca::is_same<D, C>) && ca::is_stateless_allocator<A>
-			[[nodiscard]] static auto from(const ca::sv::basic<D> text) noexcept -> ca::result<self> {
-				return self::from(A{}, text);
-			}
-
-			/* @DOC from, for ca::make_in. */
-			[[nodiscard]] static auto make_in(const A& allocator, const view_type text) noexcept -> ca::result<self> {
-				return self::from(allocator, text);
+			[[nodiscard]] static auto make(const ca::sv::basic<D> text) noexcept -> ca::result<self> {
+				return self::make_in(A{}, text);
 			}
 
 
@@ -583,12 +578,12 @@ namespace ca {
 
 			/* @DOC A copy in memory from the same allocator. */
 			[[nodiscard]] auto clone(void) const noexcept -> ca::result<self> {
-				return self::from(_allocator, this->view());
+				return self::make_in(_allocator, this->view());
 			}
 
 			/* @DOC clone, in memory from allocator. */
 			[[nodiscard]] auto clone_in(const A& allocator) const noexcept -> ca::result<self> {
-				return self::from(allocator, this->view());
+				return self::make_in(allocator, this->view());
 			}
 
 			[[nodiscard]] auto operator==(const self& other) const noexcept -> bool {

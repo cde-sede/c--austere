@@ -25,8 +25,8 @@ static auto parts(const fpath& p) -> size_t {
 #include "5-collections/fs/path.hpp"
 
 using fpath = ca::fs::path;
-static auto from(const char* const s) -> fpath { return ca::move(*fpath::from(s)); }
-static auto from_clean(const char* const s) -> fpath { return ca::move(*fpath::from(s)); }
+static auto from(const char* const s) -> fpath { return ca::move(*fpath::make(s)); }
+static auto from_clean(const char* const s) -> fpath { return ca::move(*fpath::make(s)); }
 static auto join(const fpath& p, const char* const s) -> fpath { return ca::move(*p.join(s)); }
 static auto name_size(const fpath& p) -> size_t { return p.name().size(); }
 static auto stem_size(const fpath& p) -> size_t { return p.stem().size(); }
@@ -102,8 +102,8 @@ auto main(void) -> int {
 	if (!open_counters())
 		return 1;
 	const fpath bases[4] = {from_clean(clean[0]), from_clean(clean[1]), from_clean(clean[2]), from_clean(clean[3])};
-	bench("from, messy input, 1e6", "std: constructor + lexically_normal", build_messy);
-	bench("from, clean input, 1e6", "std: constructor only, no normalization", build_clean);
+	bench("make, messy input, 1e6", "std: constructor + lexically_normal", build_messy);
+	bench("make, clean input, 1e6", "std: constructor only, no normalization", build_clean);
 	bench("join of a file name, 1e6", "std: operator/", [&] { join_file(bases); });
 	bench("name + stem + suffix, 1e6", [&] { name_parts(bases); });
 	bench("parent, 1e6", [&] { parent(bases); });

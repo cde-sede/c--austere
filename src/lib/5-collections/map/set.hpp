@@ -151,7 +151,7 @@ namespace ca {
 
 			/* @DOC The distinct keys of keys: set(iterable). On failure the partial set is
 			   destroyed and that error returned. */
-			[[nodiscard]] static auto from(const ca::borrowed_slice<const K> keys) noexcept -> ca::result<self>
+			[[nodiscard]] static auto make(const ca::borrowed_slice<const K> keys) noexcept -> ca::result<self>
 			requires ca::is_stateless_allocator<A> && ca::impl::is_buildable_from<K, const K&> {
 
 				self made{};

@@ -32,7 +32,7 @@ static auto trivial(void) noexcept -> int {
 		return 5;
 	if (!a.insert(0U, {1, 2}) || a[1] != 2 || a[2] != 9 || a.pop().value_or(0) != 9)
 		return 6;
-	return a.clear() && a.empty() && !a.pop() && fails_with(ca::inline_array<int, 2>::from({1, 2, 3}), ca::errc::no_space) ? 0 : 7;
+	return a.clear() && a.empty() && !a.pop() && fails_with(ca::inline_array<int, 2>::make({1, 2, 3}), ca::errc::no_space) ? 0 : 7;
 }
 
 static auto owning(void) noexcept -> int {

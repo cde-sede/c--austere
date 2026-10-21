@@ -7,7 +7,7 @@ static auto is(const ca::sv::str a, const char* b) noexcept -> bool {
 }
 
 auto main(void) -> int {
-	auto p = ca::fs::path::from("//usr/./lib//archive.tar.gz/");
+	auto p = ca::fs::path::make("//usr/./lib//archive.tar.gz/");
 	if (!p || !is(p->view(), "/usr/lib/archive.tar.gz") || !p->is_absolute())
 		return 1;
 	if (!is(p->name(), "archive.tar.gz") || !is(p->suffix(), ".gz") || !is(p->stem(), "archive.tar") || !is(p->parent(), "/usr/lib"))
@@ -23,7 +23,7 @@ auto main(void) -> int {
 	const ca::fs::path dot;
 	if (!is(dot.view(), ".") || !dot.name().empty() || !is(dot.parent(), ".") || dot.components().begin() != dot.components().end())
 		return 5;
-	auto rel = ca::fs::path::from("a/b");
+	auto rel = ca::fs::path::make("a/b");
 	if (!rel || !is(rel->parent(), "a") || !is(rel->root(), ""))
 		return 6;
 	auto joined = rel->join("../c/");
@@ -36,7 +36,7 @@ auto main(void) -> int {
 	if (!zip || !is(zip->view(), "/usr/lib/archive.tar.zip") || !named || !is(named->view(), "/usr/lib/x")
 		|| !stemmed || !is(stemmed->view(), "/usr/lib/y.gz"))
 		return 8;
-	auto base = ca::fs::path::from("/usr");
+	auto base = ca::fs::path::make("/usr");
 	if (!base)
 		return 9;
 	auto below = p->relative_to(*base);
@@ -44,13 +44,13 @@ auto main(void) -> int {
 		return 10;
 	if (!p->match("*.gz") || !p->match("lib/*.tar.*") || !p->match("/usr/*/a[q-s]chive.*") || p->match("/lib/*") || p->match("[!a]*"))
 		return 11;
-	auto hidden = ca::fs::path::from(".bashrc");
+	auto hidden = ca::fs::path::make(".bashrc");
 	if (!hidden || !hidden->suffix().empty() || !is(hidden->stem(), ".bashrc"))
 		return 12;
 	auto copy = p->clone();
 	if (!copy || !(*copy == *p) || !p->push("more") || !is(p->view(), "/usr/lib/archive.tar.gz/more"))
 		return 13;
-	auto root = ca::fs::path::from("/");
+	auto root = ca::fs::path::make("/");
 	if (!root || !is(root->parent(), "/") || !root->name().empty())
 		return 14;
 	return 0;

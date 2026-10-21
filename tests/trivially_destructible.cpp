@@ -2,14 +2,18 @@
 #include "1-primitives/traits/is_trivially_destructible.hpp"
 #include "2-vocabulary/optional.hpp"
 #include "2-vocabulary/result.hpp"
+#include "3-system/process/spawn_actions.hpp"
 #include "4-lifecycle/memory/arena.hpp"
 #include "4-lifecycle/unique.hpp"
 #include "5-collections/array/deque.hpp"
 #include "5-collections/array/dynamic_array.hpp"
+#include "5-collections/array/dynamic_bit_array.hpp"
 #include "5-collections/array/inline_array.hpp"
 #include "5-collections/array/slice.hpp"
 #include "5-collections/array/small_array.hpp"
 #include "5-collections/fs/path.hpp"
+#include "5-collections/io/ring_buffer.hpp"
+#include "5-collections/list/intrusive_list.hpp"
 #include "5-collections/list/list.hpp"
 #include "5-collections/map/hashmap.hpp"
 #include "5-collections/map/map.hpp"
@@ -52,6 +56,17 @@ static_assert(ca::is_trivially_destructible<ca::fs::descriptor>);
 static_assert(ca::is_trivially_destructible<ca::io::buffered_reader<>>);
 static_assert(ca::is_trivially_destructible<ca::io::buffered_writer<>>);
 static_assert(ca::is_trivially_destructible<ca::io::writer>);
+static_assert(ca::is_trivially_destructible<ca::io::ring_buffer<>>);
+static_assert(ca::is_trivially_destructible<ca::dynamic_bit_array<>>);
+static_assert(ca::is_trivially_destructible<ca::sys::spawn_actions>);
+static_assert(ca::is_trivially_destructible<ca::map<ca::str, ca::str>>);
+
+struct linked : ca::list_link<linked> {
+};
+
+static_assert(ca::is_trivially_destructible<ca::list_link<linked>>);
+static_assert(ca::is_trivially_destructible<linked>);
+static_assert(ca::is_trivially_destructible<ca::intrusive_list<linked>>);
 
 auto main(void) -> int {
 	return 0;

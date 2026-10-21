@@ -9,7 +9,7 @@
    |---|---|---|
    | operator[], get, first, last | O(1) | one compare |
    | size, empty, begin, end, data, view | O(1) | |
-   | make(n, args...), from(view), clone | O(n) | one allocation; one memcpy for trivially copyable T in from and clone |
+   | make(n, args...), make(view), clone | O(n) | one allocation; one memcpy for trivially copyable T in make(view) and clone |
    | into_slice (dynamic_array) | O(1) | takes the array's block as is, no copy, no shrink |
    | find, count, contains, compare, == | O(n) | memchr/memcmp for code units, element loops otherwise |
    | find(other), find_last(other) | O(n * m) | |
@@ -71,7 +71,7 @@ namespace ca {
 	// -- SLICE --------------------------------------------------------------
 
 	/* @DOC Fixed-length run of T it owns, in memory from A: what a sequence becomes once its
-	   length stops changing (Rust's Box<[T]>). Made by make(n, args...), from(view) or
+	   length stops changing (Rust's Box<[T]>). Made by make(n, args...), make(view) or
 	   dynamic_array::into_slice; those acquire memory and can fail. The sequence methods (cut,
 	   find, compare, fill, reverse) come from ca::impl::slice_methods and return
 	   borrowed_slices into it. Clean up with cleanup(); the destructor is a failsafe that frees
@@ -184,7 +184,7 @@ namespace ca {
 			/* @DOC A copy of the elements of view, in memory from allocator: clone() of each when T
 			   has one, else the copy constructor. On a failed element clone, the partial copy is
 			   destroyed and that error returned. */
-			[[nodiscard]] static auto from(const A& allocator, const ca::borrowed_slice<const T> view) noexcept -> ca::result<self>
+			[[nodiscard]] static auto make_in(const A& allocator, const ca::borrowed_slice<const T> view) noexcept -> ca::result<self>
 			requires ca::is_clonable<T> || ca::is_copy_constructible<T> {
 
 				self copy{allocator};
@@ -213,9 +213,9 @@ namespace ca {
 				return copy;
 			}
 
-			[[nodiscard]] static auto from(const ca::borrowed_slice<const T> view) noexcept -> ca::result<self>
+			[[nodiscard]] static auto make(const ca::borrowed_slice<const T> view) noexcept -> ca::result<self>
 			requires (ca::is_clonable<T> || ca::is_copy_constructible<T>) && ca::is_stateless_allocator<A> {
-				return self::from(A{}, view);
+				return self::make_in(A{}, view);
 			}
 
 
@@ -326,14 +326,14 @@ namespace ca {
 				return ca::borrowed_slice<const T>{_data, this->size()};
 			}
 
-			/* @DOC A copy in memory from the same allocator; see from. */
+			/* @DOC A copy in memory from the same allocator; see make_in(allocator, view). */
 			[[nodiscard]] auto clone(void) const noexcept -> ca::result<self> requires ca::is_clonable<T> || ca::is_copy_constructible<T> {
-				return self::from(_allocator, this->view());
+				return self::make_in(_allocator, this->view());
 			}
 
 			/* @DOC clone, in memory from allocator. */
 			[[nodiscard]] auto clone_in(const A& allocator) const noexcept -> ca::result<self> requires ca::is_clonable<T> || ca::is_copy_constructible<T> {
-				return self::from(allocator, this->view());
+				return self::make_in(allocator, this->view());
 			}
 
 			/* @DOC Cleans up every element (cleanup() when T has one), then frees the storage: empty.

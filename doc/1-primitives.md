@@ -501,7 +501,7 @@ auto main(void) -> int {
 
 The reason must outlive the context, so it is a string literal. The frames between the trap and the context are left without running destructors: what they owned leaks. Traps are for bugs, not for expected failures, which return `ca::result`.
 
-The machinery is `recovery.hpp`: each context pushes an `impl::recovery` point (a `__builtin_setjmp` buffer) on a per-thread list, and `ca::trap` jumps to the innermost one. Nothing below layer 4 manipulates the list.
+The machinery is `recovery.hpp`: each context pushes an `impl::recovery` point (a `__builtin_setjmp` buffer and the context's callbacks) on a per-thread list. `ca::trap` runs in two phases (`impl::raise`): it asks each point from the innermost outward for a `ca::verdict` while the trapping frames are still alive, runs the `leave` of every context passed, then jumps to the one that took it; with no taker, it stops right at the trap. Nothing below layer 4 manipulates the list.
 
 ### Optimizer hints
 
@@ -560,6 +560,16 @@ constexpr auto assume(const bool condition) noexcept -> void;
 
 Lets the optimizer assume condition; undefined if false. condition is evaluated.
 
+## `debug/frame_address.hpp`
+
+### function `impl::frame_address`
+
+```c++
+[[nodiscard, gnu::always_inline]] inline auto frame_address(void) noexcept -> const void*;
+```
+
+The frame record of the function this is inlined into: the caller's frame pointer, then the return address. Forces that function to keep a frame pointer.
+
 ## `debug/is_constant_folded.hpp`
 
 ### function `is_constant_folded`
@@ -573,13 +583,21 @@ True when the optimizer proves value is a constant at this call site, after inli
 
 ## `debug/recovery.hpp`
 
+### struct `impl::trap_info`
+
+```c++
+struct trap_info final;
+```
+
+What a trap carries while contexts decide on it: its reason, where it was (result::raise records its caller; line 0 when unknown), the error code and trace number of a failed result accessed (0 when none), the error object itself when it is not a ca::error (_payload, of type _type, a type_key) and how to clean it up when it is owned and no context takes it (_discard), whether ca::ask raised it (_resumable), and whether _code and _trace already carry the reason (_traced, set by the first context that needs the trap as a ca::error, so the reason is recorded once). _frame is the frame record of the ca function that raised the trap, whose return address is the trap site: backtraces start there. _payload and _frame point into the trapping frames: valid until the trap unwinds.
+
 ### struct `impl::recovery`
 
 ```c++
 struct recovery final;
 ```
 
-A point ca::trap returns to instead of stopping the program: the jump buffer of __builtin_setjmp, the enclosing point, and what the trap left: its reason, where it was (result::raise records its caller; line 0 when unknown), the error code and trace number of a failed result accessed (0 when none), and whether _accept took that error whole. _accept(_sink, error, type_key) takes an error of the context's type (by move when it cannot be copied) and answers whether it did. Points form a per-thread list, innermost in current_recovery; ca::context_manager pushes and pops them.
+A context as a trap sees it: the jump buffer of __builtin_setjmp, the enclosing point, the context's own state (_context) for _handles, which decides on a trap (nullptr: takes every trap, passes every ca::ask), and _unwind, which runs the context's leave when a trap passes it for an outer context. _take runs on the point a trap unwinds to, before it does: it takes the trap's error into _sink when of the context's type (by move when it cannot be copied), setting _accepted, else records the trap in the thread's trace. _trap is what the trap carried, copied into the point it unwinds to. Points form a per-thread list, innermost in current_recovery; ca::context_manager pushes and pops them.
 
 ### variable `impl::current_recovery`
 
@@ -587,7 +605,7 @@ A point ca::trap returns to instead of stopping the program: the jump buffer of 
 inline constinit thread_local ca::impl::recovery* current_recovery;
 ```
 
-The thread's innermost recovery point, nullptr outside every context.
+The thread's innermost recovery point, nullptr outside every context, and while contexts decide on a trap or leave on its way: a trap there stops the program.
 
 ### function `impl::recover`
 
@@ -596,6 +614,22 @@ The thread's innermost recovery point, nullptr outside every context.
 ```
 
 Resumes at point, in the function that set it with __builtin_setjmp. A function of its own: __builtin_longjmp may not be called from the function that called __builtin_setjmp.
+
+### function `impl::raise`
+
+```c++
+[[gnu::cold, gnu::noinline]] inline auto raise(ca::impl::trap_info& info) noexcept -> bool;
+```
+
+Both phases of a trap. Search: from the innermost point outward, each context's _handles decides, at the trap site. Cleanup: every context passed runs its leave (_unwind), innermost first, the target takes the error (_accept), and the trap unwinds to it. Returns true when a context resumed info (resumable only: resuming anything else stops the program), false when none took it; an owned error no context took is cleaned up (_discard) first. The target's _take runs while the trapping frames are still alive.
+
+### function `impl::stop`
+
+```c++
+[[noreturn, gnu::cold, gnu::noinline]] inline auto stop(ca::impl::trap_info& info) noexcept -> void;
+```
+
+A trap that cannot resume: raise, then stop the program when no context took it.
 
 ## `debug/source_location.hpp`
 
@@ -622,10 +656,10 @@ Where it is written, or the caller's location when it is a default argument.
 ### function `trap`
 
 ```c++
-[[noreturn]] inline auto trap(const char* const reason = nullptr) noexcept -> void;
+[[noreturn, gnu::always_inline]] inline auto trap(const char* const reason = nullptr) noexcept -> void;
 ```
 
-Leaves for the thread's innermost context (ca::context_manager, ca::with), which fails with reason; outside every context, stops the program with an illegal instruction. reason must outlive the context: a literal. Frames between the trap and the context are skipped, their objects never destroyed.
+Leaves for the innermost context that takes it (ca::context_manager, ca::with), which fails with reason; the contexts it passes run their leave on the way. With no context taking it, stops the program with an illegal instruction, right here. reason must outlive the context: a literal. Frames between the trap and the context are skipped, their objects never destroyed. Always inlined, so the trap and its backtrace start in the function that trapped.
 
 ## `debug/unreachable.hpp`
 
@@ -636,6 +670,16 @@ Leaves for the thread's innermost context (ca::context_manager, ca::with), which
 ```
 
 Marks a point as unreachable; reaching it is undefined.
+
+## `debug/verdict.hpp`
+
+### enum `verdict`
+
+```c++
+enum class verdict;
+```
+
+What a context's handles answers for a trap, while every frame is still alive: pass it to an outer context, take it (the trap unwinds to this context, which fails with its error), or resume the code that asked (ca::ask only; resuming a ca::trap stops the program).
 
 ## `floats/`
 

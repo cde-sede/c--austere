@@ -19,8 +19,7 @@ usage, and signal handling.
 
 `spawn_actions` lists descriptor changes the child applies before running the program (dup2,
 close, open), so a child's standard streams can be redirected without fork. It follows ca's
-explicit lifecycle: `init()` before use, `cleanup()` after, and it is neither copyable nor
-movable.
+explicit lifecycle: `make()` builds it, `cleanup()` frees it; it moves but does not copy.
 
 ```c++
 #include "ca/file.hpp"
@@ -40,11 +39,11 @@ auto main(void) -> int {
 	auto ends = ca::sys::pipe(ca::fs::cloexec_t::OPEN_VALUE);
 	if (!ends)
 		return 1;
-	ca::sys::spawn_actions actions;
-	if (!actions.init() || !actions.add_dup2(ends->write_end(), 1))
+	auto actions = ca::sys::spawn_actions::make();
+	if (!actions || !actions->add_dup2(ends->write_end(), 1))
 		return 2;
-	auto child = ca::sys::posix_spawnp("sh", argv, nullptr, &actions);
-	if (!child || !actions.cleanup() || !ca::sys::close(ends->write_end()))
+	auto child = ca::sys::posix_spawnp("sh", argv, nullptr, &*actions);
+	if (!child || !actions->cleanup() || !ca::sys::close(ends->write_end()))
 		return 3;
 
 	char out[16]{};

@@ -38,7 +38,7 @@ auto main(void) -> int {
 		return 6;
 	if (!ca::printf_to(m, "%ls %lc %s %5.1ls|", L"wide", L'\u00e9', u"u16", L"\u00e9t\u00e9") || !check(m, "wide \u00e9 u16     \u00e9|"))
 		return 7;
-	auto s = ca::u16str::from(u"owned");
+	auto s = ca::u16str::make(u"owned");
 	if (!s)
 		return 8;
 	auto shown = ca::format_to(m, "{} {p}", *s, ca::sv::u16{});

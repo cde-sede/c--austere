@@ -25,11 +25,11 @@
    without an allocation that could fail.
 
    Rules, checked: an element is in at most one list per Tag (linking a linked element traps);
-   remove() takes elements of this list (removing an unlinked one traps); an element must leave
-   its list before it is destroyed (its link's destructor traps otherwise). The list's
-   destructor unlinks what it still holds. Copying or moving an element gives an unlinked one;
-   relocating a linked element by bytes would corrupt the list, so list_link is not trivially
-   copyable.
+   remove() takes elements of this list (removing an unlinked one traps). Unchecked, for trivial
+   destructors (a trap unwinds past them, see ca::context_manager): an element leaves its list
+   before it is destroyed, and a list is cleared before it goes away. Copying or moving an
+   element gives an unlinked one; relocating a linked element by bytes would corrupt the list,
+   so list_link is not trivially copyable.
 
    Copy and move: the list is move-only; moving takes three words, the elements stay where they
    are. TRIVIALLY_RELOCATABLE: no element points at the list object. */
@@ -168,9 +168,10 @@ namespace ca {
 
 	/* @DOC Doubly linked list of elements it does not own, linked through the list_link<T, Tag>
 	   they derive from: no allocation, nothing can fail, an element unlinks in O(1) from a
-	   reference to it. Elements must stay in place while linked and leave before they die (both
-	   checked by traps). first, last, pop and pop_front allow the doubt; dereferencing end()
-	   traps. The destructor unlinks the remaining elements. */
+	   reference to it. Elements must stay in place while linked and leave before they die,
+	   unchecked. first, last, pop and pop_front allow the doubt; dereferencing end() traps.
+	   Trivially destructible, so a trap may unwind past it: clear() before the list goes away,
+	   or its elements stay linked (linking one again then traps). */
 	template <typename T, typename Tag = void>
 	class intrusive_list final {
 
@@ -223,11 +224,6 @@ namespace ca {
 
 			constexpr intrusive_list(self&& other) noexcept
 			: _first{ca::exchange(other._first, nullptr)}, _last{ca::exchange(other._last, nullptr)}, _size{ca::exchange(other._size, 0U)} {
-			}
-
-			/* @DOC Unlinks the remaining elements. */
-			constexpr ~intrusive_list(void) noexcept {
-				this->clear();
 			}
 
 

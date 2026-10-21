@@ -23,7 +23,7 @@ auto main(void) -> int {
 		return 6;
 	if (!d->sync() || !twin->cleanup() || !d->cleanup() || d->is_open())
 		return 7;
-	auto gone = ca::fs::path::from("build/fs_descriptor_io.tmp").and_then([](const ca::fs::path& p) {
+	auto gone = ca::fs::path::make("build/fs_descriptor_io.tmp").and_then([](const ca::fs::path& p) {
 		return p.unlink();
 	});
 	return gone ? 0 : 8;

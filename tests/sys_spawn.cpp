@@ -1,5 +1,6 @@
 // expect: exit 0
 // link: both
+#include "1-primitives/utility/move.hpp"
 #include "3-system/error/errc.hpp"
 #include "3-system/file/close.hpp"
 #include "3-system/file/read.hpp"
@@ -29,14 +30,18 @@ auto main(void) -> int {
 	auto early = actions.add_close(0);
 	if (early || early.error() != ca::errc::invalid_argument || actions.is_live())
 		return 4;
-	if (!actions.init() || !actions.add_dup2(ends->write_end(), 1) || !actions.add_open(0, "/dev/null", ca::fs::access::READ_ONLY, 0U))
+	auto made = ca::sys::spawn_actions::make();
+	if (!made || !made->is_live())
+		return 5;
+	actions = ca::move(*made);
+	if (made->is_live() || !actions.add_dup2(ends->write_end(), 1) || !actions.add_open(0, "/dev/null", ca::fs::access::READ_ONLY, 0U))
 		return 5;
 	char echo[] = "printf \"$GREETING\"";
 	char* const printing[]{sh, dash_c, echo, nullptr};
 	char greeting[] = "GREETING=hi there";
 	char* const environment[]{greeting, nullptr};
 	auto printer = ca::sys::posix_spawn("/bin/sh", printing, environment, &actions);
-	if (!printer || !actions.cleanup() || actions.is_live() || !ca::sys::close(ends->write_end()))
+	if (!printer || !actions.cleanup() || actions.is_live() || !actions.cleanup() || !ca::sys::close(ends->write_end()))
 		return 6;
 	char got[16]{};
 	ca::usz total = 0U;
