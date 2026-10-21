@@ -23,6 +23,7 @@
 		case ca::errc::symlink_loop.code():     return "symlink_loop";
 		case ca::errc::not_supported.code():    return "not_supported";
 		case ca::errc::not_implemented.code():  return "not_implemented";
+		case ca::errc::timed_out.code():        return "timed_out";
 		case ca::errc::not_recoverable.code():  return "not_recoverable";
 		default:                                return {};
 	}

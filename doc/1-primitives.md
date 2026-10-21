@@ -157,6 +157,16 @@ enum class memory_order : int;
 
 Orderings of the __atomic builtins.
 
+## `atomic/spin_pause.hpp`
+
+### function `spin_pause`
+
+```c++
+[[gnu::always_inline]] inline auto spin_pause(void) noexcept -> void;
+```
+
+Tells the CPU the thread is spinning on a value another thread will change: pause on x86-64, yield on aarch64, nothing elsewhere. Neither a fence nor a syscall.
+
 ## `bit/`
 
 The std `<bit>` header, one function per file, all constexpr. The counting and rounding functions take unsigned integers only: `bool` and the character types are refused, as in std, so `popcount('a')` does not compile.

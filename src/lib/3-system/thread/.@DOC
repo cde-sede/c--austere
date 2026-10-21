@@ -1,5 +1,13 @@
-Per-thread slots with an exit callback: the POSIX thread-specific keys, reduced to what C++
-`thread_local` cannot do.
+Futexes, yield, and per-thread slots with an exit callback.
+
+`sys::futex_wait(word, expected)` sleeps while a `ca::atomic<u32>` holds expected, until a
+`sys::futex_wake(word, count)`; `futex_wait_until(word, expected, deadline)` gives up with
+`errc::timed_out` at a monotonic deadline. Either may return early, so callers loop on the word.
+Words are process-private. Linux only; elsewhere a wait yields once, which keeps every loop
+correct but spinning. The primitives built on them are in `sync/`. `sys::yield()` gives the CPU
+to another runnable thread.
+
+The slots are the POSIX thread-specific keys, reduced to what C++ `thread_local` cannot do.
 
 `sys::thread_key_create(on_exit)` makes a slot holding one pointer per thread, null in each. When
 a thread other than the main one exits with a non-null value in the slot, `on_exit(value)` runs in

@@ -6,5 +6,6 @@
 #include "1-primitives/atomic/atomic.hpp"
 #include "1-primitives/atomic/atomic_signal_fence.hpp"
 #include "1-primitives/atomic/atomic_thread_fence.hpp"
+#include "1-primitives/atomic/spin_pause.hpp"
 
 #endif // ca_include_atomic_hpp

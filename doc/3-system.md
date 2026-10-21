@@ -2814,6 +2814,246 @@ auto main(void) -> int {
 
 Fills buffer from the kernel's secure random source, any size (fetched 256 bytes at a time). For keys and seeds.
 
+## `sync/`
+
+Synchronization between threads, each over one or two futex words (`sys::futex_wait`, `futex_wake`): no allocation, no kernel object, constant-initialized, trivially destructible. Nothing here fails except a timed wait, with `errc::timed_out`, as I/O fails.
+
+| Type | Does |
+|---|---|
+| `ca::mutex` | lock, try_lock, lock_until/lock_for, unlock; not recursive |
+| `ca::condition` | wait/wait_until/wait_for on a held mutex, with or without a predicate; notify_one, notify_all |
+| `ca::once` | call(f): f runs once among every caller; a failed `result<void>` lets the next call retry |
+| `ca::latch` | count_down, wait, try_wait, arrive_and_wait: a one-shot countdown |
+| `ca::semaphore` | acquire, try_acquire, acquire_until/acquire_for, release(n) |
+
+Deadlines are `sys::now(clock::monotonic)` nanoseconds; each `*_for` takes a duration in nanoseconds instead. A wait may come back without a notify, so `condition` loops on a predicate when given one.
+
+```c++
+#include "ca/sync.hpp"
+#include "ca/time.hpp"
+
+static constinit ca::mutex lock;
+static constinit ca::condition changed;
+static constinit ca::once setup;
+static int ready = 0;
+
+auto main(void) -> int {
+	if (!setup.call([] { ready = 1; }) || !setup.is_done())
+		return 1;
+	lock.lock();
+	changed.wait(lock, [] { return ready == 1; });
+	const bool timed_out = !changed.wait_for(lock, 1000000);
+	lock.unlock();
+	if (!timed_out)
+		return 2;
+	ca::semaphore slots{1U};
+	if (!slots.try_acquire() || slots.try_acquire())
+		return 3;
+	slots.release();
+	ca::latch done{2U};
+	done.count_down(2U);
+	return done.try_wait() ? 0 : 4;
+}
+```
+
+Unlocking a mutex nobody holds traps, as does counting a latch below zero. A thread that traps while holding a mutex leaves it locked; `ca::locked` (layer 4) unlocks on the way out.
+
+## `sync/condition.hpp`
+
+### class `condition`
+
+```c++
+class condition final;
+```
+
+Threads sleeping until another signals a change made under a mutex: a sequence number bumped by each notify, the futex word waiters sleep on, and a count of waiters, so a notify with nobody waiting makes no syscall. Waits may return without a notify; the predicate overloads loop until it holds. Constant-initialized, trivially destructible, neither copyable nor movable.
+
+### function `condition::wait`
+
+```c++
+auto wait(ca::mutex& held) noexcept -> void;
+```
+
+Unlocks held, sleeps until a notify (or spuriously), locks held again. held must be locked by the caller.
+
+### function `condition::wait_until`
+
+```c++
+[[nodiscard]] auto wait_until(ca::mutex& held, ca::i64 deadline) noexcept -> ca::result<void>;
+```
+
+wait, giving up with errc::timed_out at deadline (sys::now(clock::monotonic) nanoseconds); held is locked again either way.
+
+### function `condition::wait_until`
+
+```c++
+template <typename P>
+[[nodiscard]] auto wait_until(ca::mutex& held, const ca::i64 deadline, P predicate) noexcept -> ca::result<void>;
+```
+
+Waits until predicate holds; errc::timed_out when it still does not at deadline.
+
+### function `condition::notify_one`
+
+```c++
+auto notify_one(void) noexcept -> void;
+```
+
+Wakes one waiter, if any. Holding the mutex is not required.
+
+### function `condition::notify_all`
+
+```c++
+auto notify_all(void) noexcept -> void;
+```
+
+Wakes every waiter.
+
+## `sync/latch.hpp`
+
+### class `latch`
+
+```c++
+class latch final;
+```
+
+A countdown threads wait on until it reaches zero, once: std::latch. Counting below zero traps. Trivially destructible, neither copyable nor movable.
+
+### function `latch::try_wait`
+
+```c++
+[[nodiscard]] auto try_wait(void) const noexcept -> bool;
+```
+
+Whether it reached zero; never sleeps.
+
+### function `latch::count_down`
+
+```c++
+auto count_down(ca::u32 n = 1U) noexcept -> void;
+```
+
+Counts n down; the arrival at zero wakes every waiter.
+
+### function `latch::wait`
+
+```c++
+auto wait(void) const noexcept -> void;
+```
+
+Sleeps until zero.
+
+### function `latch::wait_until`
+
+```c++
+[[nodiscard]] auto wait_until(ca::i64 deadline) const noexcept -> ca::result<void>;
+```
+
+wait, giving up with errc::timed_out at deadline (sys::now(clock::monotonic) nanoseconds).
+
+### function `latch::arrive_and_wait`
+
+```c++
+auto arrive_and_wait(const ca::u32 n = 1U) noexcept -> void;
+```
+
+count_down(n), then wait.
+
+## `sync/mutex.hpp`
+
+### class `mutex`
+
+```c++
+class mutex final;
+```
+
+Mutual exclusion in one 32-bit word: 0 unlocked, 1 locked, 2 locked with sleepers (Drepper's futex mutex). Locking spins briefly, then sleeps in the kernel; unlocking makes a syscall only when someone sleeps. Not recursive: locking it again from its holder never returns. Constant-initialized, trivially destructible, neither copyable nor movable.
+
+### function `mutex::is_locked`
+
+```c++
+[[nodiscard]] auto is_locked(void) const noexcept -> bool;
+```
+
+Whether some thread holds it; a hint for checks, stale once read.
+
+### function `mutex::lock_until`
+
+```c++
+[[nodiscard]] auto lock_until(ca::i64 deadline) noexcept -> ca::result<void>;
+```
+
+lock, giving up with errc::timed_out at deadline (sys::now(clock::monotonic) nanoseconds).
+
+### function `mutex::lock_for`
+
+```c++
+[[nodiscard]] auto lock_for(ca::i64 nanoseconds) noexcept -> ca::result<void>;
+```
+
+lock_until nanoseconds from now.
+
+### function `mutex::unlock`
+
+```c++
+auto unlock(void) noexcept -> void;
+```
+
+Traps when not locked.
+
+## `sync/once.hpp`
+
+### class `once`
+
+```c++
+class once final;
+```
+
+Runs a function once among every thread calling call: the first runs it, the others sleep until it is done. A function returning a failed ca::result\<void> leaves it not done, so the next call runs it again. A trap inside the function, or call from the function itself, leaves the other callers waiting forever. Constant-initialized, trivially destructible, neither copyable nor movable.
+
+### function `once::call`
+
+```c++
+template <typename F>
+[[nodiscard]] auto call(F&& f) noexcept -> ca::result<void>;
+```
+
+Runs f (void or ca::result\<void>) unless it already ran; f's failure when it ran and failed.
+
+### function `once::_begin`
+
+```c++
+[[nodiscard]] auto _begin(void) noexcept -> bool;
+```
+
+true: the caller runs the function; false: it is done.
+
+## `sync/semaphore.hpp`
+
+### class `semaphore`
+
+```c++
+class semaphore final;
+```
+
+A counter of permits: acquire takes one, sleeping while there is none; release gives some back. A count of sleepers keeps release free of syscalls when nobody waits. std::counting_semaphore without the bound. Trivially destructible, neither copyable nor movable.
+
+### function `semaphore::acquire_until`
+
+```c++
+[[nodiscard]] auto acquire_until(ca::i64 deadline) noexcept -> ca::result<void>;
+```
+
+acquire, giving up with errc::timed_out at deadline (sys::now(clock::monotonic) nanoseconds).
+
+### function `semaphore::release`
+
+```c++
+auto release(ca::u32 n = 1U) noexcept -> void;
+```
+
+Gives n permits back, waking up to n sleepers.
+
 ## `syscall/`
 
 `ca::syscall`: the kernel's own entry points, without libc. `ca::sys` calls these wherever the target has a table, which is how ca reaches the kernel without the C library; user code should prefer the typed `ca::sys` wrappers, since these check nothing beyond the argument count and kind.
@@ -6046,7 +6286,11 @@ How many of fraction digits after the point remain once trailing zeros go (%g wi
 
 ## `thread/`
 
-Per-thread slots with an exit callback: the POSIX thread-specific keys, reduced to what C++ `thread_local` cannot do.
+Futexes, yield, and per-thread slots with an exit callback.
+
+`sys::futex_wait(word, expected)` sleeps while a `ca::atomic<u32>` holds expected, until a `sys::futex_wake(word, count)`; `futex_wait_until(word, expected, deadline)` gives up with `errc::timed_out` at a monotonic deadline. Either may return early, so callers loop on the word. Words are process-private. Linux only; elsewhere a wait yields once, which keeps every loop correct but spinning. The primitives built on them are in `sync/`. `sys::yield()` gives the CPU to another runnable thread.
+
+The slots are the POSIX thread-specific keys, reduced to what C++ `thread_local` cannot do.
 
 `sys::thread_key_create(on_exit)` makes a slot holding one pointer per thread, null in each. When a thread other than the main one exits with a non-null value in the slot, `on_exit(value)` runs in that thread, the slot cleared first. `sys::thread_key_set(key, value)` stores the calling thread's value. Keys are never deleted.
 
@@ -6080,6 +6324,36 @@ auto main(void) -> int {
 ```
 
 The callback does not run for the main thread, which ends with the process; flush or release main-thread state from `main` or an atexit handler instead.
+
+## `thread/futex_wait.hpp`
+
+### function `futex_wait`
+
+```c++
+auto futex_wait(const ca::atomic<ca::u32>& word, ca::u32 expected) noexcept -> void;
+```
+
+Sleeps while word holds expected, until a futex_wake on it. Returns at once when it holds something else, and may return early (a signal, a stale wake): callers read word again in a loop. Process-private words only. Outside linux it yields once instead.
+
+## `thread/futex_wait_until.hpp`
+
+### function `futex_wait_until`
+
+```c++
+[[nodiscard]] auto futex_wait_until(const ca::atomic<ca::u32>& word, ca::u32 expected, ca::i64 deadline) noexcept -> ca::result<void>;
+```
+
+futex_wait with a deadline on the monotonic clock (sys::now(clock::monotonic) nanoseconds): errc::timed_out once it has passed, also when it already had. Early returns are not failures; callers loop until the word changes or the deadline fails.
+
+## `thread/futex_wake.hpp`
+
+### function `futex_wake`
+
+```c++
+auto futex_wake(const ca::atomic<ca::u32>& word, ca::u32 count) noexcept -> void;
+```
+
+Wakes up to count threads sleeping in futex_wait on word; ca::limits\<u32>::max() wakes all. Always a syscall: skip it when no thread can be waiting.
 
 ## `thread/thread_key.hpp`
 
@@ -6118,6 +6392,16 @@ A new per-thread slot, null in every thread. When a thread other than the main o
 ```
 
 Stores value in the calling thread's slot of key.
+
+## `thread/yield.hpp`
+
+### function `yield`
+
+```c++
+auto yield(void) noexcept -> void;
+```
+
+Gives the CPU to another runnable thread, if any.
 
 ## `thread/impl/key_table.hpp`
 
@@ -6395,6 +6679,16 @@ Days from 1970-01-01 to year-month-day (month 1 - 12, day 1 - 31), any year (How
 ```
 
 The date days after 1970-01-01, any count (Howard Hinnant's civil_from_days).
+
+## `time/impl/deadline_after.hpp`
+
+### function `impl::deadline_after`
+
+```c++
+[[nodiscard]] inline auto deadline_after(const ca::i64 nanoseconds) noexcept -> ca::i64;
+```
+
+The monotonic deadline nanoseconds from now, saturated; now for a negative count. What every *_for of the sync primitives passes to its *_until.
 
 ## `time/impl/time_zone.hpp`
 

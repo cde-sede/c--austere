@@ -1,0 +1,46 @@
+Synchronization between threads, each over one or two futex words (`sys::futex_wait`,
+`futex_wake`): no allocation, no kernel object, constant-initialized, trivially destructible.
+Nothing here fails except a timed wait, with `errc::timed_out`, as I/O fails.
+
+| Type | Does |
+|---|---|
+| `ca::mutex` | lock, try_lock, lock_until/lock_for, unlock; not recursive |
+| `ca::condition` | wait/wait_until/wait_for on a held mutex, with or without a predicate; notify_one, notify_all |
+| `ca::once` | call(f): f runs once among every caller; a failed `result<void>` lets the next call retry |
+| `ca::latch` | count_down, wait, try_wait, arrive_and_wait: a one-shot countdown |
+| `ca::semaphore` | acquire, try_acquire, acquire_until/acquire_for, release(n) |
+
+Deadlines are `sys::now(clock::monotonic)` nanoseconds; each `*_for` takes a duration in
+nanoseconds instead. A wait may come back without a notify, so `condition` loops on a
+predicate when given one.
+
+```c++
+#include "ca/sync.hpp"
+#include "ca/time.hpp"
+
+static constinit ca::mutex lock;
+static constinit ca::condition changed;
+static constinit ca::once setup;
+static int ready = 0;
+
+auto main(void) -> int {
+	if (!setup.call([] { ready = 1; }) || !setup.is_done())
+		return 1;
+	lock.lock();
+	changed.wait(lock, [] { return ready == 1; });
+	const bool timed_out = !changed.wait_for(lock, 1000000);
+	lock.unlock();
+	if (!timed_out)
+		return 2;
+	ca::semaphore slots{1U};
+	if (!slots.try_acquire() || slots.try_acquire())
+		return 3;
+	slots.release();
+	ca::latch done{2U};
+	done.count_down(2U);
+	return done.try_wait() ? 0 : 4;
+}
+```
+
+Unlocking a mutex nobody holds traps, as does counting a latch below zero. A thread that traps
+while holding a mutex leaves it locked; `ca::locked` (layer 4) unlocks on the way out.

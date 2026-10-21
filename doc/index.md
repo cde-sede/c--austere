@@ -73,13 +73,13 @@ c++ -std=c++2c -nostdinc++ -fno-exceptions -fno-rtti -I src/lib prog.cpp -nostdl
 
 | Layer | Headers | Documented entities |
 |---|---|---|
-| [1-primitives](1-primitives.md) | 227 | 199/199 |
+| [1-primitives](1-primitives.md) | 228 | 200/200 |
 | [2-vocabulary](2-vocabulary.md) | 65 | 20/20 |
-| [3-system](3-system.md) | 184 | 0/0 |
+| [3-system](3-system.md) | 194 | 5/5 |
 | [4-lifecycle](4-lifecycle.md) | 37 | 31/31 |
 | [5-collections](5-collections.md) | 65 | 38/38 |
 | [6-resources](6-resources.md) | 15 | 4/4 |
-| [ca](ca.md) | 116 | 0/0 |
+| [ca](ca.md) | 117 | 0/0 |
 
 ## [1-primitives](1-primitives.md)
 
@@ -90,6 +90,7 @@ Layer 1: what the language and the compiler give, wrapped once.
 - [`atomic/atomic_signal_fence.hpp`](1-primitives.md#atomicatomicsignalfencehpp) - Compiler fence between a thread and its signal handlers, order M.
 - [`atomic/atomic_thread_fence.hpp`](1-primitives.md#atomicatomicthreadfencehpp) - Memory fence between threads, order M.
 - [`atomic/memory_order.hpp`](1-primitives.md#atomicmemoryorderhpp) - Orderings of the __atomic builtins.
+- [`atomic/spin_pause.hpp`](1-primitives.md#atomicspinpausehpp) - Tells the CPU the thread is spinning on a value another thread will change: pause on x86-64, yiel...
 - [`bit/bit_cast.hpp`](1-primitives.md#bitbitcasthpp) - Object representation of from, as a To.
 - [`bit/bit_ceil.hpp`](1-primitives.md#bitbitceilhpp) - Smallest power of two not below value; undefined when not representable.
 - [`bit/bit_floor.hpp`](1-primitives.md#bitbitfloorhpp) - Largest power of two not above value; 0 for 0.
@@ -534,6 +535,11 @@ Layer 3: the boundary with the operating system.
 - [`process/impl/spawn.hpp`](3-system.md#processimplspawnhpp) - Processes without libc, on raw syscalls: what libca_runtime's fork, execvp, posix_spawn, posix_sp...
 - [`process/impl/wait_status_of.hpp`](3-system.md#processimplwaitstatusofhpp)
 - [`random/getentropy.hpp`](3-system.md#randomgetentropyhpp) - Fills buffer from the kernel's secure random source, any size (fetched 256 bytes at a time).
+- [`sync/condition.hpp`](3-system.md#syncconditionhpp) - Threads sleeping until another signals a change made under a mutex: a sequence number bumped by e...
+- [`sync/latch.hpp`](3-system.md#synclatchhpp) - A countdown threads wait on until it reaches zero, once: std::latch.
+- [`sync/mutex.hpp`](3-system.md#syncmutexhpp) - Mutual exclusion in one 32-bit word: 0 unlocked, 1 locked, 2 locked with sleepers (Drepper's fute...
+- [`sync/once.hpp`](3-system.md#synconcehpp) - Runs a function once among every thread calling call: the first runs it, the others sleep until i...
+- [`sync/semaphore.hpp`](3-system.md#syncsemaphorehpp) - A counter of permits: acquire takes one, sleeping while there is none; release gives some back.
 - [`syscall/argument.hpp`](3-system.md#syscallargumenthpp) - What a raw syscall takes in a register: an integer, an enum or a pointer.
 - [`syscall/auxiliary.hpp`](3-system.md#syscallauxiliaryhpp) - Value of entry type (AT_*) of the auxiliary vector the kernel handed the process, 0 when absent.
 - [`syscall/invoke.hpp`](3-system.md#syscallinvokehpp) - Raw kernel entry points: invoke, plus one function per syscall of the target (number::* and a cal...
@@ -545,9 +551,13 @@ Layer 3: the boundary with the operating system.
 - [`text/format_float.hpp`](3-system.md#textformatfloathpp) - Writes value as printf's %\<conversion> would (conversion one of f F e E g G a A), with precision...
 - [`text/format_float_shortest.hpp`](3-system.md#textformatfloatshortesthpp) - Writes the fewest %g digits that read back as the same value: 0.1 is "0.1", not "0.10000000000000...
 - [`text/impl/float_text.hpp`](3-system.md#textimplfloattexthpp)
+- [`thread/futex_wait.hpp`](3-system.md#threadfutexwaithpp) - Sleeps while word holds expected, until a futex_wake on it.
+- [`thread/futex_wait_until.hpp`](3-system.md#threadfutexwaituntilhpp) - futex_wait with a deadline on the monotonic clock (sys::now(clock::monotonic) nanoseconds): errc:...
+- [`thread/futex_wake.hpp`](3-system.md#threadfutexwakehpp) - Wakes up to count threads sleeping in futex_wait on word; ca::limits\<u32>::max() wakes all.
 - [`thread/thread_key.hpp`](3-system.md#threadthreadkeyhpp) - A per-thread slot from thread_key_create, holding one pointer per thread.
 - [`thread/thread_key_create.hpp`](3-system.md#threadthreadkeycreatehpp) - A new per-thread slot, null in every thread.
 - [`thread/thread_key_set.hpp`](3-system.md#threadthreadkeysethpp) - Stores value in the calling thread's slot of key.
+- [`thread/yield.hpp`](3-system.md#threadyieldhpp) - Gives the CPU to another runnable thread, if any.
 - [`thread/impl/key_table.hpp`](3-system.md#threadimplkeytablehpp) - Thread keys without libc, for a process of one thread (ca starts none yet): one value per key, pr...
 - [`time/calendar_time.hpp`](3-system.md#timecalendartimehpp) - A moment as a date and time of day in some time zone, by utc_time or local_time.
 - [`time/clock.hpp`](3-system.md#timeclockhpp) - Clocks to read with now().
@@ -559,6 +569,7 @@ Layer 3: the boundary with the operating system.
 - [`time/utc_time.hpp`](3-system.md#timeutctimehpp) - Date and time of seconds since the epoch, in UTC.
 - [`time/impl/calendar_of.hpp`](3-system.md#timeimplcalendarofhpp)
 - [`time/impl/civil.hpp`](3-system.md#timeimplcivilhpp)
+- [`time/impl/deadline_after.hpp`](3-system.md#timeimpldeadlineafterhpp)
 - [`time/impl/time_zone.hpp`](3-system.md#timeimpltimezonehpp)
 - [`trace/attach.hpp`](3-system.md#traceattachhpp) - Gives error's trace backtrace, unless it has one already (the one nearest the origin stays) or er...
 - [`trace/backtrace.hpp`](3-system.md#tracebacktracehpp) - The calls leading to a point, innermost first: one address per frame, inside its call instruction...
@@ -806,6 +817,7 @@ The include facade: what programs include.
 - [`string_writer.hpp`](ca.md#stringwriterhpp) - `#include "ca/string_writer.hpp"`: 5-collections/io/string_writer.hpp.
 - [`sv.hpp`](ca.md#svhpp) - `#include "ca/sv.hpp"`: 2-vocabulary/sv/.
 - [`symbolizer.hpp`](ca.md#symbolizerhpp) - `#include "ca/symbolizer.hpp"`: 6-resources/trace/symbolizer.hpp.
+- [`sync.hpp`](ca.md#synchpp) - `#include "ca/sync.hpp"`: 3-system/sync/.
 - [`syscall.hpp`](ca.md#syscallhpp) - `#include "ca/syscall.hpp"`: 3-system/syscall/.
 - [`text.hpp`](ca.md#texthpp) - `#include "ca/text.hpp"`: 1-primitives/text/, 3-system/text/.
 - [`text_writer.hpp`](ca.md#textwriterhpp) - `#include "ca/text_writer.hpp"`: 5-collections/format/text_writer.hpp.

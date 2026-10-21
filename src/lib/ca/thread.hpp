@@ -3,7 +3,11 @@
 #ifndef ca_include_thread_hpp
 #define ca_include_thread_hpp
 
+#include "3-system/thread/futex_wait.hpp"
+#include "3-system/thread/futex_wait_until.hpp"
+#include "3-system/thread/futex_wake.hpp"
 #include "3-system/thread/thread_key_create.hpp"
 #include "3-system/thread/thread_key_set.hpp"
+#include "3-system/thread/yield.hpp"
 
 #endif // ca_include_thread_hpp
