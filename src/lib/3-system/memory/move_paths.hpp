@@ -5,6 +5,7 @@
 #include "1-primitives/integers/usz.hpp"
 #include "1-primitives/memory/impl/loose_bytes.hpp"
 #include "1-primitives/memory/impl/move_paths.hpp"
+#include "1-primitives/simd/vec.hpp"
 #include "2-vocabulary/failure.hpp"
 #include "2-vocabulary/result.hpp"
 #include "3-system/error/errc.hpp"
@@ -52,7 +53,7 @@ namespace ca {
 
 			if (count < 16U || count > 32U) [[unlikely]]
 				return ca::impl::move_size_out_of_range();
-			ca::impl::move_two<ca::impl::bytes16>(static_cast<char*>(to), static_cast<const char*>(from), count);
+			ca::impl::move_two<ca::simd::vec<char, 16U>>(static_cast<char*>(to), static_cast<const char*>(from), count);
 			return ca::result<void>{};
 		}
 
@@ -61,7 +62,7 @@ namespace ca {
 
 			if (count < 32U || count > 64U) [[unlikely]]
 				return ca::impl::move_size_out_of_range();
-			ca::impl::move_four<ca::impl::bytes16>(static_cast<char*>(to), static_cast<const char*>(from), count);
+			ca::impl::move_four<ca::simd::vec<char, 16U>>(static_cast<char*>(to), static_cast<const char*>(from), count);
 			return ca::result<void>{};
 		}
 
@@ -70,7 +71,7 @@ namespace ca {
 
 			if (count < 64U || count > 128U) [[unlikely]]
 				return ca::impl::move_size_out_of_range();
-			ca::impl::move_eight<ca::impl::bytes16>(static_cast<char*>(to), static_cast<const char*>(from), count);
+			ca::impl::move_eight<ca::simd::vec<char, 16U>>(static_cast<char*>(to), static_cast<const char*>(from), count);
 			return ca::result<void>{};
 		}
 
@@ -152,7 +153,7 @@ namespace ca {
 
 				if (count < 32U || count > 64U) [[unlikely]]
 					return ca::impl::move_size_out_of_range();
-				ca::impl::move_two<ca::impl::bytes32>(static_cast<char*>(to), static_cast<const char*>(from), count);
+				ca::impl::move_two<ca::simd::vec<char, 32U>>(static_cast<char*>(to), static_cast<const char*>(from), count);
 				return ca::result<void>{};
 			}
 
@@ -161,7 +162,7 @@ namespace ca {
 
 				if (count < 64U || count > 128U) [[unlikely]]
 					return ca::impl::move_size_out_of_range();
-				ca::impl::move_four<ca::impl::bytes32>(static_cast<char*>(to), static_cast<const char*>(from), count);
+				ca::impl::move_four<ca::simd::vec<char, 32U>>(static_cast<char*>(to), static_cast<const char*>(from), count);
 				return ca::result<void>{};
 			}
 
@@ -170,7 +171,7 @@ namespace ca {
 
 				if (count < 128U || count > 256U) [[unlikely]]
 					return ca::impl::move_size_out_of_range();
-				ca::impl::move_eight<ca::impl::bytes32>(static_cast<char*>(to), static_cast<const char*>(from), count);
+				ca::impl::move_eight<ca::simd::vec<char, 32U>>(static_cast<char*>(to), static_cast<const char*>(from), count);
 				return ca::result<void>{};
 			}
 

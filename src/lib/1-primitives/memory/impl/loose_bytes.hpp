@@ -11,12 +11,6 @@ namespace ca {
 
 	namespace impl {
 
-		/* @DOC 16 bytes in an SSE register. */
-		using bytes16 [[gnu::vector_size(16)]] = char;
-
-		/* @DOC 32 bytes in an AVX register. */
-		using bytes32 [[gnu::vector_size(32)]] = char;
-
 		/* @DOC T at any address and of any type: an unaligned, aliasing load or store. A struct,
 		   because attributes on an alias are lost when it is a template argument. */
 		template <typename T>

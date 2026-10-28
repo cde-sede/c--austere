@@ -17,6 +17,7 @@ The folders are independent groups, each with its umbrella in the facade (`ca/bi
 | `integers/` | exact-width aliases (`u8` .. `i64`, `usz`, `isz`, `byte`) |
 | `memory/` | object lifetime (construct, destroy, relocate, launder) and byte primitives |
 | `numeric/` | overflow-checked arithmetic, min, max, align_up |
+| `simd/` | vector types, lane masks, splat, loads and stores (the vector extensions, wrapped) |
 | `text/` | the code unit types |
 | `traits/` | every std type trait, as concepts where they answer yes or no |
 | `utility/` | move, forward, exchange, swap, declval, initializer_list |
@@ -1397,48 +1398,6 @@ Every path loads all it copies before storing, so overlapping ranges need no sep
 
 `move_paths.hpp` holds those pieces, always inlined; `loose_bytes.hpp` the unaligned, aliasing loads and stores they use (`loose<T>(p)`: a T read at any address, through a packed `may_alias` struct, since attributes on an alias are lost as template arguments). The out-of-line strategies are exposed to layer 3 as `ca::move_paths`, for benchmarks and tests that need to call one strategy directly.
 
-## `memory/impl/byte_vectors.hpp`
-
-### function `impl::byte_mask`
-
-```c++
-[[gnu::always_inline]] inline auto byte_mask(const ca::impl::bytes16& v) noexcept -> ca::u32;
-```
-
-Bit i set when byte i of v has its high bit set (pmovmskb): of an equality result, the lanes that compared equal.
-
-### function `impl::byte_mask`
-
-```c++
-[[gnu::target("avx2")]] inline auto byte_mask(const ca::impl::bytes32& v) noexcept -> ca::u32;
-```
-
-Not always_inline: generic templates calling it are compiled without AVX2; the AVX2 variants are flattened, so it is inlined there. The mask is opaque: clang otherwise tests it with vpxor and vptest (3 uops, then the compare again).
-
-### function `impl::peek`
-
-```c++
-[[gnu::always_inline]] inline auto peek(const char* const p, ca::impl::bytes16& v) noexcept -> void;
-```
-
-16 or 32 bytes at p into v, in asm: the compiler sees no access beyond the range the caller owns, which these loads may pass, never beyond p's page (the caller checks). The 16-byte one is legacy SSE (AVX state is clean at entry); the 32-byte one, as byte_mask, by reference (no vector crosses an ABI).
-
-### function `impl::peek_aligned`
-
-```c++
-[[gnu::always_inline]] inline auto peek_aligned(const char* const p, ca::impl::bytes16& v) noexcept -> void;
-```
-
-peek at p aligned to the vector size: such a load never crosses a page, so it may cover bytes before and after any range inside it.
-
-### function `impl::broadcast`
-
-```c++
-[[gnu::target("avx2")]] inline auto broadcast(const int value, ca::impl::bytes32& v) noexcept -> void;
-```
-
-The low byte of value in every lane of v: vmovd and vpbroadcastb. A 32-bit word broadcast puts an imul on the path to the first use (memchr 16 - 256 B 7 - 13% slower); V{} + value is vpinsrb lane by lane on gcc. By reference, as peek.
-
 ## `memory/impl/compare_bytes.hpp`
 
 ### alias `compare_bytes_function`
@@ -1552,22 +1511,6 @@ auto find_byte_sse2(const void* data, int value, ca::usz count) noexcept -> void
 The variants find_byte_variant and string_length_variant pick from, for tests: every x86-64 CPU runs the sse2 ones, the avx2 ones need AVX2 and BMI2.
 
 ## `memory/impl/loose_bytes.hpp`
-
-### function `impl::vector_size`
-
-```c++
-using bytes16 [[gnu::vector_size(16)]] = char;
-```
-
-16 bytes in an SSE register.
-
-### function `impl::vector_size`
-
-```c++
-using bytes32 [[gnu::vector_size(32)]] = char;
-```
-
-32 bytes in an AVX register.
 
 ### struct `impl::loose_bytes`
 
@@ -1792,6 +1735,339 @@ requires (ca::is_integral<R> && ca::is_integral<A> && ca::is_integral<B> && (ca:
 ```
 
 out = a - b - cs...; true on overflow (out then holds the wrapped value).
+
+## `simd/`
+
+Vectors: one register of N lanes, and what an algorithm needs around the compiler's vector type to use it. Arithmetic is the compiler's own: `ca::simd::vec<T, N>` is the GCC/clang vector extension type, so `+ - * & | ^ ~ << >>`, the comparisons (lanes of all ones where true, zeros where false) and `?:` work lane by lane, on clang and gcc alike, with no wrapper to see through. This folder adds the parts the operators do not give: lanes to a bitmask, a value into every lane, and loads and stores that are defined behaviour.
+
+There are no SIMD versions of containers or algorithms here: `ca::find_byte`, the hash table, the unicode validators use these inside, and stay the one name to call.
+
+| Name | Does |
+|---|---|
+| `vec<T, N>` | N lanes of T; 16 bytes is SSE2 (and NEON), 32 bytes AVX2 |
+| `lanes<V>`, `lane_of<V>` | N and T of a vector type |
+| `mask<N>` | one bit per lane: `any`, `all`, `none`, `count`, `first`, `last`, `test`, `below`, `from`, the bitwise operators; `for (ca::usz lane : m)` walks the set lanes |
+| `mask_of(v)` | the lanes whose high bit is set: of a comparison, the lanes where it holds (pmovmskb for byte lanes) |
+| `splat(value, v)` | value in every lane |
+| `load(p, v)`, `store(p, v)` | sizeof(V) bytes at p, any alignment, any type of memory there |
+| `load_aligned`, `store_aligned` | the same at p aligned to sizeof(V) |
+| `peek(p, v)`, `peek_aligned(p, v)` | x86-64: a load the compiler does not see, which may read past the caller's range, never past p's page |
+
+Every function writes its vector result to a reference instead of returning it: a vector of 32 bytes returned or passed by value from code compiled without AVX changes the ABI, which clang rejects and gcc warns about (an error under -Werror). Inside one function, vectors are values like any other.
+
+```c++
+#include "ca/integers.hpp"
+#include "ca/simd.hpp"
+
+using bytes = ca::simd::vec<ca::u8, 16U>;
+
+static auto count_byte(const ca::u8* const data, const ca::u8 needle) noexcept -> ca::usz {
+	bytes v;
+	bytes n;
+	ca::simd::load(data, v);
+	ca::simd::splat(needle, n);
+	return ca::simd::mask_of(v == n).count();
+}
+
+auto main(void) -> int {
+	const ca::u8 data[16] = {'a', 'b', 'a', 'c', 'a', 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 'a'};
+	if (count_byte(data, 'a') != 4U)
+		return 1;
+	bytes v;
+	ca::simd::load(data, v);
+	ca::usz sum = 0U;
+	for (const ca::usz lane : ca::simd::mask_of(v == 'a'))
+		sum += lane;
+	return sum == 0U + 2U + 4U + 15U ? 0 : 2;
+}
+```
+
+Wider vectors need their instructions enabled in the function using them, and the CPU to have them. ca compiles for baseline x86-64 (SSE2), so a 32-byte path is a function marked `[[gnu::target("avx2")]]`, picked at run time; the byte primitives of `memory/` do it once per function, on the first call (cpuid). Helpers such as `mask_of` for 32 lanes are themselves AVX2 functions, not `always_inline`: a generic template calling them builds without AVX2, and an AVX2 caller marked `[[gnu::flatten]]` inlines them.
+
+`mask_of` and `splat` are constexpr: at compile time, and for lanes no instruction gathers (16-bit lanes, or a CPU other than x86-64), they go lane by lane. `peek` exists only on x86-64, where its asm is written; elsewhere read only what is in range.
+
+## `simd/lane_of.hpp`
+
+### alias `lane_of`
+
+```c++
+template <typename V>
+using lane_of = ca::remove_cvref<decltype(ca::declval<V&>()[0])>;
+```
+
+The lane type of the vector type V: T of ca::simd::vec<T, N>.
+
+## `simd/lanes.hpp`
+
+### variable `lanes`
+
+```c++
+template <typename V>
+inline constexpr ca::usz lanes = sizeof(V) / sizeof(ca::simd::lane_of<V>);
+```
+
+The lane count of the vector type V: N of ca::simd::vec<T, N>.
+
+## `simd/load.hpp`
+
+### function `load`
+
+```c++
+template <typename V>
+[[gnu::always_inline]] inline auto load(const void* const p, V& v) noexcept -> void;
+```
+
+The sizeof(V) bytes at p into v: any alignment, any type of the memory there. Every byte must be in a live object; to read past a range, ca::simd::peek.
+
+## `simd/load_aligned.hpp`
+
+### function `load_aligned`
+
+```c++
+template <typename V>
+[[gnu::always_inline]] inline auto load_aligned(const void* const p, V& v) noexcept -> void;
+```
+
+ca::simd::load from p aligned to sizeof(V): one aligned load (movdqa), which faults on a misaligned p.
+
+## `simd/mask.hpp`
+
+### class `mask`
+
+```c++
+template <ca::usz N>
+requires (N >= 1U && N <= 64U)
+class mask final;
+```
+
+One bit per lane of a vector of N lanes, bit i for lane i: what ca::simd::mask_of makes of a comparison. In a 32-bit word up to 32 lanes, else 64; the bits from N are always clear. `for (ca::usz lane : m)` walks the set lanes in increasing order.
+
+### class `mask::iterator`
+
+```c++
+class iterator final;
+```
+
+Walks the set lanes of a mask, in increasing order.
+
+### function `mask::iterator::operator*`
+
+```c++
+[[nodiscard, gnu::always_inline]] constexpr auto operator*(void) const noexcept -> ca::usz;
+```
+
+The current lane.
+
+### function `mask::mask`
+
+```c++
+constexpr mask(void) noexcept
+: _bits{0U};
+```
+
+No lane set.
+
+### function `mask::mask`
+
+```c++
+[[gnu::always_inline]] constexpr explicit mask(const word bits) noexcept
+: _bits{bits};
+```
+
+Lane i set when bit i of bits is; the bits from N must be clear.
+
+### function `mask::full`
+
+```c++
+[[nodiscard]] static constexpr auto full(void) noexcept -> self;
+```
+
+Every lane set.
+
+### function `mask::bits`
+
+```c++
+[[nodiscard, gnu::always_inline]] constexpr auto bits(void) const noexcept -> word;
+```
+
+The lanes as a word, bit i for lane i.
+
+### function `mask::test`
+
+```c++
+[[nodiscard, gnu::always_inline]] constexpr auto test(const ca::usz lane) const noexcept -> bool;
+```
+
+Whether lane is set; false from N.
+
+### function `mask::count`
+
+```c++
+[[nodiscard, gnu::always_inline]] constexpr auto count(void) const noexcept -> ca::usz;
+```
+
+Set lanes.
+
+### function `mask::first`
+
+```c++
+[[nodiscard, gnu::always_inline]] constexpr auto first(void) const noexcept -> ca::usz;
+```
+
+The lowest set lane; at least N when none is.
+
+### function `mask::last`
+
+```c++
+[[nodiscard, gnu::always_inline]] constexpr auto last(void) const noexcept -> ca::usz;
+```
+
+The highest set lane; at least N when none is.
+
+### function `mask::below`
+
+```c++
+[[nodiscard, gnu::always_inline]] constexpr auto below(const ca::usz count) const noexcept -> self;
+```
+
+The set lanes below count, all of them from N.
+
+### function `mask::from`
+
+```c++
+[[nodiscard, gnu::always_inline]] constexpr auto from(const ca::usz count) const noexcept -> self;
+```
+
+The set lanes from count, none from N.
+
+### function `mask::operator~`
+
+```c++
+[[nodiscard, gnu::always_inline]] constexpr auto operator~(void) const noexcept -> self;
+```
+
+The lanes not set, of the N.
+
+## `simd/mask_of.hpp`
+
+### function `impl::high_bits`
+
+```c++
+template <typename V>
+[[nodiscard]] constexpr auto high_bits(const V& v) noexcept -> typename ca::simd::mask<ca::simd::lanes<V>>::word;
+```
+
+Bit i set when lane i of v has its high bit set, lane by lane: compile time, and the lanes no instruction gathers.
+
+### function `impl::byte_mask`
+
+```c++
+template <typename V>
+requires (sizeof(V) == 16U)
+[[nodiscard, gnu::always_inline]] inline auto byte_mask(const V& v) noexcept -> ca::u32;
+```
+
+pmovmskb over 16 byte lanes.
+
+### function `impl::byte_mask`
+
+```c++
+template <typename V>
+requires (sizeof(V) == 32U)
+[[nodiscard, gnu::target("avx2")]] inline auto byte_mask(const V& v) noexcept -> ca::u32;
+```
+
+vpmovmskb over 32 byte lanes. Not always_inline: generic templates calling it are compiled without AVX2; AVX2 callers flattened inline it. The mask is opaque: clang otherwise tests it with vpxor and vptest (3 uops, then the compare again).
+
+### variable `?`
+
+```c++
+template <typename V>
+requires (ca::simd::lanes<V> <= 64U)
+[[nodiscard, gnu::always_inline]] constexpr auto mask_of(const V& v) noexcept -> ca::simd::mask<ca::simd::lanes<V>>;
+```
+
+The lanes of v whose high bit is set: of a comparison (lanes of all ones or zeros), the lanes where it holds. Byte lanes of 16 and 32 are one pmovmskb on x86-64 (32 in AVX2 code); other vectors, and every one at compile time, are gathered lane by lane.
+
+## `simd/peek.hpp`
+
+### function `peek`
+
+```c++
+template <typename V>
+requires (sizeof(V) == 16U)
+[[gnu::always_inline]] inline auto peek(const void* const p, V& v) noexcept -> void;
+```
+
+The 16 or 32 bytes at p into v, any alignment, in asm: the compiler sees no access beyond the range the caller owns, which the load may pass, never beyond p's page (the caller checks: p's offset in its 4 KiB page at most 4096 - sizeof(V)). The 16-byte one is legacy SSE (AVX state is clean at entry), the 32-byte one AVX2 code. x86-64 only.
+
+## `simd/peek_aligned.hpp`
+
+### function `peek_aligned`
+
+```c++
+template <typename V>
+requires (sizeof(V) == 16U)
+[[gnu::always_inline]] inline auto peek_aligned(const void* const p, V& v) noexcept -> void;
+```
+
+ca::simd::peek at p aligned to sizeof(V): such a load never crosses a page, so it may cover bytes before and after any range inside it with no check. x86-64 only.
+
+## `simd/splat.hpp`
+
+### function `impl::broadcast_byte`
+
+```c++
+template <typename V>
+requires (sizeof(V) == 32U)
+[[gnu::target("avx2")]] inline auto broadcast_byte(const int value, V& v) noexcept -> void;
+```
+
+The low byte of value in every lane of v: vmovd and vpbroadcastb. A 32-bit word broadcast puts an imul on the path to the first use (memchr 16 - 256 B 7 - 13% slower); V{} + value is vpinsrb lane by lane on gcc.
+
+### function `splat`
+
+```c++
+template <typename V, typename T>
+requires ca::is_arithmetic<T>
+[[gnu::always_inline]] constexpr auto splat(const T value, V& v) noexcept -> void;
+```
+
+value, converted to the lane type, in every lane of v. Byte lanes take the low byte of any integer: 16 of them are a 32-bit word pattern (gcc builds V{} + value one vpinsrb at a time), 32 a vpbroadcastb in AVX2 code.
+
+## `simd/store.hpp`
+
+### function `store`
+
+```c++
+template <typename V>
+[[gnu::always_inline]] inline auto store(void* const p, const V& v) noexcept -> void;
+```
+
+v into the sizeof(V) bytes at p: any alignment, any type of the memory there.
+
+## `simd/store_aligned.hpp`
+
+### function `store_aligned`
+
+```c++
+template <typename V>
+[[gnu::always_inline]] inline auto store_aligned(void* const p, const V& v) noexcept -> void;
+```
+
+ca::simd::store to p aligned to sizeof(V): one aligned store (movdqa), which faults on a misaligned p.
+
+## `simd/vec.hpp`
+
+### alias `vec`
+
+```c++
+template <typename T, ca::usz N>
+requires ca::is_arithmetic<T> && (ca::has_single_bit(N))
+using vec = typename ca::simd::impl::vec_of<T, N>::type;
+```
+
+N lanes of T in one vector register: the compiler's vector type, with its lane-wise operators (+, -, *, &, |, ^, ~, <<, >>, comparisons giving lanes of all ones or zeros, ?: selecting lane by lane) and subscript. N a power of two; 16 bytes is SSE2 and NEON, 32 AVX2. A vector wider than 16 bytes never crosses a call by value where its instructions are off (the ABI differs, clang rejects it): the functions of ca::simd write their result to a reference.
 
 ## `text/`
 

@@ -18,6 +18,7 @@ The folders are independent groups, each with its umbrella in the facade (`ca/bi
 | `integers/` | exact-width aliases (`u8` .. `i64`, `usz`, `isz`, `byte`) |
 | `memory/` | object lifetime (construct, destroy, relocate, launder) and byte primitives |
 | `numeric/` | overflow-checked arithmetic, min, max, align_up |
+| `simd/` | vector types, lane masks, splat, loads and stores (the vector extensions, wrapped) |
 | `text/` | the code unit types |
 | `traits/` | every std type trait, as concepts where they answer yes or no |
 | `utility/` | move, forward, exchange, swap, declval, initializer_list |

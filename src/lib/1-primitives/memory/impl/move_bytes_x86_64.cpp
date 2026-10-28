@@ -148,6 +148,7 @@
 #include "1-primitives/memory/impl/loose_bytes.hpp"
 #include "1-primitives/memory/impl/move_paths.hpp"
 #include "1-primitives/numeric/min.hpp"
+#include "1-primitives/simd/vec.hpp"
 
 #if ca_architecture(x86_64)
 
@@ -169,30 +170,14 @@ namespace ca {
 
 	namespace impl {
 
-		/* @DOC The vector type of N bytes. */
-		template <ca::usz N>
-		struct byte_lanes;
-
-		template <>
-		struct byte_lanes<16U> final {
-				using self = ca::impl::byte_lanes<16U>;
-				using type = ca::impl::bytes16;
-		}; // struct byte_lanes
-
-		template <>
-		struct byte_lanes<32U> final {
-				using self = ca::impl::byte_lanes<32U>;
-				using type = ca::impl::bytes32;
-		}; // struct byte_lanes
-
 		/* @DOC Four vectors of N bytes, the unit of the copy loops. */
 		template <ca::usz N>
 		struct byte_block final {
 				using self = ca::impl::byte_block<N>;
-				typename ca::impl::byte_lanes<N>::type _v0;
-				typename ca::impl::byte_lanes<N>::type _v1;
-				typename ca::impl::byte_lanes<N>::type _v2;
-				typename ca::impl::byte_lanes<N>::type _v3;
+				ca::simd::vec<char, N> _v0;
+				ca::simd::vec<char, N> _v1;
+				ca::simd::vec<char, N> _v2;
+				ca::simd::vec<char, N> _v3;
 		}; // struct byte_block
 
 	} // namespace impl
@@ -254,7 +239,7 @@ static auto address(const void* const pointer) noexcept -> ca::usz {
 template <ca::usz N>
 [[gnu::always_inline]] static inline auto move_loop(char*& to, const char*& from, char* const stop) noexcept -> void {
 
-	using vector = typename ca::impl::byte_lanes<N>::type;
+	using vector = ca::simd::vec<char, N>;
 	for (; to < stop; to += 4U * N, from += 4U * N) {
 		const vector v0 = load<vector>(from);
 		const vector v1 = load<vector>(from + N);
@@ -271,14 +256,14 @@ template <ca::usz N>
 template <ca::usz N>
 [[gnu::always_inline]] static inline auto load_block(const char* const from) noexcept -> ca::impl::byte_block<N> {
 
-	using vector = typename ca::impl::byte_lanes<N>::type;
+	using vector = ca::simd::vec<char, N>;
 	return {load<vector>(from), load<vector>(from + N), load<vector>(from + 2U * N), load<vector>(from + 3U * N)};
 }
 
 template <ca::usz N>
 [[gnu::always_inline]] static inline auto store_block(char* const to, const ca::impl::byte_block<N>& block) noexcept -> void {
 
-	using vector = typename ca::impl::byte_lanes<N>::type;
+	using vector = ca::simd::vec<char, N>;
 	store_aligned<vector>(to, block._v0);
 	store_aligned<vector>(to + N, block._v1);
 	store_aligned<vector>(to + 2U * N, block._v2);
@@ -337,7 +322,7 @@ template <ca::usz N>
 template <ca::usz N, bool AHEAD>
 [[gnu::always_inline]] static inline auto move_forward(char* to, const char* from, const ca::usz count) noexcept -> void {
 
-	using vector = typename ca::impl::byte_lanes<N>::type;
+	using vector = ca::simd::vec<char, N>;
 	char* const start = to;
 	char* const end = to + count;
 	const vector head = load<vector>(from);
@@ -362,7 +347,7 @@ template <ca::usz N, bool AHEAD>
 template <ca::usz N>
 [[gnu::always_inline]] static inline auto move_backward(char* const to, const char* const from, const ca::usz count) noexcept -> void {
 
-	using vector = typename ca::impl::byte_lanes<N>::type;
+	using vector = ca::simd::vec<char, N>;
 	const vector tail = load<vector>(from + count - N);
 	const vector h0 = load<vector>(from);
 	const vector h1 = load<vector>(from + N);
@@ -393,7 +378,7 @@ template <ca::usz N>
 template <ca::usz N>
 [[gnu::always_inline]] static inline auto move_repeat(char* to, const char* from, ca::usz count) noexcept -> void {
 
-	using vector = typename ca::impl::byte_lanes<N>::type;
+	using vector = ca::simd::vec<char, N>;
 	char* const start = to;
 	const vector h0 = load<vector>(from);
 	const vector h1 = load<vector>(from + N);
@@ -413,7 +398,7 @@ template <ca::usz N>
 template <ca::usz N>
 [[gnu::always_inline]] static inline auto move_stream(char* to, const char* from, const ca::usz count) noexcept -> void {
 
-	using vector = typename ca::impl::byte_lanes<N>::type;
+	using vector = ca::simd::vec<char, N>;
 	char* const start = to;
 	char* const end = to + count;
 	const vector h0 = load<vector>(from);
@@ -484,7 +469,7 @@ template <ca::usz N>
 template <ca::usz N>
 [[gnu::always_inline]] static inline auto move_any(void* const target, const void* const source, const ca::usz count) noexcept -> void {
 
-	using vector = typename ca::impl::byte_lanes<N>::type;
+	using vector = ca::simd::vec<char, N>;
 	char* const to = static_cast<char*>(target);
 	const char* const from = static_cast<const char*>(source);
 	if (count < N) [[unlikely]] {

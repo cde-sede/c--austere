@@ -45,9 +45,12 @@
 #include "1-primitives/integers/u32.hpp"
 #include "1-primitives/integers/u64.hpp"
 #include "1-primitives/integers/u8.hpp"
-#include "1-primitives/memory/impl/byte_vectors.hpp"
 #include "1-primitives/memory/impl/cpu_features.hpp"
-#include "1-primitives/memory/impl/loose_bytes.hpp"
+#include "1-primitives/simd/mask_of.hpp"
+#include "1-primitives/simd/peek.hpp"
+#include "1-primitives/simd/peek_aligned.hpp"
+#include "1-primitives/simd/splat.hpp"
+#include "1-primitives/simd/vec.hpp"
 
 #if ca_architecture(x86_64)
 
@@ -79,7 +82,7 @@ template <typename V>
 [[gnu::always_inline]] static inline auto load(const char* const at) noexcept -> V {
 
 	V v;
-	ca::impl::peek_aligned(at, v);
+	ca::simd::peek_aligned(at, v);
 	return v;
 }
 
@@ -88,8 +91,14 @@ template <typename V>
 [[gnu::always_inline]] static inline auto loose(const char* const at) noexcept -> V {
 
 	V v;
-	ca::impl::peek(at, v);
+	ca::simd::peek(at, v);
 	return v;
+}
+
+/* Bits set where the lanes of v are all ones. */
+template <typename V>
+[[gnu::always_inline]] static inline auto byte_mask(const V& v) noexcept -> ca::u32 {
+	return ca::simd::mask_of(v).bits();
 }
 
 /* Lanes of 0xff where the bytes of v equal those of needle. */
@@ -101,19 +110,19 @@ template <typename V>
 /* Bits set where the bytes of v equal those of needle. */
 template <typename V>
 [[gnu::always_inline]] static inline auto matches(const V& v, const V& needle) noexcept -> ca::u64 {
-	return ca::impl::byte_mask(equal(v, needle));
+	return byte_mask(equal(v, needle));
 }
 
 /* equal on the aligned vector at, the load folded into the compare (one fused uop), in asm as
    peek_aligned. */
-[[gnu::always_inline]] static inline auto equal_at(const char* const at, const ca::impl::bytes16& needle) noexcept -> ca::impl::bytes16 {
+[[gnu::always_inline]] static inline auto equal_at(const char* const at, const ca::simd::vec<char, 16U>& needle) noexcept -> ca::simd::vec<char, 16U> {
 
-	ca::impl::bytes16 lanes;
+	ca::simd::vec<char, 16U> lanes;
 	asm("pcmpeqb %1, %0" : "=x"(lanes) : "m"(*reinterpret_cast<const char(*)[16]>(at)), "0"(needle));
 	return lanes;
 }
 
-[[gnu::target("avx2")]] static inline auto equal_at(const char* const at, const ca::impl::bytes32& needle, ca::impl::bytes32& lanes) noexcept -> void {
+[[gnu::target("avx2")]] static inline auto equal_at(const char* const at, const ca::simd::vec<char, 32U>& needle, ca::simd::vec<char, 32U>& lanes) noexcept -> void {
 	asm("vpcmpeqb %1, %2, %0" : "=x"(lanes) : "m"(*reinterpret_cast<const char(*)[32]>(at)), "x"(needle));
 }
 
@@ -126,14 +135,14 @@ template <typename V>
 }
 
 /* Lane-wise unsigned minimum of v and the aligned vector at, the load folded, as equal_at. */
-[[gnu::always_inline]] static inline auto least_at(const char* const at, const ca::impl::bytes16& v) noexcept -> ca::impl::bytes16 {
+[[gnu::always_inline]] static inline auto least_at(const char* const at, const ca::simd::vec<char, 16U>& v) noexcept -> ca::simd::vec<char, 16U> {
 
-	ca::impl::bytes16 lanes;
+	ca::simd::vec<char, 16U> lanes;
 	asm("pminub %1, %0" : "=x"(lanes) : "m"(*reinterpret_cast<const char(*)[16]>(at)), "0"(v));
 	return lanes;
 }
 
-[[gnu::target("avx2")]] static inline auto least_at(const char* const at, const ca::impl::bytes32& v, ca::impl::bytes32& lanes) noexcept -> void {
+[[gnu::target("avx2")]] static inline auto least_at(const char* const at, const ca::simd::vec<char, 32U>& v, ca::simd::vec<char, 32U>& lanes) noexcept -> void {
 	asm("vpminub %1, %2, %0" : "=x"(lanes) : "m"(*reinterpret_cast<const char(*)[32]>(at)), "x"(v));
 }
 
@@ -145,18 +154,14 @@ template <typename V>
 	return lanes;
 }
 
-/* value in every byte: broadcast for 32-byte vectors (mixed sizes 1.06 -> 1.02 against glibc),
-   else as 32-bit words, as fill_bytes. */
+/* value in every byte: a broadcast for 32-byte vectors (mixed sizes 1.06 -> 1.02 against
+   glibc), else as 32-bit words, as fill_bytes. */
 template <typename V>
 [[gnu::always_inline]] static inline auto splat(const int value) noexcept -> V {
-	if constexpr (sizeof(V) == 32U) {
-		V lanes;
-		ca::impl::broadcast(value, lanes);
-		return lanes;
-	} else {
-		using words [[gnu::vector_size(sizeof(V))]] = ca::u32;
-		return __builtin_bit_cast(V, words{} + static_cast<ca::u8>(value) * 0x01010101U);
-	}
+
+	V lanes;
+	ca::simd::splat(value, lanes);
+	return lanes;
 }
 
 /* Lane-wise unsigned minimum: a zero in either lane stays zero. */
@@ -206,11 +211,11 @@ template <typename V>
 	constexpr ca::usz n = sizeof(V);
 	const V zero{};
 	const char* at = text - (address(text) & (n - 1U));
-	const ca::u64 head = ca::impl::byte_mask(equal_at(at, zero)) >> (address(text) & (n - 1U));
+	const ca::u64 head = byte_mask(equal_at(at, zero)) >> (address(text) & (n - 1U));
 	if (head != 0U)
 		return static_cast<ca::usz>(__builtin_ctzll(head));
 	for (ca::usz k = 1U; k < 4U; ++k) {
-		const ca::u64 found = ca::impl::byte_mask(equal_at(at + k * n, zero));
+		const ca::u64 found = byte_mask(equal_at(at + k * n, zero));
 		if (found != 0U)
 			return static_cast<ca::usz>(at + k * n - text) + static_cast<ca::usz>(__builtin_ctzll(found));
 	}
@@ -225,10 +230,10 @@ template <typename V>
 		unlink(at);
 	} while (any == 0U);
 	at -= 4U * n;
-	const ca::u64 m0 = ca::impl::byte_mask(equal_at(at, zero));
-	const ca::u64 m1 = ca::impl::byte_mask(equal_at(at + n, zero));
-	const ca::u64 m2 = ca::impl::byte_mask(equal_at(at + 2U * n, zero));
-	const ca::u64 m3 = ca::impl::byte_mask(equal_at(at + 3U * n, zero));
+	const ca::u64 m0 = byte_mask(equal_at(at, zero));
+	const ca::u64 m1 = byte_mask(equal_at(at + n, zero));
+	const ca::u64 m2 = byte_mask(equal_at(at + 2U * n, zero));
+	const ca::u64 m3 = byte_mask(equal_at(at + 3U * n, zero));
 	return static_cast<ca::usz>(at - text) + first_of<n>(m0, m1, m2, m3);
 }
 
@@ -250,7 +255,7 @@ template <typename V>
 		span = n;
 	} else {
 		const ca::usz skip = address(start) & (n - 1U);
-		head = ca::impl::byte_mask(equal_at(start - skip, needle)) >> skip;
+		head = byte_mask(equal_at(start - skip, needle)) >> skip;
 		span = n - skip;
 	}
 	if (count <= span) {
@@ -267,14 +272,14 @@ template <typename V>
 		const V e1 = equal_at(at + n, needle);
 		const V e2 = equal_at(at + 2U * n, needle);
 		const V e3 = equal_at(at + 3U * n, needle);
-		if (ca::impl::byte_mask((e0 | e1) | (e2 | e3)) != 0U) [[unlikely]] {
-			const ca::usz index = first_of<n>(ca::impl::byte_mask(e0), ca::impl::byte_mask(e1), ca::impl::byte_mask(e2), ca::impl::byte_mask(e3));
+		if (byte_mask((e0 | e1) | (e2 | e3)) != 0U) [[unlikely]] {
+			const ca::usz index = first_of<n>(byte_mask(e0), byte_mask(e1), byte_mask(e2), byte_mask(e3));
 			return const_cast<char*>(at + index);
 		}
 		unlink(at);
 	}
 	const ca::usz left = static_cast<ca::usz>(end - at);
-	const ca::u64 first = ca::impl::byte_mask(equal_at(at, needle));
+	const ca::u64 first = byte_mask(equal_at(at, needle));
 	if (left <= n) {
 		const ca::u64 kept = cut<V>(first, left);
 		return kept != 0U ? const_cast<char*>(at + __builtin_ctzll(kept)) : nullptr;
@@ -285,7 +290,7 @@ template <typename V>
 			return nullptr;
 		return const_cast<char*>(first != 0U ? at + __builtin_ctzll(first) : end - n + __builtin_ctzll(last));
 	}
-	const ca::u64 low = first | ca::u64{ca::impl::byte_mask(equal_at(at + n, needle))} << n;
+	const ca::u64 low = first | ca::u64{byte_mask(equal_at(at + n, needle))} << n;
 	if (low != 0U)
 		return const_cast<char*>(at + __builtin_ctzll(low));
 	const ca::u64 high = matches(loose<V>(end - 2U * n), needle) | matches(loose<V>(end - n), needle) << n;
@@ -296,19 +301,19 @@ template <typename V>
 // -- VARIANTS ---------------------------------------------------------------
 
 auto ca::impl::find_byte_sse2(const void* const data, const int value, const ca::usz count) noexcept -> void* {
-	return ::find_byte<ca::impl::bytes16>(data, value, count);
+	return ::find_byte<ca::simd::vec<char, 16U>>(data, value, count);
 }
 
 [[gnu::target("avx2,bmi2"), gnu::flatten]] auto ca::impl::find_byte_avx2(const void* const data, const int value, const ca::usz count) noexcept -> void* {
-	return ::find_byte<ca::impl::bytes32>(data, value, count);
+	return ::find_byte<ca::simd::vec<char, 32U>>(data, value, count);
 }
 
 auto ca::impl::string_length_sse2(const char* const text) noexcept -> ca::usz {
-	return ::string_length<ca::impl::bytes16>(text);
+	return ::string_length<ca::simd::vec<char, 16U>>(text);
 }
 
 [[gnu::target("avx2,bmi2"), gnu::flatten]] auto ca::impl::string_length_avx2(const char* const text) noexcept -> ca::usz {
-	return ::string_length<ca::impl::bytes32>(text);
+	return ::string_length<ca::simd::vec<char, 32U>>(text);
 }
 
 

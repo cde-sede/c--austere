@@ -1,0 +1,63 @@
+Vectors: one register of N lanes, and what an algorithm needs around the compiler's vector
+type to use it. Arithmetic is the compiler's own: `ca::simd::vec<T, N>` is the GCC/clang vector
+extension type, so `+ - * & | ^ ~ << >>`, the comparisons (lanes of all ones where true, zeros
+where false) and `?:` work lane by lane, on clang and gcc alike, with no wrapper to see through.
+This folder adds the parts the operators do not give: lanes to a bitmask, a value into every
+lane, and loads and stores that are defined behaviour.
+
+There are no SIMD versions of containers or algorithms here: `ca::find_byte`, the hash table,
+the unicode validators use these inside, and stay the one name to call.
+
+| Name | Does |
+|---|---|
+| `vec<T, N>` | N lanes of T; 16 bytes is SSE2 (and NEON), 32 bytes AVX2 |
+| `lanes<V>`, `lane_of<V>` | N and T of a vector type |
+| `mask<N>` | one bit per lane: `any`, `all`, `none`, `count`, `first`, `last`, `test`, `below`, `from`, the bitwise operators; `for (ca::usz lane : m)` walks the set lanes |
+| `mask_of(v)` | the lanes whose high bit is set: of a comparison, the lanes where it holds (pmovmskb for byte lanes) |
+| `splat(value, v)` | value in every lane |
+| `load(p, v)`, `store(p, v)` | sizeof(V) bytes at p, any alignment, any type of memory there |
+| `load_aligned`, `store_aligned` | the same at p aligned to sizeof(V) |
+| `peek(p, v)`, `peek_aligned(p, v)` | x86-64: a load the compiler does not see, which may read past the caller's range, never past p's page |
+
+Every function writes its vector result to a reference instead of returning it: a vector of 32
+bytes returned or passed by value from code compiled without AVX changes the ABI, which clang
+rejects and gcc warns about (an error under -Werror). Inside one function, vectors are values
+like any other.
+
+```c++
+#include "ca/integers.hpp"
+#include "ca/simd.hpp"
+
+using bytes = ca::simd::vec<ca::u8, 16U>;
+
+static auto count_byte(const ca::u8* const data, const ca::u8 needle) noexcept -> ca::usz {
+	bytes v;
+	bytes n;
+	ca::simd::load(data, v);
+	ca::simd::splat(needle, n);
+	return ca::simd::mask_of(v == n).count();
+}
+
+auto main(void) -> int {
+	const ca::u8 data[16] = {'a', 'b', 'a', 'c', 'a', 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 'a'};
+	if (count_byte(data, 'a') != 4U)
+		return 1;
+	bytes v;
+	ca::simd::load(data, v);
+	ca::usz sum = 0U;
+	for (const ca::usz lane : ca::simd::mask_of(v == 'a'))
+		sum += lane;
+	return sum == 0U + 2U + 4U + 15U ? 0 : 2;
+}
+```
+
+Wider vectors need their instructions enabled in the function using them, and the CPU to have
+them. ca compiles for baseline x86-64 (SSE2), so a 32-byte path is a function marked
+`[[gnu::target("avx2")]]`, picked at run time; the byte primitives of `memory/` do it once per
+function, on the first call (cpuid). Helpers such as `mask_of` for 32 lanes are themselves
+AVX2 functions, not `always_inline`: a generic template calling them builds without AVX2, and
+an AVX2 caller marked `[[gnu::flatten]]` inlines them.
+
+`mask_of` and `splat` are constexpr: at compile time, and for lanes no instruction gathers
+(16-bit lanes, or a CPU other than x86-64), they go lane by lane. `peek` exists only on x86-64,
+where its asm is written; elsewhere read only what is in range.

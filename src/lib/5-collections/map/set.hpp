@@ -6,17 +6,17 @@
 
    | Operation | Time | Notes |
    |---|---|---|
-   | contains | O(1) expected | hash, one 8-byte control load per group probed, one key compare per tag hit |
+   | contains | O(1) expected | hash, one W-byte control load per group probed (W = 16 on x86-64, else 8), one key compare per tag hit |
    | add | amortized O(1) expected | the lookup, then an insert into the first free slot met |
    | discard, remove | O(1) expected | |
-   | pop | O(capacity / 8) worst | scans control groups from the start |
+   | pop | O(capacity / W) worst | scans control groups from the start |
    | union_with, update | O(size + other.size) | |
    | intersection, difference, is_subset, is_disjoint | O(size of the side walked) | the smaller side when the result allows |
    | symmetric_difference | O(size + other.size) | |
-   | iteration | O(capacity / 8 + size) | 8 control bytes per step |
+   | iteration | O(capacity / W + size) | W control bytes per step |
    | clone | O(capacity) | same placement, no rehash; one memcpy for trivially copyable keys |
 
-   Space: 1 + sizeof(K) bytes per slot; capacity a power of two from 8, at most 7/8 used.
+   Space: 1 + sizeof(K) bytes per slot; capacity a power of two from W, at most 7/8 used.
 
    Locality, hashing, relocation, copy and move, and measurements: as ca::hashmap, the same table
    with smaller slots. */

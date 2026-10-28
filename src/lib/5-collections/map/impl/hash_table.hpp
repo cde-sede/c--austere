@@ -50,8 +50,9 @@ namespace ca {
 
 		/* @DOC Open-addressing table of Slot, keyed by K (the slot itself, or its key member): a
 		   Swiss table. One block from A holds the control bytes, then the slots. Probing walks
-		   aligned groups of 8 control bytes, triangularly, matching the hash's low 7 bits 8 slots
-		   at a time; the rest of the hash picks the first group. At most 7/8 of the slots are
+		   aligned groups of control bytes (control_group: 16 on x86-64, else 8), triangularly,
+		   matching the hash's low 7 bits a group at a time; the rest of the hash picks the first
+		   group. At most 7/8 of the slots are
 		   used or deleted. Erasing marks a slot EMPTY when its group already has one (no probe
 		   ever went past it), DELETED otherwise; growth drops the DELETED. Insertion runs in two
 		   steps so the caller builds the slot before it is counted: prepare finds the key or the
@@ -209,12 +210,12 @@ namespace ca {
 
 					const ca::u64 hash = ca::hash(key);
 					const ca::u8 tag = static_cast<ca::u8>(hash & 0x7FU);
-					const ca::usz groups = _mask >> 3U;
+					const ca::usz groups = _mask >> group::SHIFT;
 					ca::usz at = static_cast<ca::usz>(hash >> 7U) & groups;
 					for (ca::usz step = 1U;; ++step) {
-						const group control{_control + (at << 3U)};
-						for (ca::u64 match = control.match(tag); match != 0U; match &= match - 1U) {
-							Slot* const slot = _slots + (at << 3U) + group::first(match);
+						const group control{_control + (at << group::SHIFT)};
+						for (typename group::bits match = control.match(tag); match != 0U; match &= match - 1U) {
+							Slot* const slot = _slots + (at << group::SHIFT) + group::first(match);
 							if (ca::impl::key_view(self::key_of(*slot)) == key) [[likely]]
 								return slot;
 						}
@@ -230,20 +231,20 @@ namespace ca {
 
 					const ca::u64 hash = ca::hash(key);
 					const ca::u8 tag = static_cast<ca::u8>(hash & 0x7FU);
-					const ca::usz groups = _mask >> 3U;
+					const ca::usz groups = _mask >> group::SHIFT;
 					ca::usz at = static_cast<ca::usz>(hash >> 7U) & groups;
 					ca::usz free = self::_none;
 					for (ca::usz step = 1U;; ++step) {
-						const group control{_control + (at << 3U)};
-						for (ca::u64 match = control.match(tag); match != 0U; match &= match - 1U) {
-							const ca::usz index = (at << 3U) + group::first(match);
+						const group control{_control + (at << group::SHIFT)};
+						for (typename group::bits match = control.match(tag); match != 0U; match &= match - 1U) {
+							const ca::usz index = (at << group::SHIFT) + group::first(match);
 							if (ca::impl::key_view(self::key_of(_slots[index])) == key) [[likely]]
 								return place{index, tag, true};
 						}
 						if (free == self::_none) {
-							const ca::u64 open = control.match_free();
+							const typename group::bits open = control.match_free();
 							if (open != 0U)
-								free = (at << 3U) + group::first(open);
+								free = (at << group::SHIFT) + group::first(open);
 						}
 						if (control.match_empty() != 0U) [[likely]]
 							break;
@@ -286,7 +287,7 @@ namespace ca {
 					const ca::usz capacity = this->capacity();
 					while (from < capacity) {
 						const ca::usz base = from & ~(group::WIDTH - 1U);
-						const ca::u64 full = group{_control + base}.match_full() & (~ca::u64{0U} << ((from - base) << 3U));
+						const typename group::bits full = group::from(group{_control + base}.match_full(), from - base);
 						if (full != 0U)
 							return base + group::first(full);
 						from = base + group::WIDTH;
@@ -456,12 +457,12 @@ namespace ca {
 
 				[[nodiscard]] static auto _free_slot(const ca::u8* const control, const ca::usz mask, const ca::u64 hash) noexcept -> ca::usz {
 
-					const ca::usz groups = mask >> 3U;
+					const ca::usz groups = mask >> group::SHIFT;
 					ca::usz at = static_cast<ca::usz>(hash >> 7U) & groups;
 					for (ca::usz step = 1U;; ++step) {
-						const ca::u64 open = group{control + (at << 3U)}.match_free();
+						const typename group::bits open = group{control + (at << group::SHIFT)}.match_free();
 						if (open != 0U)
-							return (at << 3U) + group::first(open);
+							return (at << group::SHIFT) + group::first(open);
 						at = (at + step) & groups;
 					}
 				}
@@ -473,7 +474,7 @@ namespace ca {
 					if (!block)
 						return block.propagate();
 					for (ca::usz base = 0U; base < capacity; base += group::WIDTH) {
-						for (ca::u64 full = group{control + base}.match_full(); full != 0U; full &= full - 1U) {
+						for (typename group::bits full = group{control + base}.match_full(); full != 0U; full &= full - 1U) {
 							Slot* const from = slots + base + group::first(full);
 							const ca::u64 hash = ca::hash(ca::impl::key_view(self::key_of(*from)));
 							const ca::usz index = self::_free_slot(block->_control, into - 1U, hash);

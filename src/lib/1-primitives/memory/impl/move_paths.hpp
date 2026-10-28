@@ -7,6 +7,7 @@
 #include "1-primitives/integers/u64.hpp"
 #include "1-primitives/integers/usz.hpp"
 #include "1-primitives/memory/impl/loose_bytes.hpp"
+#include "1-primitives/simd/vec.hpp"
 
 
 // -- CA NAMESPACE -----------------------------------------------------------
@@ -84,7 +85,7 @@ namespace ca {
 		[[gnu::always_inline]] inline auto move_small(char* const to, const char* const from, const ca::usz count) noexcept -> void {
 
 			if (count >= 16U) [[unlikely]]
-				ca::impl::move_two<ca::impl::bytes16>(to, from, count);
+				ca::impl::move_two<ca::simd::vec<char, 16U>>(to, from, count);
 			else
 				ca::impl::move_ladder(to, from, count);
 		}
@@ -97,10 +98,10 @@ namespace ca {
 				return;
 			}
 			if (count <= 32U) [[likely]] {
-				ca::impl::move_two<ca::impl::bytes16>(to, from, count);
+				ca::impl::move_two<ca::simd::vec<char, 16U>>(to, from, count);
 				return;
 			}
-			ca::impl::move_four<ca::impl::bytes16>(to, from, count);
+			ca::impl::move_four<ca::simd::vec<char, 16U>>(to, from, count);
 		}
 
 #if ca_architecture(x86_64)

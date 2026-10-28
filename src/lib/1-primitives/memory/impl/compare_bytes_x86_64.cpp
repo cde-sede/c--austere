@@ -77,9 +77,11 @@
 #include "1-primitives/integers/u32.hpp"
 #include "1-primitives/integers/u64.hpp"
 #include "1-primitives/integers/u8.hpp"
-#include "1-primitives/memory/impl/byte_vectors.hpp"
 #include "1-primitives/memory/impl/cpu_features.hpp"
 #include "1-primitives/memory/impl/loose_bytes.hpp"
+#include "1-primitives/simd/mask_of.hpp"
+#include "1-primitives/simd/peek.hpp"
+#include "1-primitives/simd/vec.hpp"
 
 #if ca_architecture(x86_64)
 
@@ -103,7 +105,7 @@ template <typename T>
 
 template <typename V>
 [[gnu::always_inline]] static inline auto mask(const V& v) noexcept -> ca::u32 {
-	return ca::impl::byte_mask(v);
+	return ca::simd::mask_of(v).bits();
 }
 
 /* Lanes of 0xff where a and b hold the same byte. */
@@ -300,22 +302,22 @@ template <typename V>
 		return value & ((1U << count) - 1U);
 }
 
-/* Equality lanes of the vectors at a and b, which may run past the range (see peek), loaded in
-   asm. AVX2 folds b's load into vpcmpeqb; legacy SSE pcmpeqb faults on an unaligned memory
-   operand, so the 16-byte one loads both. */
-[[gnu::always_inline]] static inline auto same_peeked(const char* const a, const char* const b, ca::impl::bytes16& lanes) noexcept -> void {
+/* Equality lanes of the vectors at a and b, which may run past the range (see
+   ca::simd::peek), loaded in asm. AVX2 folds b's load into vpcmpeqb; legacy SSE pcmpeqb faults
+   on an unaligned memory operand, so the 16-byte one loads both. */
+[[gnu::always_inline]] static inline auto same_peeked(const char* const a, const char* const b, ca::simd::vec<char, 16U>& lanes) noexcept -> void {
 
-	ca::impl::bytes16 x;
-	ca::impl::bytes16 y;
-	ca::impl::peek(a, x);
-	ca::impl::peek(b, y);
-	lanes = __builtin_bit_cast(ca::impl::bytes16, x == y);
+	ca::simd::vec<char, 16U> x;
+	ca::simd::vec<char, 16U> y;
+	ca::simd::peek(a, x);
+	ca::simd::peek(b, y);
+	lanes = __builtin_bit_cast(ca::simd::vec<char, 16U>, x == y);
 }
 
-[[gnu::target("avx2")]] static inline auto same_peeked(const char* const a, const char* const b, ca::impl::bytes32& lanes) noexcept -> void {
+[[gnu::target("avx2")]] static inline auto same_peeked(const char* const a, const char* const b, ca::simd::vec<char, 32U>& lanes) noexcept -> void {
 
-	ca::impl::bytes32 x;
-	ca::impl::peek(a, x);
+	ca::simd::vec<char, 32U> x;
+	ca::simd::peek(a, x);
 	asm("vpcmpeqb %1, %2, %0" : "=x"(lanes) : "m"(*reinterpret_cast<const char(*)[32]>(b)), "x"(x));
 }
 
@@ -332,7 +334,7 @@ template <typename V, bool LOCATE>
 		return count != 0U ? (LOCATE ? difference(a, b) : static_cast<int>(*a != *b)) : 0;
 	if (((address(a) | address(b)) & (PAGE - 1U)) > PAGE - sizeof(V)) [[unlikely]] {
 		if (count >= 16U)
-			return compare_pair<ca::impl::bytes16, LOCATE>(a, b, count);
+			return compare_pair<ca::simd::vec<char, 16U>, LOCATE>(a, b, count);
 		return LOCATE ? compare_ladder(a, b, count) : differ_ladder(a, b, count);
 	}
 	V lanes;
@@ -376,19 +378,19 @@ template <typename V, bool LOCATE>
 }
 
 auto ca::impl::compare_bytes_sse2(const void* const a, const void* const b, const ca::usz count) noexcept -> int {
-	return compare_any<ca::impl::bytes16, true>(a, b, count);
+	return compare_any<ca::simd::vec<char, 16U>, true>(a, b, count);
 }
 
 [[gnu::target("avx2,bmi2"), gnu::flatten]] auto ca::impl::compare_bytes_avx2(const void* const a, const void* const b, const ca::usz count) noexcept -> int {
-	return compare_any<ca::impl::bytes32, true>(a, b, count);
+	return compare_any<ca::simd::vec<char, 32U>, true>(a, b, count);
 }
 
 auto ca::impl::differ_bytes_sse2(const void* const a, const void* const b, const ca::usz count) noexcept -> int {
-	return compare_any<ca::impl::bytes16, false>(a, b, count);
+	return compare_any<ca::simd::vec<char, 16U>, false>(a, b, count);
 }
 
 [[gnu::target("avx2,bmi2"), gnu::flatten]] auto ca::impl::differ_bytes_avx2(const void* const a, const void* const b, const ca::usz count) noexcept -> int {
-	return compare_any<ca::impl::bytes32, false>(a, b, count);
+	return compare_any<ca::simd::vec<char, 32U>, false>(a, b, count);
 }
 
 

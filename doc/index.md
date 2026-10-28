@@ -73,13 +73,13 @@ c++ -std=c++2c -nostdinc++ -fno-exceptions -fno-rtti -I src/lib prog.cpp -nostdl
 
 | Layer | Headers | Documented entities |
 |---|---|---|
-| [1-primitives](1-primitives.md) | 228 | 200/200 |
+| [1-primitives](1-primitives.md) | 239 | 200/200 |
 | [2-vocabulary](2-vocabulary.md) | 65 | 20/20 |
 | [3-system](3-system.md) | 194 | 5/5 |
 | [4-lifecycle](4-lifecycle.md) | 37 | 31/31 |
-| [5-collections](5-collections.md) | 65 | 38/38 |
+| [5-collections](5-collections.md) | 67 | 38/38 |
 | [6-resources](6-resources.md) | 15 | 4/4 |
-| [ca](ca.md) | 117 | 0/0 |
+| [ca](ca.md) | 118 | 0/0 |
 
 ## [1-primitives](1-primitives.md)
 
@@ -162,7 +162,6 @@ Layer 1: what the language and the compiler give, wrapped once.
 - [`memory/relocate_n.hpp`](1-primitives.md#memoryrelocatenhpp) - Moves count objects from `from` into uninitialized storage at `to`, ending the lifetime of the so...
 - [`memory/relocate_overlapping_n.hpp`](1-primitives.md#memoryrelocateoverlappingnhpp) - relocate_n within one array: the ranges may overlap.
 - [`memory/string_length.hpp`](1-primitives.md#memorystringlengthhpp) - Length in code units of a NUL-terminated string, NUL excluded.
-- [`memory/impl/byte_vectors.hpp`](1-primitives.md#memoryimplbytevectorshpp)
 - [`memory/impl/compare_bytes.hpp`](1-primitives.md#memoryimplcomparebyteshpp) - Signature of a compare_bytes variant (memcmp: negative, 0 or positive, bytes as unsigned) and of...
 - [`memory/impl/cpu_features.hpp`](1-primitives.md#memoryimplcpufeatureshpp)
 - [`memory/impl/fill_bytes.hpp`](1-primitives.md#memoryimplfillbyteshpp) - Signature of a fill_bytes variant: memset semantics, count 0 accepts any pointer; returns `to`, s...
@@ -176,6 +175,18 @@ Layer 1: what the language and the compiler give, wrapped once.
 - [`numeric/min.hpp`](1-primitives.md#numericminhpp) - The lesser of a and b; a when equal.
 - [`numeric/mul_overflow.hpp`](1-primitives.md#numericmuloverflowhpp) - out = a * b * cs...; true on overflow (out then holds the wrapped value).
 - [`numeric/sub_overflow.hpp`](1-primitives.md#numericsuboverflowhpp) - out = a - b - cs...; true on overflow (out then holds the wrapped value).
+- [`simd/lane_of.hpp`](1-primitives.md#simdlaneofhpp) - The lane type of the vector type V: T of ca::simd::vec<T, N>.
+- [`simd/lanes.hpp`](1-primitives.md#simdlaneshpp) - The lane count of the vector type V: N of ca::simd::vec<T, N>.
+- [`simd/load.hpp`](1-primitives.md#simdloadhpp) - The sizeof(V) bytes at p into v: any alignment, any type of the memory there.
+- [`simd/load_aligned.hpp`](1-primitives.md#simdloadalignedhpp) - ca::simd::load from p aligned to sizeof(V): one aligned load (movdqa), which faults on a misalign...
+- [`simd/mask.hpp`](1-primitives.md#simdmaskhpp) - One bit per lane of a vector of N lanes, bit i for lane i: what ca::simd::mask_of makes of a comp...
+- [`simd/mask_of.hpp`](1-primitives.md#simdmaskofhpp) - The lanes of v whose high bit is set: of a comparison (lanes of all ones or zeros), the lanes whe...
+- [`simd/peek.hpp`](1-primitives.md#simdpeekhpp) - The 16 or 32 bytes at p into v, any alignment, in asm: the compiler sees no access beyond the ran...
+- [`simd/peek_aligned.hpp`](1-primitives.md#simdpeekalignedhpp) - ca::simd::peek at p aligned to sizeof(V): such a load never crosses a page, so it may cover bytes...
+- [`simd/splat.hpp`](1-primitives.md#simdsplathpp) - value, converted to the lane type, in every lane of v.
+- [`simd/store.hpp`](1-primitives.md#simdstorehpp) - v into the sizeof(V) bytes at p: any alignment, any type of the memory there.
+- [`simd/store_aligned.hpp`](1-primitives.md#simdstorealignedhpp) - ca::simd::store to p aligned to sizeof(V): one aligned store (movdqa), which faults on a misalign...
+- [`simd/vec.hpp`](1-primitives.md#simdvechpp) - N lanes of T in one vector register: the compiler's vector type, with its lane-wise operators (+,...
 - [`text/is_character.hpp`](1-primitives.md#textischaracterhpp) - The code unit types strings are made of: char and char8_t (UTF-8), char16_t (UTF-16), char32_t (U...
 - [`traits/add_const.hpp`](1-primitives.md#traitsaddconsthpp) - std::add_const_t.
 - [`traits/add_cv.hpp`](1-primitives.md#traitsaddcvhpp) - std::add_cv_t.
@@ -684,6 +695,8 @@ Layer 5: the owning data structures, and formatting, which only needs them and t
 - [`map/impl/hash_table.hpp`](5-collections.md#mapimplhashtablehpp)
 - [`map/impl/key.hpp`](5-collections.md#mapimplkeyhpp)
 - [`map/impl/range.hpp`](5-collections.md#mapimplrangehpp)
+- [`map/impl/swar_group.hpp`](5-collections.md#mapimplswargrouphpp)
+- [`map/impl/vector_group.hpp`](5-collections.md#mapimplvectorgrouphpp)
 - [`string/basic_str.hpp`](5-collections.md#stringbasicstrhpp) - Performance of ca::basic_str<C, A>.
 - [`string/inline_str.hpp`](5-collections.md#stringinlinestrhpp) - Performance of ca::inline_str<N, C>.
 - [`string/join.hpp`](5-collections.md#stringjoinhpp) - The items of a range (anything converting to sv::basic\<C>: views, strings, C strings, the pieces...
@@ -808,6 +821,7 @@ The include facade: what programs include.
 - [`result.hpp`](ca.md#resulthpp) - `#include "ca/result.hpp"`: 2-vocabulary/result.hpp.
 - [`ring_buffer.hpp`](ca.md#ringbufferhpp) - `#include "ca/ring_buffer.hpp"`: 5-collections/io/ring_buffer.hpp.
 - [`set.hpp`](ca.md#sethpp) - `#include "ca/set.hpp"`: 5-collections/map/set.hpp.
+- [`simd.hpp`](ca.md#simdhpp) - `#include "ca/simd.hpp"`: 1-primitives/simd/.
 - [`slice.hpp`](ca.md#slicehpp) - `#include "ca/slice.hpp"`: 5-collections/array/slice.hpp.
 - [`small_array.hpp`](ca.md#smallarrayhpp) - `#include "ca/small_array.hpp"`: 5-collections/array/small_array.hpp.
 - [`span.hpp`](ca.md#spanhpp) - `#include "ca/span.hpp"`: 2-vocabulary/span.hpp.

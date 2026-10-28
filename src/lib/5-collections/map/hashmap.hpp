@@ -8,22 +8,32 @@
 
    | Operation | Time | Notes |
    |---|---|---|
-   | get, contains, operator[] | O(1) expected | hash, one 8-byte control load and match per group probed, one key compare per tag hit (1/128 false hits) |
+   A group is W control bytes matched at once: W = 16 on x86-64 (one SSE2 compare and
+   pmovmskb), 8 elsewhere (a 64-bit word, SWAR).
+
+   | Operation | Time | Notes |
+   |---|---|---|
+   | get, contains, operator[] | O(1) expected | hash, one W-byte control load and match per group probed, one key compare per tag hit (1/128 false hits per slot) |
    | set, setdefault | amortized O(1) expected | the lookup, then an insert into the first free slot met |
    | pop(key) | O(1) expected | marks the slot EMPTY when its group has one, else DELETED |
-   | popitem | O(capacity / 8) worst | scans control groups from the start |
-   | iteration, keys, values, items | O(capacity / 8 + size) | 8 control bytes per step |
+   | popitem | O(capacity / W) worst | scans control groups from the start |
+   | iteration, keys, values, items | O(capacity / W + size) | W control bytes per step |
    | reserve, shrink, growth | O(capacity) | every slot rehashed and relocated (memcpy for trivially relocatable items) |
-   | clear, cleanup | O(capacity / 8 + size) | no walk for trivially destructible items without cleanup() |
+   | clear, cleanup | O(capacity / W + size) | no walk for trivially destructible items without cleanup() |
    | clone | O(capacity) | same placement, no rehash; one memcpy for trivially copyable items |
    | update | O(other.size) | |
 
-   Space: capacity is a power of two from 8, at most 7/8 of it used, so 1 + sizeof(item) bytes
-   per slot at 44% to 87.5% load right after growth. Growth doubles, or rehashes in place when
-   DELETED slots, not elements, filled the table.
+   Space: capacity is a power of two from W, at most 7/8 of it used, so 1 + sizeof(item) bytes
+   per slot at 44% to 87.5% load right after growth; a map of up to 14 items is one group on
+   x86-64. Growth doubles, or rehashes in place when DELETED slots, not elements, filled the
+   table.
 
-   Locality: a lookup touches one control group (8 bytes) and, on a tag hit, one slot; misses
+   Locality: a lookup touches one control group (W bytes) and, on a tag hit, one slot; misses
    rarely touch a slot. Probing walks aligned groups triangularly, so it visits every group.
+   16-byte groups replaced 8-byte SWAR ones on x86-64: lookups, walks, churn and small maps
+   faster, most of all churn and small maps; insertion and str keys unchanged within noise. A
+   group holds up to 14 items before a probe moves on, so fewer probes reach a second group and
+   DELETED slots fill the table later.
 
    Hashing: ca::hash, wyhash on bytes, one 128-bit multiply on integers. Keys are looked up by
    lookup_type: an sv for str keys, so literals and views never build a string.
@@ -44,13 +54,13 @@
 
    | Case | clang 18 | gcc 13 | Notes |
    |---|---|---|---|
-   | insert 1e6 scrambled u64, growing, then cleanup | 0.15x | 0.15x | |
-   | 1e7 lookup hits in 1e6 entries | 0.46x | 0.43x | |
-   | 1e7 lookup misses | 0.098x | 0.096x | misses rarely touch a slot |
-   | walk 1e6 entries 10 times | 0.20x | 0.21x | |
-   | insert + pop churn, 1e5 live, 5e6 rounds | 0.33x | 0.35x | DELETED reclaimed by in-place rehash |
-   | 1e5 maps of 8 ints, built, read, destroyed | 0.88x | 0.50x | |
-   | str keys, 1e5 inserted, 1e6 lookups by literal | 0.27x | 0.31x | std: std::string keys |
+   | insert 1e6 scrambled u64, growing, then cleanup | 0.12x | 0.11x | |
+   | 1e7 lookup hits in 1e6 entries | 0.45x | 0.43x | |
+   | 1e7 lookup misses | 0.090x | 0.099x | misses rarely touch a slot |
+   | walk 1e6 entries 10 times | 0.14x | 0.14x | |
+   | insert + pop churn, 1e5 live, 5e6 rounds | 0.22x | 0.25x | DELETED reclaimed by in-place rehash |
+   | 1e5 maps of 8 ints, built, read, destroyed | 0.57x | 0.29x | |
+   | str keys, 1e5 inserted, 1e6 lookups by literal | 0.40x | 0.31x | std: std::string keys |
    BENCH-- */
 
 #ifndef ca_collections_map_hashmap_hpp

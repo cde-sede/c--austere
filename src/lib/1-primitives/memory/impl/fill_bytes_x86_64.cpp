@@ -45,9 +45,10 @@
 #include "1-primitives/integers/u32.hpp"
 #include "1-primitives/integers/u64.hpp"
 #include "1-primitives/integers/u8.hpp"
-#include "1-primitives/memory/impl/byte_vectors.hpp"
 #include "1-primitives/memory/impl/cpu_features.hpp"
 #include "1-primitives/memory/impl/loose_bytes.hpp"
+#include "1-primitives/simd/splat.hpp"
+#include "1-primitives/simd/vec.hpp"
 
 #if ca_architecture(x86_64)
 
@@ -74,18 +75,14 @@ template <typename T>
 	reinterpret_cast<ca::impl::aligned_bytes<T>*>(to)->_value = value;
 }
 
-/* value in every byte: ca::impl::broadcast for 32-byte vectors, else as 32-bit words (gcc
-   builds a byte broadcast of V{} + value one vpinsrb at a time). */
+/* value in every byte: a broadcast for 32-byte vectors, else as 32-bit words (gcc builds a
+   byte broadcast of V{} + value one vpinsrb at a time). */
 template <typename V>
 [[gnu::always_inline]] static inline auto splat(const int value) noexcept -> V {
-	if constexpr (sizeof(V) == 32U) {
-		V lanes;
-		ca::impl::broadcast(value, lanes);
-		return lanes;
-	} else {
-		using words [[gnu::vector_size(sizeof(V))]] = ca::u32;
-		return __builtin_bit_cast(V, words{} + static_cast<ca::u8>(value) * 0x01010101U);
-	}
+
+	V lanes;
+	ca::simd::splat(value, lanes);
+	return lanes;
 }
 
 static auto address(const void* const pointer) noexcept -> ca::usz {
@@ -188,7 +185,7 @@ template <typename V>
 	char* const to = static_cast<char*>(target);
 	if (count < n) [[unlikely]] {
 		if (n > 16U && count >= 16U)
-			fill_two(to, splat<ca::impl::bytes16>(value), count);
+			fill_two(to, splat<ca::simd::vec<char, 16U>>(value), count);
 		else
 			fill_ladder(to, value, count);
 		return;
@@ -218,13 +215,13 @@ template <typename V>
 
 auto ca::impl::fill_bytes_sse2(void* const to, const int value, const ca::usz count) noexcept -> void* {
 
-	fill_any<ca::impl::bytes16>(to, value, count);
+	fill_any<ca::simd::vec<char, 16U>>(to, value, count);
 	return to;
 }
 
 [[gnu::target("avx2")]] auto ca::impl::fill_bytes_avx2(void* const to, const int value, const ca::usz count) noexcept -> void* {
 
-	fill_any<ca::impl::bytes32>(to, value, count);
+	fill_any<ca::simd::vec<char, 32U>>(to, value, count);
 	return to;
 }
 

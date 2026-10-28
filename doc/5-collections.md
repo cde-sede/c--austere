@@ -4391,19 +4391,24 @@ Layout: control pointer, slot pointer, mask, size and growth left, 40 bytes on 6
 
 | Operation | Time | Notes |
 |---|---|---|
-| get, contains, operator[] | O(1) expected | hash, one 8-byte control load and match per group probed, one key compare per tag hit (1/128 false hits) |
+
+A group is W control bytes matched at once: W = 16 on x86-64 (one SSE2 compare and pmovmskb), 8 elsewhere (a 64-bit word, SWAR).
+
+| Operation | Time | Notes |
+|---|---|---|
+| get, contains, operator[] | O(1) expected | hash, one W-byte control load and match per group probed, one key compare per tag hit (1/128 false hits per slot) |
 | set, setdefault | amortized O(1) expected | the lookup, then an insert into the first free slot met |
 | pop(key) | O(1) expected | marks the slot EMPTY when its group has one, else DELETED |
-| popitem | O(capacity / 8) worst | scans control groups from the start |
-| iteration, keys, values, items | O(capacity / 8 + size) | 8 control bytes per step |
+| popitem | O(capacity / W) worst | scans control groups from the start |
+| iteration, keys, values, items | O(capacity / W + size) | W control bytes per step |
 | reserve, shrink, growth | O(capacity) | every slot rehashed and relocated (memcpy for trivially relocatable items) |
-| clear, cleanup | O(capacity / 8 + size) | no walk for trivially destructible items without cleanup() |
+| clear, cleanup | O(capacity / W + size) | no walk for trivially destructible items without cleanup() |
 | clone | O(capacity) | same placement, no rehash; one memcpy for trivially copyable items |
 | update | O(other.size) | |
 
-Space: capacity is a power of two from 8, at most 7/8 of it used, so 1 + sizeof(item) bytes per slot at 44% to 87.5% load right after growth. Growth doubles, or rehashes in place when DELETED slots, not elements, filled the table.
+Space: capacity is a power of two from W, at most 7/8 of it used, so 1 + sizeof(item) bytes per slot at 44% to 87.5% load right after growth; a map of up to 14 items is one group on x86-64. Growth doubles, or rehashes in place when DELETED slots, not elements, filled the table.
 
-Locality: a lookup touches one control group (8 bytes) and, on a tag hit, one slot; misses rarely touch a slot. Probing walks aligned groups triangularly, so it visits every group.
+Locality: a lookup touches one control group (W bytes) and, on a tag hit, one slot; misses rarely touch a slot. Probing walks aligned groups triangularly, so it visits every group. 16-byte groups replaced 8-byte SWAR ones on x86-64: lookups, walks, churn and small maps faster, most of all churn and small maps; insertion and str keys unchanged within noise. A group holds up to 14 items before a probe moves on, so fewer probes reach a second group and DELETED slots fill the table later.
 
 Hashing: ca::hash, wyhash on bytes, one 128-bit multiply on integers. Keys are looked up by lookup_type: an sv for str keys, so literals and views never build a string.
 
@@ -4417,13 +4422,13 @@ Baseline std::unordered_map over glibc malloc; ca over ca::heap; u64 keys and va
 
 | Case | clang 18 | gcc 13 | Notes |
 |---|---|---|---|
-| insert 1e6 scrambled u64, growing, then cleanup | 0.15x | 0.15x | |
-| 1e7 lookup hits in 1e6 entries | 0.46x | 0.43x | |
-| 1e7 lookup misses | 0.098x | 0.096x | misses rarely touch a slot |
-| walk 1e6 entries 10 times | 0.20x | 0.21x | |
-| insert + pop churn, 1e5 live, 5e6 rounds | 0.33x | 0.35x | DELETED reclaimed by in-place rehash |
-| 1e5 maps of 8 ints, built, read, destroyed | 0.88x | 0.50x | |
-| str keys, 1e5 inserted, 1e6 lookups by literal | 0.27x | 0.31x | std: std::string keys |
+| insert 1e6 scrambled u64, growing, then cleanup | 0.12x | 0.11x | |
+| 1e7 lookup hits in 1e6 entries | 0.45x | 0.43x | |
+| 1e7 lookup misses | 0.090x | 0.099x | misses rarely touch a slot |
+| walk 1e6 entries 10 times | 0.14x | 0.14x | |
+| insert + pop churn, 1e5 live, 5e6 rounds | 0.22x | 0.25x | DELETED reclaimed by in-place rehash |
+| 1e5 maps of 8 ints, built, read, destroyed | 0.57x | 0.29x | |
+| str keys, 1e5 inserted, 1e6 lookups by literal | 0.40x | 0.31x | std: std::string keys |
 
 ### struct `impl::project_item`
 
@@ -5112,17 +5117,17 @@ Layout: the hashmap's table with the keys as slots: control pointer, slot pointe
 
 | Operation | Time | Notes |
 |---|---|---|
-| contains | O(1) expected | hash, one 8-byte control load per group probed, one key compare per tag hit |
+| contains | O(1) expected | hash, one W-byte control load per group probed (W = 16 on x86-64, else 8), one key compare per tag hit |
 | add | amortized O(1) expected | the lookup, then an insert into the first free slot met |
 | discard, remove | O(1) expected | |
-| pop | O(capacity / 8) worst | scans control groups from the start |
+| pop | O(capacity / W) worst | scans control groups from the start |
 | union_with, update | O(size + other.size) | |
 | intersection, difference, is_subset, is_disjoint | O(size of the side walked) | the smaller side when the result allows |
 | symmetric_difference | O(size + other.size) | |
-| iteration | O(capacity / 8 + size) | 8 control bytes per step |
+| iteration | O(capacity / W + size) | W control bytes per step |
 | clone | O(capacity) | same placement, no rehash; one memcpy for trivially copyable keys |
 
-Space: 1 + sizeof(K) bytes per slot; capacity a power of two from 8, at most 7/8 used.
+Space: 1 + sizeof(K) bytes per slot; capacity a power of two from W, at most 7/8 used.
 
 Locality, hashing, relocation, copy and move, and measurements: as ca::hashmap, the same table with smaller slots.
 
@@ -5420,7 +5425,7 @@ The two structures under the maps, and what they share.
 
 ### Swiss table (`hashmap`, `set`)
 
-- `control_group.hpp`: eight control bytes, one per slot, matched together in a 64-bit word (SWAR: portable, no vector unit needed). A full slot holds the low 7 bits of its key's hash; EMPTY and DELETED have the high bit set. `match(tag)` returns the slots whose tag is equal, so a lookup compares a key only on a tag hit, about 1 in 128 misses. `empty_control` is one shared group of EMPTY bytes that every table without storage points at, so lookups need no branch for the empty case.
+- `control_group.hpp`: the group of control bytes, one per slot, matched together: `vector_group.hpp` on x86-64 (16 bytes, one SSE2 compare and pmovmskb through `ca::simd`), `swar_group.hpp` elsewhere (8 bytes in a 64-bit word, portable, no vector unit needed). A full slot holds the low 7 bits of its key's hash; EMPTY and DELETED have the high bit set. `match(tag)` returns the slots whose tag is equal, so a lookup compares a key only on a tag hit, about 1 in 128 slots. Both give the same interface (`WIDTH`, `SHIFT`, `bits`, `first`, `from`), so the table is written once. `empty_control` is one shared group of EMPTY bytes that every table without storage points at, so lookups need no branch for the empty case.
 - `hash_table.hpp`: the table itself, over slots of any type: one block holding the control bytes then the slots, power-of-two capacity, at most 7/8 full, triangular probing over aligned groups. `hashmap` stores `item<K, V>` in the slots, `set` stores K.
 
 ### B-tree (`map`)
@@ -5512,43 +5517,18 @@ Shows a map entry as its value.
 
 ## `map/impl/control_group.hpp`
 
-### class `impl::control_group`
+### alias `impl::control_group`
 
 ```c++
-class control_group final;
+using control_group = ca::impl::vector_group;
 ```
 
-Eight control bytes of a hash table, one per slot, matched together in a 64-bit word (SWAR: portable, no vector unit needed). A full slot holds the low 7 bits of its key's hash (high bit clear); EMPTY and DELETED have it set. Masks returned keep the high bit of each matching byte.
-
-### function `impl::control_group::control_group`
-
-```c++
-[[gnu::always_inline]] explicit control_group(const ca::u8* const control) noexcept
-: _bytes{0U};
-```
-
-The group at control, eight bytes.
-
-### function `impl::control_group::match`
-
-```c++
-[[nodiscard, gnu::always_inline]] auto match(const ca::u8 tag) const noexcept -> ca::u64;
-```
-
-Full slots holding tag; rarely a false positive next to a true one, never on EMPTY or DELETED.
-
-### function `impl::control_group::first`
-
-```c++
-[[nodiscard, gnu::always_inline]] static auto first(const ca::u64 mask) noexcept -> ca::usz;
-```
-
-Index in the group of the first byte of a non-zero mask.
+The control group of the hash tables on this CPU: 16 bytes in an SSE2 vector on x86-64, 8 in a 64-bit word (SWAR) elsewhere.
 
 ### variable `impl::?`
 
 ```c++
-alignas(8) inline constinit ca::u8 empty_control[ca::impl::control_group::WIDTH] =;
+alignas(16) inline constinit ca::u8 empty_control[16] =;
 ```
 
 The control bytes of every table owning no storage: one group of EMPTY, so lookups need no branch for it. Never written.
@@ -5562,7 +5542,7 @@ template <typename K, typename Slot, ca::is_allocator A>
 class hash_table final;
 ```
 
-Open-addressing table of Slot, keyed by K (the slot itself, or its key member): a Swiss table. One block from A holds the control bytes, then the slots. Probing walks aligned groups of 8 control bytes, triangularly, matching the hash's low 7 bits 8 slots at a time; the rest of the hash picks the first group. At most 7/8 of the slots are used or deleted. Erasing marks a slot EMPTY when its group already has one (no probe ever went past it), DELETED otherwise; growth drops the DELETED. Insertion runs in two steps so the caller builds the slot before it is counted: prepare finds the key or the slot it goes in (growing first), commit claims it.
+Open-addressing table of Slot, keyed by K (the slot itself, or its key member): a Swiss table. One block from A holds the control bytes, then the slots. Probing walks aligned groups of control bytes (control_group: 16 on x86-64, else 8), triangularly, matching the hash's low 7 bits a group at a time; the rest of the hash picks the first group. At most 7/8 of the slots are used or deleted. Erasing marks a slot EMPTY when its group already has one (no probe ever went past it), DELETED otherwise; growth drops the DELETED. Insertion runs in two steps so the caller builds the slot before it is counted: prepare finds the key or the slot it goes in (growing first), commit claims it.
 
 ### struct `impl::hash_table::place`
 
@@ -5768,6 +5748,108 @@ struct range final;
 ```
 
 A begin and an end, for range-for: what keys(), values() and items() return.
+
+## `map/impl/swar_group.hpp`
+
+### class `impl::swar_group`
+
+```c++
+class swar_group final;
+```
+
+Eight control bytes of a hash table, one per slot, matched together in a 64-bit word (SWAR: portable, no vector unit needed). A full slot holds the low 7 bits of its key's hash (high bit clear); EMPTY and DELETED have it set. Masks returned keep the high bit of each matching byte.
+
+### alias `impl::swar_group::bits`
+
+```c++
+using bits = ca::u64;
+```
+
+A set of slots of the group, as the matches return it.
+
+### function `impl::swar_group::swar_group`
+
+```c++
+[[gnu::always_inline]] explicit swar_group(const ca::u8* const control) noexcept
+: _bytes{0U};
+```
+
+The group at control, eight bytes.
+
+### function `impl::swar_group::match`
+
+```c++
+[[nodiscard, gnu::always_inline]] auto match(const ca::u8 tag) const noexcept -> bits;
+```
+
+Full slots holding tag; rarely a false positive next to a true one, never on EMPTY or DELETED.
+
+### function `impl::swar_group::first`
+
+```c++
+[[nodiscard, gnu::always_inline]] static auto first(const bits set) noexcept -> ca::usz;
+```
+
+Index in the group of the first slot of a non-empty set.
+
+### function `impl::swar_group::from`
+
+```c++
+[[nodiscard, gnu::always_inline]] static auto from(const bits set, const ca::usz lane) noexcept -> bits;
+```
+
+The slots of set from index lane of the group on.
+
+## `map/impl/vector_group.hpp`
+
+### class `impl::vector_group`
+
+```c++
+class vector_group final;
+```
+
+Sixteen control bytes of a hash table, one per slot, matched together in a 16-byte vector (SSE2: one compare and one pmovmskb). The bytes as swar_group: a full slot holds the low 7 bits of its key's hash, EMPTY and DELETED have the high bit set, so the free slots are the high bits themselves. Masks returned hold bit i for slot i.
+
+### alias `impl::vector_group::bits`
+
+```c++
+using bits = ca::u32;
+```
+
+A set of slots of the group, as the matches return it.
+
+### function `impl::vector_group::vector_group`
+
+```c++
+[[gnu::always_inline]] explicit vector_group(const ca::u8* const control) noexcept
+: _bytes{};
+```
+
+The group at control, sixteen bytes, any alignment.
+
+### function `impl::vector_group::match`
+
+```c++
+[[nodiscard, gnu::always_inline]] auto match(const ca::u8 tag) const noexcept -> bits;
+```
+
+Full slots holding tag; never EMPTY or DELETED, whose high bit tag lacks.
+
+### function `impl::vector_group::first`
+
+```c++
+[[nodiscard, gnu::always_inline]] static auto first(const bits set) noexcept -> ca::usz;
+```
+
+Index in the group of the first slot of a non-empty set.
+
+### function `impl::vector_group::from`
+
+```c++
+[[nodiscard, gnu::always_inline]] static auto from(const bits set, const ca::usz lane) noexcept -> bits;
+```
+
+The slots of set from index lane of the group on.
 
 ## `string/`
 
