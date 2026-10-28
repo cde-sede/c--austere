@@ -4,6 +4,7 @@
 #include "1-primitives/integers/i32.hpp"
 #include "2-vocabulary/result.hpp"
 #include "3-system/process/spawn_actions.hpp"
+#include "3-system/process/spawn_options.hpp"
 
 
 // -- CA NAMESPACE -----------------------------------------------------------
@@ -19,9 +20,10 @@ namespace ca {
 		// -- POSIX SPAWN ----------------------------------------------------
 
 		/* @DOC Starts program path as a child with arguments argv (null-terminated), environment envp
-		   (null-terminated; nullptr inherits ours) and actions (nullptr for none); returns its id. Cheaper
-		   than fork then exec, and safe in a multithreaded parent. */
-		[[nodiscard]] auto posix_spawn(const char* path, char* const* argv, char* const* envp, const ca::sys::spawn_actions* actions) noexcept -> ca::result<ca::i32>;
+		   (null-terminated; nullptr inherits ours), actions (nullptr for none) and options (its
+		   process group); returns its id. Cheaper than fork then exec, and safe in a multithreaded
+		   parent. */
+		[[nodiscard]] auto posix_spawn(const char* path, char* const* argv, char* const* envp, const ca::sys::spawn_actions* actions, const ca::sys::spawn_options& options = ca::sys::spawn_options()) noexcept -> ca::result<ca::i32>;
 
 	} // namespace sys
 

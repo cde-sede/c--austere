@@ -11,8 +11,12 @@
 #include "5-collections/array/inline_array.hpp"
 #include "5-collections/array/slice.hpp"
 #include "5-collections/array/small_array.hpp"
+#include "5-collections/concurrent/channel.hpp"
+#include "5-collections/concurrent/mpmc_queue.hpp"
+#include "5-collections/concurrent/spsc_queue.hpp"
 #include "5-collections/fs/path.hpp"
 #include "5-collections/io/ring_buffer.hpp"
+#include "5-collections/io/spsc_ring_buffer.hpp"
 #include "5-collections/list/intrusive_list.hpp"
 #include "5-collections/list/list.hpp"
 #include "5-collections/map/hashmap.hpp"
@@ -57,6 +61,10 @@ static_assert(ca::is_trivially_destructible<ca::io::buffered_reader<>>);
 static_assert(ca::is_trivially_destructible<ca::io::buffered_writer<>>);
 static_assert(ca::is_trivially_destructible<ca::io::writer>);
 static_assert(ca::is_trivially_destructible<ca::io::ring_buffer<>>);
+static_assert(ca::is_trivially_destructible<ca::io::spsc_ring_buffer<>>);
+static_assert(ca::is_trivially_destructible<ca::spsc_queue<ca::str>>);
+static_assert(ca::is_trivially_destructible<ca::mpmc_queue<ca::str>>);
+static_assert(ca::is_trivially_destructible<ca::channel<ca::str>>);
 static_assert(ca::is_trivially_destructible<ca::dynamic_bit_array<>>);
 static_assert(ca::is_trivially_destructible<ca::sys::spawn_actions>);
 static_assert(ca::is_trivially_destructible<ca::map<ca::str, ca::str>>);

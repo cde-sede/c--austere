@@ -11,7 +11,8 @@ Layer 5: the owning data structures, and formatting, which only needs them and t
 | `map/` | `hashmap`, `map` (B-tree), `set`, `item`, `ca::hash` |
 | `list/` | `list`, `intrusive_list` |
 | `format/` | `format`, `format_to`, `printf_to`, `format_string`: `{}` and `%` checked at compile time |
-| `io/` | in-memory readers and writers, `ring_buffer`, `read_line`, `read_to_end` |
+| `io/` | in-memory readers and writers, `ring_buffer`, `spsc_ring_buffer`, `read_line`, `read_to_end` |
+| `concurrent/` | `spsc_queue`, `mpmc_queue`, `channel`: queues shared between threads |
 | `fs/` | `fs::path` |
 | `trace/` | `ca::report`, `ca::context`: owned error traces with formatted messages |
 
@@ -1968,6 +1969,591 @@ Index of the first clear bit at or after from, or nothing.
 
 The indices of the set bits, in increasing order.
 
+## `concurrent/`
+
+Queues shared between threads: elements go in on one thread and come out on another, in order.
+
+| Type | Threads | Waiting |
+|---|---|---|
+| `spsc_queue<T, A>` | one producer, one consumer | never: `try_push`, `try_emplace`, `try_pop` |
+| `mpmc_queue<T, A>` | any number of each | never: the same three |
+| `channel<T, A>` | any number of each | `push`/`pop` sleep while full/empty; `_until`, `_for` and `try_` variants; `close` |
+| `io::spsc_ring_buffer<A>` (in `io/`) | one writer, one reader | never; a byte stream, `format_to` writes into it in place |
+
+All are bounded: the capacity, rounded up to a power of two, is fixed when the factory makes the queue (`make(capacity)`, `make_in(allocator, capacity)`), and nothing allocates after that. None takes a lock. A full queue refuses a push with `errc::no_space` and leaves the argument as it was, so a move-only value is not lost; a pop answers an optional, empty when the queue is. The channel adds sleeping on futexes, `errc::timed_out` for the timed variants, and `errc::broken_pipe` for pushes once closed and for pops once closed and drained.
+
+The queue object is a handle on a block the threads share. Share it by reference; moving it or calling `cleanup()` while another thread may still use it is a bug nothing detects. The single-threaded containers (`deque`, `io::ring_buffer`) stay what they were, with no atomic operation in their way: these types are what to reach for when threads are involved.
+
+```c++
+#include "ca/channel.hpp"
+#include "ca/error.hpp"
+#include "ca/mpmc_queue.hpp"
+#include "ca/spsc_queue.hpp"
+
+auto main(void) -> int {
+	auto jobs = ca::spsc_queue<int>::make(2U);
+	if (!jobs || !jobs->try_push(1) || !jobs->try_push(2))
+		return 1;
+	auto full = jobs->try_push(3);
+	if (full || full.error() != ca::errc::no_space)
+		return 2;
+	auto first = jobs->try_pop();
+	if (!first || *first != 1 || !jobs->cleanup())
+		return 3;
+
+	auto shared = ca::mpmc_queue<int>::make(8U);
+	if (!shared || !shared->try_emplace(7) || shared->try_pop() != 7 || !shared->cleanup())
+		return 4;
+
+	auto results = ca::channel<int>::make(4U);
+	if (!results || !results->push(42))
+		return 5;
+	results->close();
+	auto answer = results->pop();
+	auto after = results->pop();
+	if (!answer || *answer != 42 || after || after.error() != ca::errc::broken_pipe)
+		return 6;
+	return results->cleanup() ? 0 : 7;
+}
+```
+
+## `concurrent/channel.hpp`
+
+Performance of ca::channel<T, A>.
+
+- Layout: the handle is a pointer to the block, the cells, the index mask and the allocator (24 bytes with ca::heap). The block holds an mpmc_queue's two claim counters, then the line of the consumers' wait word (an event count bumped when an element arrives, the number of consumers asleep, the closed flag), the producers' line (the mirror, bumped when room appears), then the cells.
+- The elements move through the lock-free mpmc ring; blocking only adds sleeping. A thread that finds the ring empty (or full) counts itself as a sleeper, reads the event count, tries once more, and only then sleeps on the count with a futex. The other side, after each element it moves, issues one full fence and reads the sleeper count: the futex wake, a syscall, happens only when a thread actually sleeps. Without waiting, a push or pop costs the mpmc operation plus that fence.
+- No lock anywhere, no allocation after the factory; close() wakes every sleeper.
+- Time: O(1) per operation besides the waiting; cleanup O(n) for elements left.
+- Space: four 128-byte lines and capacity cells, one allocation from A.
+- Copy: none; the handle moves (the block stays where it is), but not while shared.
+
+Baseline a std::deque\<T> behind a std::mutex and two std::condition_variable (the textbook bounded buffer); one thread pushing and popping in turn, so nobody ever sleeps and the figures are the cost of the operations themselves:
+
+### struct `impl::channel_wait`
+
+```c++
+struct channel_wait final;
+```
+
+Where one side of a channel sleeps: an event count bumped when the other side makes progress, and how many of this side sleep on it.
+
+### struct `impl::channel_state`
+
+```c++
+struct channel_state final;
+```
+
+The shared part of a channel: the ring's counters, then the consumers' and the producers' wait lines; _closed is used on the consumers' line only.
+
+### function `impl::channel_signal`
+
+```c++
+inline auto channel_signal(ca::impl::channel_wait& wait) noexcept -> void;
+```
+
+Wakes one sleeper of wait, if any, after an element moved: the fence orders that move before the look at the sleepers, which a sleeper makes after counting itself.
+
+### struct `impl::channel_sleep`
+
+```c++
+struct channel_sleep final;
+```
+
+Sleeps until woken: what an untimed wait does, never failing.
+
+### struct `impl::channel_sleep_until`
+
+```c++
+struct channel_sleep_until final;
+```
+
+Sleeps until woken or the deadline, which fails with errc::timed_out.
+
+### class `channel`
+
+```c++
+template <typename T, ca::is_allocator A = ca::heap>
+class channel final;
+```
+
+Bounded FIFO of T between any number of producer and consumer threads that wait: push sleeps while the channel is full, pop while it is empty. Timed variants give up with errc::timed_out (deadlines on the monotonic clock, as sys::now(clock::monotonic)), try_ variants never wait. close() ends it: pushes fail with errc::broken_pipe from then on, pops still drain what is left, then fail the same way; every sleeper wakes. A failed push leaves its argument untouched. Build with make / make_in(allocator, capacity); share the channel by reference, and neither move it nor clean it up while a thread may use it. Close after the last push has returned: one racing with close may succeed after a consumer saw the channel closed and empty.
+
+### alias `channel::rebind`
+
+```c++
+template <ca::is_allocator B>
+using rebind = ca::channel<T, B>;
+```
+
+The same channel type over allocator B.
+
+### function `channel::make_in`
+
+```c++
+[[nodiscard]] static auto make_in(const A& allocator, const ca::usz capacity) noexcept -> ca::result<self>;
+```
+
+An open channel of at least capacity elements (> 0), rounded up to a power of two and to at least 2, from allocator.
+
+### function `channel::operator=`
+
+```c++
+auto operator=(self&& other) noexcept -> self&;
+```
+
+Takes other's channel and allocator; the previous one is released as by cleanup(). Traps when T is cleanable and elements remain: cleanup() first.
+
+### function `channel::capacity`
+
+```c++
+[[nodiscard]] constexpr auto capacity(void) const noexcept -> ca::usz;
+```
+
+Elements the channel holds when full; 0 after cleanup.
+
+### function `channel::size`
+
+```c++
+[[nodiscard]] auto size(void) const noexcept -> ca::usz;
+```
+
+Pushes claimed minus pops claimed, at some moment during the call.
+
+### function `channel::closed`
+
+```c++
+[[nodiscard]] auto closed(void) const noexcept -> bool;
+```
+
+Whether close() ran.
+
+### function `channel::push`
+
+```c++
+template <typename U>
+requires ca::is_constructible<T, U&&>
+[[nodiscard]] auto push(U&& value) noexcept -> ca::result<void>;
+```
+
+Appends a T made from value, sleeping while the channel is full; errc::broken_pipe once closed, value then untouched.
+
+### function `channel::push_until`
+
+```c++
+template <typename U>
+requires ca::is_constructible<T, U&&>
+[[nodiscard]] auto push_until(U&& value, const ca::i64 deadline) noexcept -> ca::result<void>;
+```
+
+push, giving up with errc::timed_out at deadline (monotonic nanoseconds).
+
+### function `channel::push_for`
+
+```c++
+template <typename U>
+requires ca::is_constructible<T, U&&>
+[[nodiscard]] auto push_for(U&& value, const ca::i64 nanoseconds) noexcept -> ca::result<void>;
+```
+
+push, giving up with errc::timed_out after nanoseconds.
+
+### function `channel::try_push`
+
+```c++
+template <typename U>
+requires ca::is_constructible<T, U&&>
+[[nodiscard]] auto try_push(U&& value) noexcept -> ca::result<void>;
+```
+
+push without waiting: errc::no_space when full, errc::broken_pipe once closed.
+
+### function `channel::pop`
+
+```c++
+[[nodiscard]] auto pop(void) noexcept -> ca::result<T>;
+```
+
+The oldest element, sleeping while the channel is empty; errc::broken_pipe once it is closed and empty.
+
+### function `channel::pop_until`
+
+```c++
+[[nodiscard]] auto pop_until(const ca::i64 deadline) noexcept -> ca::result<T>;
+```
+
+pop, giving up with errc::timed_out at deadline (monotonic nanoseconds).
+
+### function `channel::pop_for`
+
+```c++
+[[nodiscard]] auto pop_for(const ca::i64 nanoseconds) noexcept -> ca::result<T>;
+```
+
+pop, giving up with errc::timed_out after nanoseconds.
+
+### function `channel::try_pop`
+
+```c++
+[[nodiscard]] auto try_pop(void) noexcept -> ca::optional<T>;
+```
+
+The oldest element without waiting, or nothing when the channel is empty.
+
+### function `channel::close`
+
+```c++
+auto close(void) noexcept -> void;
+```
+
+Closes the channel and wakes every sleeper. Closing twice changes nothing.
+
+### function `channel::cleanup`
+
+```c++
+[[nodiscard]] auto cleanup(void) noexcept -> ca::result<void>;
+```
+
+Cleans up and destroys the elements left, then frees the block: capacity 0. No thread may use the channel during or after it. Returns the first element's cleanup error; everything is released regardless.
+
+## `concurrent/mpmc_queue.hpp`
+
+Performance of ca::mpmc_queue<T, A>.
+
+- Layout: the handle is a pointer to the block, the cells, the index mask and the allocator (24 bytes with ca::heap). The block holds the producers' claim counter and the consumers' on separate 128-byte lines, then the cells: a sequence number and room for a T each.
+- Dmitry Vyukov's bounded queue: a push claims a position with one compare-exchange on the producers' counter, then publishes through the cell's sequence (one release store); a pop mirrors it on the consumers' counter. Producers never touch the consumers' line, nor the other way round, and two threads meet on a cell only when the queue is near full or empty. No lock: a thread stopped in the middle of an operation delays only the element it claimed.
+- Time: try_push, try_emplace, try_pop O(1) besides retries of the compare-exchange under contention; cleanup O(n) for elements left.
+- Space: two 128-byte lines and capacity cells (8 bytes plus T, padded to T's alignment), one allocation from A made by the factory; never grows.
+- Copy: none; the handle moves (the block stays where it is), but not while shared.
+
+Baseline a std::deque\<T> behind a std::mutex; one thread pushing and popping in turn, the cost of the operations without contention (the harness runs on one CPU):
+
+### class `mpmc_queue`
+
+```c++
+template <typename T, ca::is_allocator A = ca::heap>
+class mpmc_queue final;
+```
+
+Bounded lock-free FIFO of T shared by any number of producer and consumer threads (Vyukov's array queue): try_push, try_emplace and try_pop from any thread, none of them blocking or allocating. A failed push leaves its argument untouched. Build with make / make_in(allocator, capacity); share the queue by reference, and neither move it nor clean it up while a thread may use it. channel<T, A> adds blocking and closing.
+
+### alias `mpmc_queue::rebind`
+
+```c++
+template <ca::is_allocator B>
+using rebind = ca::mpmc_queue<T, B>;
+```
+
+The same queue type over allocator B.
+
+### function `mpmc_queue::make_in`
+
+```c++
+[[nodiscard]] static auto make_in(const A& allocator, const ca::usz capacity) noexcept -> ca::result<self>;
+```
+
+A queue of at least capacity elements (> 0), rounded up to a power of two and to at least 2, from allocator.
+
+### function `mpmc_queue::operator=`
+
+```c++
+auto operator=(self&& other) noexcept -> self&;
+```
+
+Takes other's queue and allocator; the previous one is released as by cleanup(). Traps when T is cleanable and elements remain: cleanup() first.
+
+### function `mpmc_queue::capacity`
+
+```c++
+[[nodiscard]] constexpr auto capacity(void) const noexcept -> ca::usz;
+```
+
+Elements the queue holds when full; 0 after cleanup.
+
+### function `mpmc_queue::size`
+
+```c++
+[[nodiscard]] auto size(void) const noexcept -> ca::usz;
+```
+
+Pushes claimed minus pops claimed, at some moment during the call: exact when no thread is pushing or popping.
+
+### function `mpmc_queue::try_push`
+
+```c++
+template <typename U>
+requires ca::is_constructible<T, U&&>
+[[nodiscard]] auto try_push(U&& value) noexcept -> ca::result<void>;
+```
+
+Appends a T made from value, unless the queue is full (errc::no_space), value then untouched.
+
+### function `mpmc_queue::try_emplace`
+
+```c++
+template <typename... Args>
+requires ca::is_constructible<T, Args&&...>
+[[nodiscard]] auto try_emplace(Args&&... args) noexcept -> ca::result<void>;
+```
+
+Appends a T made from args, unless the queue is full (errc::no_space).
+
+### function `mpmc_queue::try_pop`
+
+```c++
+[[nodiscard]] auto try_pop(void) noexcept -> ca::optional<T>;
+```
+
+The oldest element, moved out, or nothing when the queue is empty.
+
+### function `mpmc_queue::cleanup`
+
+```c++
+[[nodiscard]] auto cleanup(void) noexcept -> ca::result<void>;
+```
+
+Cleans up and destroys the elements left, then frees the block: capacity 0. No thread may use the queue during or after it. Returns the first element's cleanup error; everything is released regardless.
+
+## `concurrent/spsc_queue.hpp`
+
+Performance of ca::spsc_queue<T, A>.
+
+- Layout: the handle is a pointer to the shared block, the slots, the index mask and the allocator (24 bytes with ca::heap); every thread reads it, none writes it. The block holds the consumer's line (its index and the last producer index it saw), the producer's line (the mirror), then the slots: no line written by both sides.
+- Each side reads the other's index only when its cached copy says the queue looks full (producer) or empty (consumer): a stream of pushes and pops makes one acquire load per lap of the other side, not per element. Publishing is one release store, a plain mov on x86: no locked instruction, no fence, on either side.
+- Capacity is a power of two: indices are free-running counts masked into the slots.
+- Time: try_push, try_emplace, try_pop O(1); cleanup O(n) for elements left.
+- Space: two 128-byte lines and capacity slots, one allocation from A (128-byte aligned, or T's alignment when larger), made by the factory; never grows.
+- Copy: none; the handle moves (the block stays where it is), but not while shared.
+
+Baseline a std::deque\<T> behind a std::mutex, the plain thread-safe FIFO; one thread pushing and popping in turn, so the figures are the cost of the operations themselves, without the cache-line transfers of two threads (the harness runs on one CPU):
+
+### struct `impl::spsc_indices`
+
+```c++
+struct spsc_indices final;
+```
+
+The shared indices of an spsc_queue: each side's line holds the index it writes and its cached copy of the other's.
+
+### class `spsc_queue`
+
+```c++
+template <typename T, ca::is_allocator A = ca::heap>
+class spsc_queue final;
+```
+
+Bounded lock-free FIFO of T between one producer thread and one consumer thread (Lamport's ring with cached indices): try_push and try_emplace on the producer only, try_pop on the consumer only, none of them ever blocks or allocates. A failed push leaves its argument untouched. Build with make / make_in(allocator, capacity); share the queue by reference, and neither move it nor clean it up while either side may use it. cleanup() cleans up and destroys the elements left, then frees the block.
+
+### alias `spsc_queue::rebind`
+
+```c++
+template <ca::is_allocator B>
+using rebind = ca::spsc_queue<T, B>;
+```
+
+The same queue type over allocator B.
+
+### function `spsc_queue::make_in`
+
+```c++
+[[nodiscard]] static auto make_in(const A& allocator, const ca::usz capacity) noexcept -> ca::result<self>;
+```
+
+A queue of at least capacity elements (> 0), rounded up to a power of two, from allocator.
+
+### function `spsc_queue::operator=`
+
+```c++
+auto operator=(self&& other) noexcept -> self&;
+```
+
+Takes other's queue and allocator; the previous one is released as by cleanup(). Traps when T is cleanable and elements remain: cleanup() first.
+
+### function `spsc_queue::capacity`
+
+```c++
+[[nodiscard]] constexpr auto capacity(void) const noexcept -> ca::usz;
+```
+
+Elements the queue holds when full; 0 after cleanup.
+
+### function `spsc_queue::size`
+
+```c++
+[[nodiscard]] auto size(void) const noexcept -> ca::usz;
+```
+
+Elements pushed and not popped, as of some moment during the call: exact on either side when the other is idle.
+
+### function `spsc_queue::try_push`
+
+```c++
+template <typename U>
+requires ca::is_constructible<T, U&&>
+[[nodiscard]] auto try_push(U&& value) noexcept -> ca::result<void>;
+```
+
+Producer: appends a T made from value, unless the queue is full (errc::no_space), value then untouched.
+
+### function `spsc_queue::try_emplace`
+
+```c++
+template <typename... Args>
+requires ca::is_constructible<T, Args&&...>
+[[nodiscard]] auto try_emplace(Args&&... args) noexcept -> ca::result<void>;
+```
+
+Producer: appends a T made from args, unless the queue is full (errc::no_space).
+
+### function `spsc_queue::try_pop`
+
+```c++
+[[nodiscard]] auto try_pop(void) noexcept -> ca::optional<T>;
+```
+
+Consumer: the oldest element, moved out, or nothing when the queue is empty.
+
+### function `spsc_queue::cleanup`
+
+```c++
+[[nodiscard]] auto cleanup(void) noexcept -> ca::result<void>;
+```
+
+Cleans up and destroys the elements left, then frees the block: capacity 0. Neither side may use the queue during or after it. Returns the first element's cleanup error; everything is released regardless.
+
+## `concurrent/impl/`
+
+The parts the concurrent queues share.
+
+- `queue_parts.hpp`: `queue_line`, the 128 bytes that keep indices written by different threads apart (x86 fetches cache lines in pairs); `queue_capacity` (a power of two, with a minimum), `queue_layout` / `queue_layout_of` (one block: a header of shared indices, then the slots at their alignment), and `queue_release`, which cleans up and destroys a left element.
+- `mpmc_core.hpp`: Vyukov's bounded multi-producer multi-consumer ring as free functions over a borrowed `mpmc_ring` (counters, cells, mask), so `mpmc_queue` and `channel` keep their own block layouts. Each cell's sequence number says whose turn it is: equal to the position, a producer may claim it; position + 1, a consumer may. Claiming is a compare-exchange on the side's counter; publishing is a release store of the next sequence, which is what orders the element's bytes for the other side. Capacity is at least 2: with one cell, full and empty would carry the same sequence.
+
+The channel's waits are event counts over `sys::futex_wait`: a sleeper counts itself, reads the event word, tries the queue once more, then sleeps on that word; the other side, after moving an element, fences and looks at the sleeper count, and only when it is not zero bumps the word and wakes one. Either the sleeper's last try sees the element, or the waker sees the sleeper, so no wake is lost, and an uncontended push or pop makes no syscall.
+
+## `concurrent/impl/mpmc_core.hpp`
+
+### struct `impl::mpmc_cell`
+
+```c++
+template <typename T>
+struct mpmc_cell final;
+```
+
+One slot of an mpmc ring: its sequence number, then room for a T. The sequence is the position a producer may claim it at (empty), or that position + 1 once filled.
+
+### struct `impl::mpmc_indices`
+
+```c++
+struct mpmc_indices final;
+```
+
+The claim counters of an mpmc ring, producers' and consumers' on lines of their own.
+
+### struct `impl::mpmc_ring`
+
+```c++
+template <typename T>
+struct mpmc_ring final;
+```
+
+An mpmc ring borrowed from its owner: the counters, mask + 1 cells.
+
+### function `impl::mpmc_start`
+
+```c++
+template <typename T>
+auto mpmc_start(const ca::impl::mpmc_ring<T> ring) noexcept -> void;
+```
+
+Constructs the cells of a new ring, each empty at its own position.
+
+### function `impl::mpmc_try_emplace`
+
+```c++
+template <typename T, typename... Args>
+[[nodiscard]] auto mpmc_try_emplace(const ca::impl::mpmc_ring<T> ring, Args&&... args) noexcept -> bool;
+```
+
+Claims the next position whose cell is empty and builds a T there from args; false when the ring is full (the cell at the next position still holds an element).
+
+### function `impl::mpmc_try_pop`
+
+```c++
+template <typename T>
+[[nodiscard]] auto mpmc_try_pop(const ca::impl::mpmc_ring<T> ring) noexcept -> ca::optional<T>;
+```
+
+Claims the oldest filled cell and moves its element out; nothing when the ring is empty (or its oldest element is still being written).
+
+### function `impl::mpmc_size`
+
+```c++
+template <typename T>
+[[nodiscard]] auto mpmc_size(const ca::impl::mpmc_ring<T> ring) noexcept -> ca::usz;
+```
+
+Elements claimed for writing and not yet claimed for reading, at some moment.
+
+### function `impl::mpmc_release`
+
+```c++
+template <typename T>
+auto mpmc_release(const ca::impl::mpmc_ring<T> ring, ca::error& first) noexcept -> void;
+```
+
+Cleans up and destroys the elements of a ring nobody uses any more, keeping the first error.
+
+## `concurrent/impl/queue_parts.hpp`
+
+### variable `impl::queue_line`
+
+```c++
+inline constexpr ca::usz queue_line = 128U;
+```
+
+What separates indices written by different threads: two cache lines, since x86 prefetches lines in pairs and would otherwise make neighbours share one.
+
+### struct `impl::queue_block`
+
+```c++
+struct queue_block final;
+```
+
+Where a queue's slots start and how large its block is: a header of size header, then count slots of slot bytes aligned to alignment.
+
+### function `impl::queue_capacity`
+
+```c++
+[[nodiscard]] inline auto queue_capacity(const ca::usz requested, const ca::usz minimum) noexcept -> ca::result<ca::usz>;
+```
+
+The power of two at least requested and at least minimum: errc::invalid_argument for 0, errc::out_of_memory past the largest.
+
+### function `impl::queue_layout`
+
+```c++
+[[nodiscard]] inline auto queue_layout(const ca::usz header, const ca::usz count, const ca::usz slot, const ca::usz slot_alignment) noexcept -> ca::result<ca::impl::queue_block>;
+```
+
+The layout of a block holding header bytes then count slots; errc::out_of_memory on overflow.
+
+### function `impl::queue_layout_of`
+
+```c++
+[[nodiscard]] inline auto queue_layout_of(const ca::usz header, const ca::usz count, const ca::usz slot, const ca::usz slot_alignment) noexcept -> ca::impl::queue_block;
+```
+
+queue_layout of a block already made, which cannot overflow: what its release needs.
+
+### function `impl::queue_release`
+
+```c++
+template <typename T>
+auto queue_release(T* const element, ca::error& first) noexcept -> void;
+```
+
+Cleans up (when T has cleanup) and destroys element, keeping the first error.
+
 ## `format/`
 
 Formatting, Python's `{}` syntax and C's `%` syntax, both parsed and checked when the program compiles: a placeholder that does not fit its argument, a missing argument or an extra one is a compile error naming the problem. There are no varargs and no runtime parsing.
@@ -3045,7 +3631,8 @@ I/O in memory: readers and writers over buffers and strings, a ring buffer strea
 | `io::memory_writer` | writes into fixed memory the caller provides: the snprintf of `format_to` |
 | `io::string_writer<S>` | appends to a `ca::str` or `inline_str`, formatting in place in its spare capacity |
 | `io::memory_reader` | a buffered reader over text it does not own: parse a string like a file |
-| `io::ring_buffer<A>` | an in-memory byte stream (FIFO) over a power-of-two ring |
+| `io::ring_buffer<A>` | an in-memory byte stream (FIFO) over a power-of-two ring, for one thread |
+| `io::spsc_ring_buffer<A>` | the same between two threads, one writing, one reading, lock-free |
 | `io::read_line(reader, line)` | the next line, without its `'\n'`, into a string or char array |
 | `io::read_to_end(reader, out)` | the rest of the input appended to a string or char array |
 
@@ -3454,6 +4041,173 @@ Ends a message at at: its bytes become readable.
 ```
 
 Frees the ring; afterwards capacity 0, every write dropped.
+
+## `io/spsc_ring_buffer.hpp`
+
+Performance of ca::io::spsc_ring_buffer\<A>.
+
+- Layout: the handle is a pointer to the shared block, the bytes, the capacity and the allocator (24 bytes with ca::heap). The block holds the consumer's line (its count and the last producer count it saw), the producer's line (its count, the last consumer count it saw, the message in progress, the sticky error), then the bytes, 64-byte aligned.
+- Each side reads the other's count only when its cached copy is not enough for the call: a read wanting more than it knows is there, a write or window wanting more room. Publishing is one release store, a plain mov on x86: no locked instruction, no fence, on either side.
+- read() and write() are one bounds check and at most two memcpy, as in ring_buffer. fill()/consume() and window()/drain()/settle() lend the ring itself, so parsing and formatting work in place across threads, without a staging copy. A message becomes visible to the consumer whole, at settle or at the end of write, never in part.
+- Unlike ring_buffer, an empty ring is not rewound to its start (that would write the producer's count from the consumer's side): a window or fill can stop at the end of the ring and continue past the wrap.
+- Time: read, write, fill, consume, window, settle O(1) besides the bytes copied.
+- Space: two 128-byte lines and capacity bytes, one allocation from A made by the factory; never grows.
+- Copy: none; the handle moves (the block stays where it is), but not while shared.
+
+Baseline a std::deque\<char> behind a std::mutex; ca is a 4 KiB ring; one thread writing and reading in turn, so the figures are the cost of the operations themselves, without the cache-line transfers of two threads (the harness runs on one CPU):
+
+### struct `impl::spsc_ring_state`
+
+```c++
+struct spsc_ring_state final;
+```
+
+The shared part of an spsc_ring_buffer: the consumer's line, then the producer's, each with the count it writes and its cached copy of the other's.
+
+### class `spsc_ring_buffer`
+
+```c++
+template <ca::is_allocator A = ca::heap>
+class spsc_ring_buffer final;
+```
+
+ring_buffer between two threads: one producer writes (write, window, drain, settle, flush, error, clear_error), one consumer reads (read, read_full, fill, consume); each side calls only its own methods, size() and space() are for both. Lock-free, never blocks: read returns 0 when the ring is empty, a write that does not fit is dropped whole with errc::no_space, also kept sticky on the producer's side until flush() or clear_error(). The consumer sees only whole messages. Build with make / make_in(allocator, capacity); share it by reference, and neither move it nor clean it up while either side may use it.
+
+### variable `spsc_ring_buffer::ALIGNMENT`
+
+```c++
+static constexpr ca::usz ALIGNMENT = 64U;
+```
+
+Alignment of the bytes: one cache line.
+
+### function `spsc_ring_buffer::make_in`
+
+```c++
+[[nodiscard]] static auto make_in(const A& allocator, const ca::usz capacity) noexcept -> ca::result<self>;
+```
+
+A ring of at least capacity bytes (> 0), rounded up to a power of two, from allocator.
+
+### function `spsc_ring_buffer::operator=`
+
+```c++
+auto operator=(self&& other) noexcept -> self&;
+```
+
+Takes other's ring and allocator; the previous ring is freed.
+
+### function `spsc_ring_buffer::size`
+
+```c++
+[[nodiscard]] auto size(void) const noexcept -> ca::usz;
+```
+
+Bytes written and not read yet, at some moment during the call.
+
+### function `spsc_ring_buffer::space`
+
+```c++
+[[nodiscard]] auto space(void) const noexcept -> ca::usz;
+```
+
+Bytes a write could take, at some moment during the call.
+
+### function `spsc_ring_buffer::error`
+
+```c++
+[[nodiscard]] auto error(void) const noexcept -> ca::error;
+```
+
+Producer: the sticky error, ok when none; kept until flush() or clear_error().
+
+### function `spsc_ring_buffer::read`
+
+```c++
+[[nodiscard]] auto read(const ca::span<ca::byte> buffer) noexcept -> ca::result<ca::usz>;
+```
+
+Consumer: up to buffer.size() bytes, oldest first; 0 when empty.
+
+### function `spsc_ring_buffer::read_full`
+
+```c++
+[[nodiscard]] auto read_full(const ca::span<ca::byte> buffer) noexcept -> ca::result<ca::usz>;
+```
+
+Consumer: read; everything published is available at once.
+
+### function `spsc_ring_buffer::fill`
+
+```c++
+[[nodiscard]] auto fill(void) noexcept -> ca::result<ca::sv::str>;
+```
+
+Consumer: the oldest unread bytes up to the end of the ring, in place; empty when the ring is. The rest, past the wrap, comes after consume. Valid until consume.
+
+### function `spsc_ring_buffer::consume`
+
+```c++
+auto consume(const ca::usz count) noexcept -> void;
+```
+
+Consumer: marks count unread bytes (at most those fill or read last saw) as read.
+
+### function `spsc_ring_buffer::write`
+
+```c++
+[[nodiscard]] auto write(const ca::span<const ca::byte> bytes) noexcept -> ca::result<void>;
+```
+
+Producer: appends bytes when they fit, else drops them (errc::no_space).
+
+### function `spsc_ring_buffer::clear_error`
+
+```c++
+auto clear_error(void) noexcept -> void;
+```
+
+Producer: forgets the sticky error, once handled: writes are accepted again.
+
+### function `spsc_ring_buffer::flush`
+
+```c++
+[[nodiscard]] auto flush(void) noexcept -> ca::result<void>;
+```
+
+Producer: nothing to write out: returns the sticky error and clears it.
+
+### function `spsc_ring_buffer::window`
+
+```c++
+[[nodiscard]] auto window(void) noexcept -> ca::span<char>;
+```
+
+Producer: free space after the last write, up to the end of the ring or the oldest unread byte; empty when full or after an error. See is_windowed_writer.
+
+### function `spsc_ring_buffer::drain`
+
+```c++
+[[nodiscard]] auto drain(char* const at) noexcept -> ca::result<ca::span<char>>;
+```
+
+Producer: keeps the bytes up to at for the message and lends the space past the wrap; when there is none the whole message is dropped (errc::no_space).
+
+### function `spsc_ring_buffer::settle`
+
+```c++
+[[nodiscard]] auto settle(char* const at) noexcept -> ca::result<void>;
+```
+
+Producer: ends a message at at: its bytes become readable, all at once.
+
+### function `spsc_ring_buffer::cleanup`
+
+```c++
+[[nodiscard]] auto cleanup(void) noexcept -> ca::result<void>;
+```
+
+Frees the ring; afterwards capacity 0. Neither side may use it during or after.
 
 ## `io/string_writer.hpp`
 

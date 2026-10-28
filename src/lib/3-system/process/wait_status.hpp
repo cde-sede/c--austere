@@ -1,6 +1,7 @@
 #ifndef ca_system_process_wait_status_hpp
 #define ca_system_process_wait_status_hpp
 
+#include "1-primitives/integers/i32.hpp"
 #include "2-vocabulary/nullopt.hpp"
 #include "2-vocabulary/optional.hpp"
 
@@ -17,7 +18,7 @@ namespace ca {
 
 		// -- WAIT STATUS ----------------------------------------------------
 
-		/* @DOC How a child process ended: an exit code, or the signal that killed it. */
+		/* @DOC How a child process ended: which child, and an exit code or the signal that killed it. */
 		class wait_status final {
 
 
@@ -30,6 +31,7 @@ namespace ca {
 
 				// -- private members ----------------------------------------
 
+				ca::i32 _child;
 				bool _exited;
 				int _value;
 
@@ -38,12 +40,17 @@ namespace ca {
 
 				// -- public lifecycle ---------------------------------------
 
-				constexpr wait_status(const bool exited, const int value) noexcept
-				: _exited{exited}, _value{value} {
+				constexpr wait_status(const ca::i32 child, const bool exited, const int value) noexcept
+				: _child{child}, _exited{exited}, _value{value} {
 				}
 
 
 				// -- accessors ----------------------------------------------
+
+				/* @DOC Id of the child reaped: the one a waitpid for -1 or a process group found. */
+				[[nodiscard]] constexpr auto child(void) const noexcept -> ca::i32 {
+					return _child;
+				}
 
 				/* @DOC Whether the child exited (rather than being killed by a signal). */
 				[[nodiscard]] constexpr auto exited(void) const noexcept -> bool {

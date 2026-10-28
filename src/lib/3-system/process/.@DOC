@@ -5,8 +5,8 @@ usage, and signal handling.
 
 | Function | Does |
 |---|---|
-| `sys::posix_spawn(path, argv, envp, actions)` | starts a program as a child, returns its pid |
-| `sys::posix_spawnp(file, argv, envp, actions)` | the same, looking file up in PATH |
+| `sys::posix_spawn(path, argv, envp, actions, options)` | starts a program as a child, returns its pid |
+| `sys::posix_spawnp(file, argv, envp, actions, options)` | the same, looking file up in PATH |
 | `sys::fork()` | duplicates the process: the child's pid in the parent, 0 in the child |
 | `sys::execve`, `sys::execvp` | replace the process image |
 | `sys::waitpid(pid)` | waits for a child and reaps it: a `wait_status` |
@@ -14,12 +14,15 @@ usage, and signal handling.
 | `sys::exit(status)`, `sys::exit_immediately(status)` | end the process, with or without atexit handlers |
 
 `argv` and `envp` are null-terminated arrays of mutable C strings, as POSIX takes them; a null
-`envp` passes the current environment. A `wait_status` tells how the child ended:
-`exit_code()` and `signal()` are optionals, `succeeded()` means exit code 0.
+`envp` passes the current environment. A `wait_status` tells which child ended (`child()`, what
+a wait for -1 or `-group` needs) and how: `exit_code()` and `signal()` are optionals,
+`succeeded()` means exit code 0.
 
 `spawn_actions` lists descriptor changes the child applies before running the program (dup2,
 close, open), so a child's standard streams can be redirected without fork. It follows ca's
 explicit lifecycle: `make()` builds it, `cleanup()` frees it; it moves but does not copy.
+`spawn_options` is a plain value (the default changes nothing): `set_process_group(group)` has
+the child join group first, or with 0 lead a new one, as a shell starts a job.
 
 ```c++
 #include "ca/file.hpp"
@@ -69,7 +72,8 @@ buffered output would otherwise be written twice.
 ### Signals
 
 `sys::signals` names the signal numbers without `<signal.h>` (`interrupt`, `terminate`, `kill`,
-`child`, `pipe`, `user1`, ...). `sys::sigaction(signal, handler)` installs a handler with
+`child`, `pipe`, `user1`, ..., and for job control `stop`, `resume`, `terminal_stop`,
+`background_read`, `background_write`, `window_resize`). `sys::sigaction(signal, handler)` installs a handler with
 interrupted calls restarted, or a `signal_disposition` (`default_action`, `ignore`).
 `signal_set` is a constexpr set of signal numbers for `sigprocmask` (`block`, `unblock`,
 `replace`) and `sigwait`, which takes a blocked signal synchronously: the safe way to handle
@@ -90,6 +94,43 @@ auto main(void) -> int {
 	if (!taken || *taken != ca::sys::signals::user1)
 		return 3;
 	return ca::sys::sigprocmask(ca::sys::mask_change::replace, *previous) ? 0 : 4;
+}
+```
+
+`sigwaitinfo(set)` takes the signal with a `signal_info`: its number, how it was sent
+(`code()`, `signal_codes::user` or `queue`), the sender's pid and uid, and the value
+`sigqueue(pid, signal, value)` carried. `sigtimedwait(set, nanoseconds)` waits at most that long
+and fails with `errc::timed_out`; 0 polls. Both, and `sigqueue`, are Linux-only
+(`errc::not_supported` elsewhere).
+
+`sigaction(signal, handler, flags)` takes `sigaction_flags` (`restart`, `on_alternate_stack`,
+`no_defer`, `reset_handler`) instead of the default restart. A handler meant to survive a stack
+overflow runs `on_alternate_stack`, on the memory `sigaltstack(stack)` gives the thread; an empty
+span removes it, which a thread must do before that memory goes away.
+
+```c++
+#include "ca/process.hpp"
+#include "ca/span.hpp"
+
+static char alternate[65536];
+
+static auto on_overflow(int) -> void {
+	ca::sys::exit_immediately(70);
+}
+
+auto main(void) -> int {
+	if (!ca::sys::sigaltstack(ca::span<char>{alternate}))
+		return 1;
+	if (!ca::sys::sigaction(ca::sys::signals::segv, on_overflow, ca::sys::sigaction_flags::on_alternate_stack))
+		return 2;
+	ca::sys::signal_set set;
+	set.add(ca::sys::signals::user1);
+	if (!ca::sys::sigprocmask(ca::sys::mask_change::block, set))
+		return 3;
+	if (!ca::sys::sigqueue(ca::sys::getpid(), ca::sys::signals::user1, 7))
+		return 4;
+	auto info = ca::sys::sigtimedwait(set, 1000000000);
+	return info && info->queued() && info->value() == 7 ? 0 : 5;
 }
 ```
 

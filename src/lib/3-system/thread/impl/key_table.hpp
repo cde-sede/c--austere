@@ -17,20 +17,25 @@ namespace ca {
 
 		// -- KEY TABLE ------------------------------------------------------
 
-		/* @DOC Thread keys without libc, for a process of one thread (ca starts none yet): one
-		   value per key, process-wide. What libca_runtime's pthread_key_create, setspecific and
-		   getspecific are; ca::sys::thread_key_create and thread_key_set call those. As glibc's
-		   for the main thread, destructors never run. Linux x86-64 only. */
+		/* @DOC Thread keys without libc: what libca_runtime's pthread_key_create, setspecific
+		   and getspecific are. Values per thread, in thread_local storage; destructors run when a
+		   thread ca started exits (run_key_destructors), never for the main thread, as glibc.
+		   Linux x86-64 only. */
 		namespace impl {
 
-			/* @DOC A new key, its value null. errc::try_again once 128 exist. */
-			[[nodiscard]] auto create_key(void) noexcept -> ca::result<ca::usz>;
+			/* @DOC A new key, its value null in every thread. errc::try_again once 128 exist. */
+			[[nodiscard]] auto create_key(void (*destructor)(void*)) noexcept -> ca::result<ca::usz>;
 
-			/* @DOC Sets key's value. errc::invalid_argument for a key never created. */
+			/* @DOC Sets key's value in the calling thread. errc::invalid_argument for a key never
+			   created. */
 			[[nodiscard]] auto set_key(ca::usz key, void* value) noexcept -> ca::result<void>;
 
-			/* @DOC key's value; null for a key never created. */
+			/* @DOC key's value in the calling thread; null for a key never created. */
 			[[nodiscard]] auto key_value(ca::usz key) noexcept -> void*;
+
+			/* @DOC The calling thread's destructors, in key order, of every non-null value (cleared
+			   first), again while they set values: four passes at most (PTHREAD_DESTRUCTOR_ITERATIONS). */
+			auto run_key_destructors(void) noexcept -> void;
 
 		} // namespace impl
 

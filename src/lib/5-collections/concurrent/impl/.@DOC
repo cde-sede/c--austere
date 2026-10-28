@@ -1,0 +1,19 @@
+The parts the concurrent queues share.
+
+- `queue_parts.hpp`: `queue_line`, the 128 bytes that keep indices written by different threads
+  apart (x86 fetches cache lines in pairs); `queue_capacity` (a power of two, with a minimum),
+  `queue_layout` / `queue_layout_of` (one block: a header of shared indices, then the slots at
+  their alignment), and `queue_release`, which cleans up and destroys a left element.
+- `mpmc_core.hpp`: Vyukov's bounded multi-producer multi-consumer ring as free functions over a
+  borrowed `mpmc_ring` (counters, cells, mask), so `mpmc_queue` and `channel` keep their own
+  block layouts. Each cell's sequence number says whose turn it is: equal to the position, a
+  producer may claim it; position + 1, a consumer may. Claiming is a compare-exchange on the
+  side's counter; publishing is a release store of the next sequence, which is what orders the
+  element's bytes for the other side. Capacity is at least 2: with one cell, full and empty
+  would carry the same sequence.
+
+The channel's waits are event counts over `sys::futex_wait`: a sleeper counts itself, reads the
+event word, tries the queue once more, then sleeps on that word; the other side, after moving an
+element, fences and looks at the sleeper count, and only when it is not zero bumps the word and
+wakes one. Either the sleeper's last try sees the element, or the waker sees the sleeper, so no
+wake is lost, and an uncontended push or pop makes no syscall.

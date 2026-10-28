@@ -12,11 +12,10 @@
 
    1. _start (asm): the kernel leaves argc, argv, envp and the auxiliary vector on the stack;
       rdi = that stack pointer, the stack aligned to 16, then start(), which never returns.
-   2. TLS (variant II): the PT_TLS image copied below the thread pointer at the offset the
-      linker gave variables (p_memsz rounded up to p_align, not to the pointer's own 64-byte
-      alignment), its tail zeroed (fresh pages), the
-      thread control block above it (self pointer at %fs:0, stack canary at %fs:0x28 from
-      AT_RANDOM), then arch_prctl(ARCH_SET_FS). Until then nothing may touch %fs: no
+   2. TLS (variant II, laid out by ca::sys::impl, thread/impl/tls, which threads ca starts
+      share): the PT_TLS image found and kept in sys::impl::program_tls, copied below the
+      thread pointer in fresh pages, the control block above it (stack canary from AT_RANDOM),
+      then arch_prctl(ARCH_SET_FS). Until then nothing may touch %fs: no
       thread_local, no ca::syscall call that fails (last_error is thread_local), no stack
       protector (no_stack_protector).
    3. preinit_array and init_array, each called (argc, argv, envp) as glibc does, so ca's own
@@ -32,6 +31,7 @@
 #include "1-primitives/integers/usz.hpp"
 #include "3-system/syscall/impl/enter.hpp"
 #include "3-system/syscall/syscalls.hpp"
+#include "3-system/thread/impl/tls.hpp"
 
 #include <elf.h>
 
@@ -56,7 +56,6 @@ extern "C" [[gnu::visibility("hidden")]] init_function __init_array_end[]; // ns
 extern "C" [[gnu::visibility("hidden"), gnu::weak]] const Elf64_Dyn _DYNAMIC[]; // ns-leak: ignore
 extern "C" [[gnu::visibility("hidden")]] const Elf64_Ehdr __ehdr_start; // ns-leak: ignore
 
-static constexpr ca::usz CONTROL_BLOCK = 256U;
 static constexpr ca::isz ARCH_SET_FS = 0x1002;
 
 /* Raw syscall, no error handling: TLS may not exist yet. */
@@ -129,48 +128,18 @@ template <typename... As>
 /* The main thread's TLS block and control block, then %fs. */
 [[gnu::no_stack_protector]] static auto set_up_thread(const ca::u64* const auxv) noexcept -> void {
 
-	const Elf64_Phdr* const segments = reinterpret_cast<const Elf64_Phdr*>(auxiliary(auxv, AT_PHDR));
-	const ca::usz count = auxiliary(auxv, AT_PHNUM);
-	ca::u64 bias = 0U;
-	bool placed = false;
-	const Elf64_Phdr* tls = nullptr;
-	for (ca::usz i = 0U; i < count; ++i) {
-		if (segments[i].p_type == PT_PHDR) {
-			  bias = reinterpret_cast<ca::u64>(segments) - segments[i].p_vaddr;
-			placed = true;
-		} else if (segments[i].p_type == PT_TLS) {
-			tls = segments + i;
-		}
-	}
-	for (ca::usz i = 0U; i < count && !placed; ++i) {
-		if (segments[i].p_type == PT_LOAD && segments[i].p_offset == 0U) {
-			  bias = reinterpret_cast<ca::u64>(segments) - __ehdr_start.e_phoff - segments[i].p_vaddr;
-			placed = true;
-		}
-	}
-	ca::usz align = 64U;
-	ca::usz size = 0U;
-	if (tls != nullptr) {
-		const ca::usz own = tls->p_align > 1U ? tls->p_align : 1U;
-		if (own > align)
-			align = own;
-		size = (tls->p_memsz + own - 1U) & ~(own - 1U);
-	}
-	const ca::usz length = (size + CONTROL_BLOCK + align + 4095U) & ~ca::usz{4095U};
+	const ca::sys::impl::tls_image image = ca::sys::impl::find_tls_image(reinterpret_cast<const void*>(auxiliary(auxv, AT_PHDR)), auxiliary(auxv, AT_PHNUM));
+	ca::sys::impl::program_tls = image;
+	const ca::usz length = (ca::sys::impl::tls_area_size(image) + 4095U) & ~ca::usz{4095U};
 	const ca::isz block = raw(ca::syscall::number::mmap, 0, length, 3, 0x22, -1, 0);
 	if (block < 0 && block > -4096) [[unlikely]]
 		raw(ca::syscall::number::exit_group, 127);
-	const ca::u64 aligned = (static_cast<ca::u64>(block) + size + align - 1U) & ~static_cast<ca::u64>(align - 1U);
-	char* const pointer = reinterpret_cast<char*>(aligned);
-	if (tls != nullptr)
-		copy(pointer - size, reinterpret_cast<const char*>(bias + tls->p_vaddr), tls->p_filesz);
-	reinterpret_cast<ca::u64*>(pointer)[0] = aligned;
 	const ca::u8* const random = reinterpret_cast<const ca::u8*>(auxiliary(auxv, AT_RANDOM));
 	ca::u64 canary = 0U;
 	if (random != nullptr)
 		copy(reinterpret_cast<char*>(&canary), reinterpret_cast<const char*>(random), sizeof(canary));
-	reinterpret_cast<ca::u64*>(pointer)[5] = canary & ~ca::u64{0xff};
-	raw(ca::syscall::number::arch_prctl, ARCH_SET_FS, aligned);
+	const ca::u64 pointer = ca::sys::impl::install_tls(image, reinterpret_cast<char*>(block), canary & ~ca::u64{0xff});
+	raw(ca::syscall::number::arch_prctl, ARCH_SET_FS, pointer);
 }
 
 extern "C" [[noreturn, gnu::no_stack_protector, gnu::used]] auto ca_runtime_start(ca::u64* const stack) noexcept -> void { // ns-leak: ignore

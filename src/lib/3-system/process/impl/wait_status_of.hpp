@@ -18,7 +18,7 @@ namespace ca {
 
 		namespace impl {
 
-			[[nodiscard]] auto wait_status_of(int raw) noexcept -> ca::sys::wait_status;
+			[[nodiscard]] auto wait_status_of(ca::i32 child, int raw) noexcept -> ca::sys::wait_status;
 
 		} // namespace impl
 

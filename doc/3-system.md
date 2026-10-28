@@ -258,6 +258,7 @@ Files and directories through their POSIX calls, one wrapper per call, each retu
 | names | `rename`, `rename_noreplace`, `renameat`, `link`, `linkat`, `symlink`, `symlinkat`, `readlink`, `readlinkat`, `realpath`, `unlink`, `unlinkat` |
 | directories | `mkdir`, `mkdirat`, `mkdtemp`, `rmdir`, `opendir`, `fdopendir`, `readdir`, `dirfd`, `closedir`, `chdir`, `getcwd` |
 | ownership | `chmod`, `fchmod`, `chown`, `fchown`, `lchown`, `umask`, `utimens` |
+| file systems | `mount`, `umount` (flags in `mount_flags`, `umount_flags`), `sync` |
 
 The flags of `open` are the raw values of the `ca::fs` options (`fs::access::READ_ONLY`, `fs::create_t::OPEN_VALUE`, ...), defined without `<fcntl.h>`; `fs::descriptor` (layer 6) combines them as typed options instead, and closes the descriptor for you.
 
@@ -321,6 +322,7 @@ auto main(void) -> int {
 - `realpath` returns a block to release with `ca::sys::free`.
 - `rename_noreplace` fails with `errc::exists` atomically instead of replacing, where the file system supports it.
 - The `*at` variants resolve relative paths against an open directory (`sys::at::cwd` for the working directory), which avoids races on paths that change underneath; their flags are in `sys::at` (`symlink_nofollow`, `remove_directory`, ...).
+- `mount` and `umount` are Linux only (`errc::not_supported` elsewhere) and need CAP_SYS_ADMIN, failing with `errc::not_permitted` without it; `umount` is umount2.
 - `file_status` gives times in nanoseconds since the epoch, permissions as the 07777 bits, and the type as a `file_kind`.
 
 ## `file/access.hpp`
@@ -749,6 +751,26 @@ Creates a new directory, mode 0700, from pattern: a path ending in "XXXXXX", rew
 
 Creates and opens a new file, read-write, mode 0600, from pattern: a path ending in "XXXXXX", rewritten in place to the name chosen. flags: 0, or the OPEN_VALUE of fs::cloexec, fs::append and fs::sync.
 
+## `file/mount.hpp`
+
+### function `mount`
+
+```c++
+[[nodiscard]] auto mount(const char* source, const char* target, const char* type, ca::u64 flags, const void* data) noexcept -> ca::result<void>;
+```
+
+Attaches the file system source of kind type at directory target, with mount_flags and file-system-specific data. type and data may be null where flags make them unused (bind, move, remount, propagation changes). errc::not_permitted without CAP_SYS_ADMIN; errc::not_supported outside Linux.
+
+## `file/mount_flags.hpp`
+
+### namespace `mount_flags`
+
+```c++
+namespace mount_flags;
+```
+
+The flags argument of mount, Linux's MS_* values without \<sys/mount.h>. Checked against it when the library builds.
+
 ## `file/open.hpp`
 
 ### function `open`
@@ -939,6 +961,16 @@ Creates a symlink at link pointing to target.
 
 Creates symlink link (relative to directory dir) pointing at target, stored as given.
 
+## `file/sync.hpp`
+
+### function `sync`
+
+```c++
+[[nodiscard]] auto sync(void) noexcept -> ca::result<void>;
+```
+
+() causes all pending modifications to filesystem metadata and cached file data to be written to the underlying filesystems. The operation does not report synchronization errors.
+
 ## `file/truncate.hpp`
 
 ### function `truncate`
@@ -958,6 +990,26 @@ Sets the size of file path: cut, or extended with zeros.
 ```
 
 Sets the mask of permission bits that file creation clears; returns the previous one. Never fails; process-wide.
+
+## `file/umount.hpp`
+
+### function `umount`
+
+```c++
+[[nodiscard]] auto umount(const char* target, int flags) noexcept -> ca::result<void>;
+```
+
+Detaches the file system mounted at target, with umount_flags (umount2). errc::busy while in use unless detach; errc::not_supported outside Linux.
+
+## `file/umount_flags.hpp`
+
+### namespace `umount_flags`
+
+```c++
+namespace umount_flags;
+```
+
+The flags argument of umount, Linux's MNT_* and UMOUNT_* values without \<sys/mount.h>. Checked against it when the library builds.
 
 ## `file/unchanged_id.hpp`
 
@@ -1264,6 +1316,27 @@ Descriptor plumbing beyond plain reads and writes: pipes, waiting on several des
 | `sys::readv(fd, buffers)`, `sys::writev(fd, buffers)` | one call over several `io_buffer`s |
 | `sys::isatty(fd)` | whether fd is a terminal |
 | `sys::get_terminal_size(fd)` | rows and columns of the terminal fd is attached to |
+| `sys::tcgetattr(fd)` | the terminal's settings, as `terminal_settings`; `not_a_terminal` otherwise |
+| `sys::tcsetattr(fd, settings, when)` | applies settings `now` (the default), after a `drain`, or with a `flush` of unread input |
+| `sys::enter_raw_mode(fd)` | puts the terminal in raw mode; returns the settings it had, to restore |
+| `sys::tcgetpgrp(fd)`, `sys::tcsetpgrp(fd, group)` | the foreground process group of the controlling terminal, read or given |
+
+`terminal_settings` is struct termios without `<termios.h>`: the flag words `input()`, `output()`, `control()`, `local()` with their `set_` counterparts, bits from `sys::terminal_input`, `terminal_output`, `terminal_control` and `terminal_local`, and the control characters by slot (`character(slot)`, `set_character(slot, value)`, slots in `sys::terminal_character`). `raw()` is a copy in raw mode, as cfmakeraw makes it. On Linux the settings have the kernel's layout and go to ioctl as they are.
+
+```c++
+#include "ca/error.hpp"
+#include "ca/io.hpp"
+
+auto main(void) -> int {
+	auto previous = ca::sys::enter_raw_mode(0);
+	if (!previous)
+		return previous.error() == ca::errc::not_a_terminal ? 0 : 1;
+	auto raw = ca::sys::tcgetattr(0);
+	if (!raw || (raw->local() & ca::sys::terminal_local::echo) != 0U)
+		return 2;
+	return ca::sys::tcsetattr(0, *previous) ? 0 : 3;
+}
+```
 
 `poll_events` holds the event bits without `<poll.h>`: `readable`, `writable`, `urgent`, and the reported-only `error`, `hangup` and `invalid`. A `poll_entry` records the events asked for and, after the call, those that occurred (`reported()`, `has(bits)`).
 
@@ -1317,6 +1390,16 @@ An `io_buffer` has the layout of `struct iovec`, so an array of them goes to the
 ```
 
 Makes target a copy of fd, closing what target held; the copy is not close-on-exec.
+
+## `io/enter_raw_mode.hpp`
+
+### function `enter_raw_mode`
+
+```c++
+[[nodiscard]] auto enter_raw_mode(int fd) noexcept -> ca::result<ca::sys::terminal_settings>;
+```
+
+Puts the terminal fd is attached to in raw mode (terminal_settings::raw), discarding unread input; returns the settings it had, for tcsetattr to restore.
 
 ## `io/get_terminal_size.hpp`
 
@@ -1457,6 +1540,117 @@ poll event bits, without <poll.h>. Checked against it when the library builds. T
 
 Reads into buffers in order, filling each before the next; 0 at end of file. count is at most 1024 (IOV_MAX). Retries on EINTR.
 
+## `io/tcgetattr.hpp`
+
+### function `tcgetattr`
+
+```c++
+[[nodiscard]] auto tcgetattr(int fd) noexcept -> ca::result<ca::sys::terminal_settings>;
+```
+
+Settings of the terminal fd is attached to; fails with not_a_terminal on anything else.
+
+## `io/tcgetpgrp.hpp`
+
+### function `tcgetpgrp`
+
+```c++
+[[nodiscard]] auto tcgetpgrp(int fd) noexcept -> ca::result<ca::i32>;
+```
+
+Foreground process group of the terminal fd is attached to, which must be the calling process's controlling terminal; not_a_terminal otherwise.
+
+## `io/tcsetattr.hpp`
+
+### function `tcsetattr`
+
+```c++
+[[nodiscard]] auto tcsetattr(int fd, const ca::sys::terminal_settings& settings,
+    ca::sys::terminal_change when = ca::sys::terminal_change::now) noexcept -> ca::result<void>;
+```
+
+Gives the terminal fd is attached to settings, applied when says; retries on EINTR.
+
+## `io/tcsetpgrp.hpp`
+
+### function `tcsetpgrp`
+
+```c++
+[[nodiscard]] auto tcsetpgrp(int fd, ca::i32 group) noexcept -> ca::result<void>;
+```
+
+Makes group the foreground process group of the terminal fd is attached to, the caller's controlling terminal, group being in the caller's session. Called from a background group, it stops the caller with signals::background_write unless that signal is ignored or blocked, as a shell does while it hands the terminal back and forth.
+
+## `io/terminal_change.hpp`
+
+### enum `terminal_change`
+
+```c++
+enum class terminal_change;
+```
+
+When tcsetattr applies new settings: at once, once pending output is written, or then also discarding unread input.
+
+## `io/terminal_flags.hpp`
+
+### namespace `terminal_input`
+
+```c++
+namespace terminal_input;
+```
+
+termios input flags (c_iflag), without <termios.h>. These, and the other terminal flags and character slots, are checked against it when the library builds.
+
+### namespace `terminal_output`
+
+```c++
+namespace terminal_output;
+```
+
+termios output flags (c_oflag).
+
+### namespace `terminal_control`
+
+```c++
+namespace terminal_control;
+```
+
+termios control flags (c_cflag). size is the mask over size_5 to size_8.
+
+### namespace `terminal_local`
+
+```c++
+namespace terminal_local;
+```
+
+termios local flags (c_lflag).
+
+### namespace `terminal_character`
+
+```c++
+namespace terminal_character;
+```
+
+Slots of the termios control characters (c_cc). minimum and time drive reads outside canonical mode: a read returns once minimum bytes arrived, or time tenths of a second after the last one. count is the number of slots.
+
+## `io/terminal_settings.hpp`
+
+### class `terminal_settings`
+
+```c++
+class terminal_settings final;
+```
+
+A terminal's settings, struct termios without <termios.h>: the four flag words (sys::terminal_input, terminal_output, terminal_control, terminal_local) and the control characters (slots in sys::terminal_character; character and set_character trap past count). On Linux it has the kernel's layout and goes to ioctl uncopied.
+
+### function `terminal_settings::raw`
+
+```c++
+[[nodiscard]] constexpr auto raw(void) const noexcept -> self;
+```
+
+These settings in raw mode, as cfmakeraw makes them: bytes pass through unprocessed and unechoed, one at a time (minimum 1, time 0), with no signal keys and no flow control.
+
 ## `io/terminal_size.hpp`
 
 ### class `terminal_size`
@@ -1476,6 +1670,36 @@ Size of a terminal window, in character cells.
 ```
 
 Writes buffers in order, as one write; returns how many bytes. count is at most 1024 (IOV_MAX). Retries on EINTR.
+
+## `io/impl/`
+
+`terminal_layout.hpp`: the friend of `terminal_settings` that knows struct termios. On Linux the settings already have the kernel's layout (checked field by field against `<asm/termbits.h>`), so `tcgetattr` and `tcsetattr` hand them to the TCGETS and TCSETS ioctls as they are, and the copies go unused. Elsewhere `to_native` and `from_native` copy to and from libc's `termios`, whose flag words are wider and whose speeds are separate fields, kept in the settings so a round trip leaves them unchanged.
+
+## `io/impl/terminal_layout.hpp`
+
+### struct `impl::terminal_layout`
+
+```c++
+struct terminal_layout final;
+```
+
+Copies between terminal_settings and struct termios, where the layouts differ.
+
+### function `impl::terminal_layout::to_native`
+
+```c++
+static auto to_native(const ca::sys::terminal_settings& settings, void* native) noexcept -> void;
+```
+
+Fills struct termios native from settings.
+
+### function `impl::terminal_layout::from_native`
+
+```c++
+[[nodiscard]] static auto from_native(const void* native) noexcept -> ca::sys::terminal_settings;
+```
+
+The settings in struct termios native.
 
 ## `machine/`
 
@@ -2003,17 +2227,17 @@ Processes and signals: starting programs, waiting for them, identities, resource
 
 | Function | Does |
 |---|---|
-| `sys::posix_spawn(path, argv, envp, actions)` | starts a program as a child, returns its pid |
-| `sys::posix_spawnp(file, argv, envp, actions)` | the same, looking file up in PATH |
+| `sys::posix_spawn(path, argv, envp, actions, options)` | starts a program as a child, returns its pid |
+| `sys::posix_spawnp(file, argv, envp, actions, options)` | the same, looking file up in PATH |
 | `sys::fork()` | duplicates the process: the child's pid in the parent, 0 in the child |
 | `sys::execve`, `sys::execvp` | replace the process image |
 | `sys::waitpid(pid)` | waits for a child and reaps it: a `wait_status` |
 | `sys::try_waitpid(pid)` | the same without blocking: nothing while the child runs |
 | `sys::exit(status)`, `sys::exit_immediately(status)` | end the process, with or without atexit handlers |
 
-`argv` and `envp` are null-terminated arrays of mutable C strings, as POSIX takes them; a null `envp` passes the current environment. A `wait_status` tells how the child ended: `exit_code()` and `signal()` are optionals, `succeeded()` means exit code 0.
+`argv` and `envp` are null-terminated arrays of mutable C strings, as POSIX takes them; a null `envp` passes the current environment. A `wait_status` tells which child ended (`child()`, what a wait for -1 or `-group` needs) and how: `exit_code()` and `signal()` are optionals, `succeeded()` means exit code 0.
 
-`spawn_actions` lists descriptor changes the child applies before running the program (dup2, close, open), so a child's standard streams can be redirected without fork. It follows ca's explicit lifecycle: `make()` builds it, `cleanup()` frees it; it moves but does not copy.
+`spawn_actions` lists descriptor changes the child applies before running the program (dup2, close, open), so a child's standard streams can be redirected without fork. It follows ca's explicit lifecycle: `make()` builds it, `cleanup()` frees it; it moves but does not copy. `spawn_options` is a plain value (the default changes nothing): `set_process_group(group)` has the child join group first, or with 0 lead a new one, as a shell starts a job.
 
 ```c++
 #include "ca/file.hpp"
@@ -2061,7 +2285,7 @@ A forked child calls `exit_immediately`, which runs no handler and flushes nothi
 
 ### Signals
 
-`sys::signals` names the signal numbers without `<signal.h>` (`interrupt`, `terminate`, `kill`, `child`, `pipe`, `user1`, ...). `sys::sigaction(signal, handler)` installs a handler with interrupted calls restarted, or a `signal_disposition` (`default_action`, `ignore`). `signal_set` is a constexpr set of signal numbers for `sigprocmask` (`block`, `unblock`, `replace`) and `sigwait`, which takes a blocked signal synchronously: the safe way to handle signals without running code inside a handler.
+`sys::signals` names the signal numbers without `<signal.h>` (`interrupt`, `terminate`, `kill`, `child`, `pipe`, `user1`, ..., and for job control `stop`, `resume`, `terminal_stop`, `background_read`, `background_write`, `window_resize`). `sys::sigaction(signal, handler)` installs a handler with interrupted calls restarted, or a `signal_disposition` (`default_action`, `ignore`). `signal_set` is a constexpr set of signal numbers for `sigprocmask` (`block`, `unblock`, `replace`) and `sigwait`, which takes a blocked signal synchronously: the safe way to handle signals without running code inside a handler.
 
 ```c++
 #include "ca/process.hpp"
@@ -2078,6 +2302,36 @@ auto main(void) -> int {
 	if (!taken || *taken != ca::sys::signals::user1)
 		return 3;
 	return ca::sys::sigprocmask(ca::sys::mask_change::replace, *previous) ? 0 : 4;
+}
+```
+
+`sigwaitinfo(set)` takes the signal with a `signal_info`: its number, how it was sent (`code()`, `signal_codes::user` or `queue`), the sender's pid and uid, and the value `sigqueue(pid, signal, value)` carried. `sigtimedwait(set, nanoseconds)` waits at most that long and fails with `errc::timed_out`; 0 polls. Both, and `sigqueue`, are Linux-only (`errc::not_supported` elsewhere).
+
+`sigaction(signal, handler, flags)` takes `sigaction_flags` (`restart`, `on_alternate_stack`, `no_defer`, `reset_handler`) instead of the default restart. A handler meant to survive a stack overflow runs `on_alternate_stack`, on the memory `sigaltstack(stack)` gives the thread; an empty span removes it, which a thread must do before that memory goes away.
+
+```c++
+#include "ca/process.hpp"
+#include "ca/span.hpp"
+
+static char alternate[65536];
+
+static auto on_overflow(int) -> void {
+	ca::sys::exit_immediately(70);
+}
+
+auto main(void) -> int {
+	if (!ca::sys::sigaltstack(ca::span<char>{alternate}))
+		return 1;
+	if (!ca::sys::sigaction(ca::sys::signals::segv, on_overflow, ca::sys::sigaction_flags::on_alternate_stack))
+		return 2;
+	ca::sys::signal_set set;
+	set.add(ca::sys::signals::user1);
+	if (!ca::sys::sigprocmask(ca::sys::mask_change::block, set))
+		return 3;
+	if (!ca::sys::sigqueue(ca::sys::getpid(), ca::sys::signals::user1, 7))
+		return 4;
+	auto info = ca::sys::sigtimedwait(set, 1000000000);
+	return info && info->queued() && info->value() == 7 ? 0 : 5;
 }
 ```
 
@@ -2264,20 +2518,20 @@ How sigprocmask changes the blocked signals: adds the set, removes it, or become
 ### function `posix_spawn`
 
 ```c++
-[[nodiscard]] auto posix_spawn(const char* path, char* const* argv, char* const* envp, const ca::sys::spawn_actions* actions) noexcept -> ca::result<ca::i32>;
+[[nodiscard]] auto posix_spawn(const char* path, char* const* argv, char* const* envp, const ca::sys::spawn_actions* actions, const ca::sys::spawn_options& options = ca::sys::spawn_options()) noexcept -> ca::result<ca::i32>;
 ```
 
-Starts program path as a child with arguments argv (null-terminated), environment envp (null-terminated; nullptr inherits ours) and actions (nullptr for none); returns its id. Cheaper than fork then exec, and safe in a multithreaded parent.
+Starts program path as a child with arguments argv (null-terminated), environment envp (null-terminated; nullptr inherits ours), actions (nullptr for none) and options (its process group); returns its id. Cheaper than fork then exec, and safe in a multithreaded parent.
 
 ## `process/posix_spawnp.hpp`
 
 ### function `posix_spawnp`
 
 ```c++
-[[nodiscard]] auto posix_spawnp(const char* file, char* const* argv, char* const* envp, const ca::sys::spawn_actions* actions) noexcept -> ca::result<ca::i32>;
+[[nodiscard]] auto posix_spawnp(const char* file, char* const* argv, char* const* envp, const ca::sys::spawn_actions* actions, const ca::sys::spawn_options& options = ca::sys::spawn_options()) noexcept -> ca::result<ca::i32>;
 ```
 
-Starts program file, searched in PATH when it has no slash, as a child with arguments argv (null-terminated), environment envp (null-terminated; nullptr inherits ours) and actions (nullptr for none); returns its id. Cheaper than fork then exec, and safe in a multithreaded parent.
+Starts program file, searched in PATH when it has no slash, as a child with arguments argv (null-terminated), environment envp (null-terminated; nullptr inherits ours), actions (nullptr for none) and options (its process group); returns its id. Cheaper than fork then exec, and safe in a multithreaded parent.
 
 ## `process/raise.hpp`
 
@@ -2442,10 +2696,38 @@ Runs handler on each delivery of signal, with interrupted calls restarted (SA_RE
 ### function `sigaction`
 
 ```c++
+[[nodiscard]] auto sigaction(int signal, void (*handler)(int), ca::u64 flags) noexcept -> ca::result<void>;
+```
+
+Runs handler on each delivery of signal with sigaction_flags, restart included only when flags has it: sigaction_flags::restart | sigaction_flags::on_alternate_stack for a handler that must survive a stack overflow.
+
+### function `sigaction`
+
+```c++
 [[nodiscard]] auto sigaction(int signal, ca::sys::signal_disposition disposition) noexcept -> ca::result<void>;
 ```
 
 Makes signal take its default action, or be ignored.
+
+## `process/sigaction_flags.hpp`
+
+### namespace `sigaction_flags`
+
+```c++
+namespace sigaction_flags;
+```
+
+The flags of sigaction, SA_* without <signal.h>. Checked against it when the library builds. restart is SA_RESTART, on_alternate_stack SA_ONSTACK (the handler runs on the sigaltstack stack), no_defer SA_NODEFER, reset_handler SA_RESETHAND (one delivery, then the default action).
+
+## `process/sigaltstack.hpp`
+
+### function `sigaltstack`
+
+```c++
+[[nodiscard]] auto sigaltstack(ca::span<char> stack) noexcept -> ca::result<void>;
+```
+
+Makes stack the calling thread's alternate signal stack, where handlers installed with sigaction_flags::on_alternate_stack run; an empty stack removes it. Too small a stack fails with errc::out_of_memory (the kernel minimum depends on the CPU's register state; 64 KiB is ample), a change while a handler runs on it with errc::not_permitted. stack must outlive its use: remove it before freeing the memory or ending the thread.
 
 ## `process/signal_disposition.hpp`
 
@@ -2456,6 +2738,32 @@ enum class signal_disposition;
 ```
 
 What sigaction makes a signal do without a handler: its default action, or nothing.
+
+## `process/signal_info.hpp`
+
+### namespace `signal_codes`
+
+```c++
+namespace signal_codes;
+```
+
+How a signal was sent, as signal_info::code reports it: user by kill or raise, queue by sigqueue. Values are checked against <signal.h> when the library builds.
+
+### class `signal_info`
+
+```c++
+class signal_info final;
+```
+
+What sigwaitinfo and sigtimedwait take with a signal: its number, how it was sent (signal_codes), and for user and queue its sender's pid and real uid, for queue the value sigqueue carried.
+
+### function `signal_info::queued`
+
+```c++
+[[nodiscard]] constexpr auto queued(void) const noexcept -> bool;
+```
+
+Whether sigqueue sent it, so value is meaningful.
 
 ## `process/signal_set.hpp`
 
@@ -2475,7 +2783,7 @@ A set of signal numbers, 1..64, for sigprocmask and sigwait. add and remove trap
 namespace signals;
 ```
 
-Signal numbers, without <signal.h>. Values are checked against it when the library builds.
+Signal numbers, without <signal.h>. Values are checked against it when the library builds. resume is SIGCONT, terminal_stop SIGTSTP (the suspend key), background_read and background_write SIGTTIN and SIGTTOU, window_resize SIGWINCH.
 
 ## `process/sigprocmask.hpp`
 
@@ -2487,6 +2795,26 @@ Signal numbers, without <signal.h>. Values are checked against it when the libra
 
 Changes the signals the calling thread blocks; returns those it blocked before.
 
+## `process/sigqueue.hpp`
+
+### function `sigqueue`
+
+```c++
+[[nodiscard]] auto sigqueue(ca::i32 pid, int signal, ca::i64 value) noexcept -> ca::result<void>;
+```
+
+Sends signal to process pid with value, which the receiver's signal_info carries. Real-time signals queue each send; others merge while pending. errc::try_again when the receiver's queue is full; errc::not_supported off Linux.
+
+## `process/sigtimedwait.hpp`
+
+### function `sigtimedwait`
+
+```c++
+[[nodiscard]] auto sigtimedwait(const ca::sys::signal_set& set, ca::i64 nanoseconds) noexcept -> ca::result<ca::sys::signal_info>;
+```
+
+sigwaitinfo for at most nanoseconds: errc::timed_out when no signal of set came by then, at once when nanoseconds is 0 or less and none is pending. Handlers running meanwhile do not extend the wait. errc::not_supported off Linux.
+
 ## `process/sigwait.hpp`
 
 ### function `sigwait`
@@ -2496,6 +2824,16 @@ Changes the signals the calling thread blocks; returns those it blocked before.
 ```
 
 Waits for one signal of set to be pending, takes it, and returns its number. Block set first (sigprocmask), in every thread.
+
+## `process/sigwaitinfo.hpp`
+
+### function `sigwaitinfo`
+
+```c++
+[[nodiscard]] auto sigwaitinfo(const ca::sys::signal_set& set) noexcept -> ca::result<ca::sys::signal_info>;
+```
+
+sigwait that also returns who sent the signal and its sigqueue value. errc::not_supported off Linux.
 
 ## `process/spawn_actions.hpp`
 
@@ -2572,6 +2910,32 @@ In the child, path is opened as fd (raw open flags and mode). path must outlive 
 
 Frees the list: not live after, even on failure. One not live succeeds.
 
+## `process/spawn_options.hpp`
+
+### class `spawn_options`
+
+```c++
+class spawn_options final;
+```
+
+What posix_spawn sets up in the child besides its descriptors (posix_spawnattr_t, held by value: nothing to free). Default: nothing.
+
+### function `spawn_options::process_group`
+
+```c++
+[[nodiscard]] constexpr auto process_group(void) const noexcept -> ca::optional<ca::i32>;
+```
+
+The group the child joins, when set: 0 for a new one it leads.
+
+### function `spawn_options::set_process_group`
+
+```c++
+constexpr auto set_process_group(const ca::i32 group) noexcept -> self&;
+```
+
+The child joins process group group before it runs the program, as setpgid(0, group) would: 0 makes a new group it leads, the way a shell starts a job's first process.
+
 ## `process/try_waitpid.hpp`
 
 ### function `try_waitpid`
@@ -2580,7 +2944,7 @@ Frees the list: not live after, even on failure. One not live succeeds.
 [[nodiscard]] auto try_waitpid(ca::i32 pid) noexcept -> ca::result<ca::optional<ca::sys::wait_status>>;
 ```
 
-waitpid without blocking: nothing while child pid still runs.
+waitpid without blocking: nothing while child pid (every child of the matching ones, for -1 or a process group) still runs; the status names the child reaped.
 
 ## `process/usage_target.hpp`
 
@@ -2600,7 +2964,15 @@ Whose usage getrusage reports: the process, or its waited-for children.
 class wait_status final;
 ```
 
-How a child process ended: an exit code, or the signal that killed it.
+How a child process ended: which child, and an exit code or the signal that killed it.
+
+### function `wait_status::child`
+
+```c++
+[[nodiscard]] constexpr auto child(void) const noexcept -> ca::i32;
+```
+
+Id of the child reaped: the one a waitpid for -1 or a process group found.
 
 ### function `wait_status::exited`
 
@@ -2650,7 +3022,8 @@ Conversions between ca's portable process types and the platform's, declared wit
 
 - `native_resource(which)`: the `RLIMIT_*` constant of a `sys::resource`.
 - `to_native(set, native)`, `from_native(native)`: a `sys::signal_set` to and from `sigset_t`, signals 1 to 64.
-- `wait_status_of(raw)`: the int status word of `waitpid` decoded into a `sys::wait_status` (exit code or terminating signal), with the platform's `WIFEXITED` family.
+- `wait_status_of(child, raw)`: the int status word of `waitpid` decoded into a `sys::wait_status` of child (exit code or terminating signal), with the platform's `WIFEXITED` family.
+- `start_child(...)`: what `posix_spawn` and `posix_spawnp` share. A `spawn_options` that sets nothing passes no `posix_spawnattr_t`; otherwise one is made, filled and destroyed around the call. Without libc, libca_runtime's `posix_spawnattr_*` keep a `spawn_attributes` in that storage (flags and group) for `spawn_process`, whose child calls setpgid before the file actions, as glibc's does.
 
 ## `process/impl/native_resource.hpp`
 
@@ -2661,6 +3034,16 @@ Conversions between ca's portable process types and the platform's, declared wit
 ```
 
 The RLIMIT_* constant of which.
+
+## `process/impl/native_signal_info.hpp`
+
+### function `impl::from_native_info`
+
+```c++
+[[nodiscard]] auto from_native_info(const void* native) noexcept -> ca::sys::signal_info;
+```
+
+The signal_info of siginfo_t native.
 
 ## `process/impl/native_signal_set.hpp`
 
@@ -2690,7 +3073,7 @@ namespace impl;
 
 Processes without libc, on raw syscalls: what libca_runtime's fork, execvp, posix_spawn, posix_spawnp and posix_spawn_file_actions_* are. In libc mode ca::sys::fork and the others stay libc's (its fork runs atfork handlers and keeps its own state right). Linux x86-64 only.
 
-spawn_process as glibc's posix_spawn: the parent blocks every signal and clones with CLONE_VM and CLONE_VFORK (no copy of the address space; the parent sleeps until the child execs or exits) onto a stack of its own. The child sets caught signals back to their default (a handler of the parent must not run in a child sharing its memory), restores the mask, applies the file actions, execs; a failure leaves its error in shared memory and exits 127, and the parent then reaps the child and returns that error. The child makes raw syscalls only: it shares the parent's memory and thread pointer, so it must not touch thread_local state (sys::last_error).
+spawn_process as glibc's posix_spawn: the parent blocks every signal and clones with CLONE_VM and CLONE_VFORK (no copy of the address space; the parent sleeps until the child execs or exits) onto a stack of its own. The child sets caught signals back to their default (a handler of the parent must not run in a child sharing its memory), restores the mask, joins its process group when asked, applies the file actions, execs; a failure leaves its error in shared memory and exits 127, and the parent then reaps the child and returns that error. The child makes raw syscalls only: it shares the parent's memory and thread pointer, so it must not touch thread_local state (sys::last_error).
 
 ### struct `impl::spawn_action`
 
@@ -2707,6 +3090,22 @@ struct spawn_list final;
 ```
 
 The file actions of a spawn, in the storage of a posix_spawn_file_actions_t (glibc's is 80 bytes; this uses 16): a malloc'd array, each path a copy.
+
+### variable `impl::spawn_sets_process_group`
+
+```c++
+inline constexpr short spawn_sets_process_group = 0x2;
+```
+
+POSIX_SPAWN_SETPGROUP: the child joins _process_group.
+
+### struct `impl::spawn_attributes`
+
+```c++
+struct spawn_attributes final;
+```
+
+The attributes of a spawn, in the storage of a posix_spawnattr_t: the POSIX_SPAWN_* flags set, and the group for spawn_sets_process_group.
 
 ### function `impl::spawn_list_init`
 
@@ -2751,10 +3150,10 @@ Adds opening path (copied) with flags and mode as fd. Errors as spawn_list_add_c
 ### function `impl::spawn_process`
 
 ```c++
-[[nodiscard]] auto spawn_process(const char* path, bool search, const ca::sys::impl::spawn_list* actions, char* const* argv, char* const* envp) noexcept -> ca::result<ca::i32>;
+[[nodiscard]] auto spawn_process(const char* path, bool search, const ca::sys::impl::spawn_list* actions, const ca::sys::impl::spawn_attributes* attributes, char* const* argv, char* const* envp) noexcept -> ca::result<ca::i32>;
 ```
 
-Starts path as a child with argv and envp (null: the environment), looked up in $PATH when search and it has no '/', the actions applied first (null for none); returns its id. The error of what failed in the child, when something did.
+Starts path as a child with argv and envp (null: the environment), looked up in $PATH when search and it has no '/', the attributes applied first, then the actions (null for none of either); returns its id. The error of what failed in the child, when something did.
 
 ### function `impl::execute_searching`
 
@@ -2771,6 +3170,16 @@ execve of file with argv and envp, looked up in $PATH (/bin:/usr/bin when unset;
 ```
 
 A copy of the process (clone with SIGCHLD only): the child's id, 0 in the child.
+
+## `process/impl/start_child.hpp`
+
+### function `impl::start_child`
+
+```c++
+[[nodiscard]] auto start_child(const char* path, bool search, char* const* argv, char* const* envp, const ca::sys::spawn_actions* actions, const ca::sys::spawn_options& options) noexcept -> ca::result<ca::i32>;
+```
+
+posix_spawn, or posix_spawnp when search, with actions (null for none) and options as a posix_spawnattr_t made for the call; envp null inherits ours.
 
 ## `process/impl/wait_status_of.hpp`
 
@@ -6176,7 +6585,7 @@ listns(const struct ns_id_req *req, u64 *ns_ids, size_t nr_ns_ids, unsigned int 
 
 ## `text/`
 
-Floating point to text, without the C library: the shortest digits by Ryu, all others exact (every decimal digit of the double, rounded to nearest, ties to even), digit for digit what glibc's printf prints. Built on `1-primitives/floats/impl/` (shortest_decimal, exact_decimal).
+Numbers and text without the C library: integers parsed from text (below), and floating point to text: the shortest digits by Ryu, all others exact (every decimal digit of the double, rounded to nearest, ties to even), digit for digit what glibc's printf prints. Built on `1-primitives/floats/impl/` (shortest_decimal, exact_decimal).
 
 - `sys::format_float(buffer, value, conversion, precision, alternate)` writes value as printf's `%f`, `%e`, `%g` or `%a` (and their capitals) would, with a precision when it is not negative and the `#` flag when alternate is set. Width and sign flags are the formatter's job.
 - `sys::format_float_shortest(buffer, value)` writes the fewest `%g` digits that read back as the same value: `0.1` gives "0.1", not "0.10000000000000001". The `f32` overload round-trips as an `f32`, so `0.1F` also gives "0.1". This is what `{}` prints for a float.
@@ -6206,6 +6615,27 @@ auto main(void) -> int {
 
 The decimal point is always '.', whatever setlocale says. Two outputs differ from glibc on purpose: `%#g` when rounding carries into a new exponent keeps all its digits, as C specifies (glibc prints `1.e+02` for 99.5 at `%#.2g`, ca `1.0e+02`), and the shortest form of a subnormal is truly the shortest (`5e-324`, where `%.15g` gave 15 digits).
 
+### Integers from text
+
+`sys::parse_integer<T>(text, base)` reads the whole of text as an integer of any integer type but bool and the character types, in base 10 or any base 2 to 36: an optional `+` or `-` (`-` for a signed T only) then digits, as `std::from_chars` takes them but with a `+` allowed and no text left over. It fails with `errc::invalid_argument` for anything else (empty text, spaces, an `0x` prefix, a stray character) and `errc::out_of_range` when the value does not fit in T, the minimum of a signed T included. constexpr, header only.
+
+```c++
+#include "ca/error.hpp"
+#include "ca/integers.hpp"
+#include "ca/text.hpp"
+
+auto main(void) -> int {
+	auto status = ca::sys::parse_integer<int>("-42");
+	if (!status || *status != -42)
+		return 1;
+	auto mask = ca::sys::parse_integer<ca::u32>("1ff", 16);
+	if (!mask || *mask != 0x1FFU)
+		return 2;
+	auto big = ca::sys::parse_integer<ca::u8>("256");
+	return !big && big.error() == ca::errc::out_of_range ? 0 : 3;
+}
+```
+
 ## `text/format_float.hpp`
 
 ### function `format_float`
@@ -6225,6 +6655,17 @@ auto format_float_shortest(ca::span<char> buffer, ca::f64 value) noexcept -> ca:
 ```
 
 Writes the fewest %g digits that read back as the same value: 0.1 is "0.1", not "0.10000000000000001"; an f32 round-trips as f32. Into buffer; returns the length, at most buffer.size() - 1, and NUL-terminates (buffer not empty). Ryu: a few 128-bit products, laid out as %.Pg with P = max(digits, 15) (f32: 6).
+
+## `text/parse_integer.hpp`
+
+### function `parse_integer`
+
+```c++
+template <ca::sys::impl::is_parsed_integer T>
+[[nodiscard]] constexpr auto parse_integer(const ca::sv::str text, const ca::sint base = 10) noexcept -> ca::result<T>;
+```
+
+The integer text spells, the whole of it, in base (2 to 36; letters either case above 9): an optional sign then digits, no space, no prefix such as 0x. '-' only for a signed T. errc::invalid_argument for anything else, errc::out_of_range when the value does not fit in T. T is unqualified.
 
 ## `text/impl/float_text.hpp`
 
@@ -6325,6 +6766,16 @@ auto main(void) -> int {
 
 The callback does not run for the main thread, which ends with the process; flush or release main-thread state from `main` or an atexit handler instead.
 
+## `thread/exit_stage.hpp`
+
+### enum `exit_stage`
+
+```c++
+enum class exit_stage;
+```
+
+When a thread key's exit callback runs, among those of the exiting thread: every user one, then every buffers one (output flushed: it may still allocate), then every memory one (the thread's heap handed back). Within a stage, the newest key first.
+
 ## `thread/futex_wait.hpp`
 
 ### function `futex_wait`
@@ -6378,10 +6829,10 @@ The system's key, widened.
 ### function `thread_key_create`
 
 ```c++
-[[nodiscard]] auto thread_key_create(void (*on_exit)(void*)) noexcept -> ca::result<ca::sys::thread_key>;
+[[nodiscard]] auto thread_key_create(void (*on_exit)(void*), ca::sys::exit_stage stage = ca::sys::exit_stage::user) noexcept -> ca::result<ca::sys::thread_key>;
 ```
 
-A new per-thread slot, null in every thread. When a thread other than the main one exits with a non-null value there, on_exit(value) runs in it, the slot cleared first.
+A new per-thread slot, null in every thread. When a thread other than the main one exits with a non-null value there, on_exit(value) runs in it, the slot cleared first, in the order of stage. errc::try_again once 32 exist.
 
 ## `thread/thread_key_set.hpp`
 
@@ -6411,15 +6862,15 @@ Gives the CPU to another runnable thread, if any.
 namespace impl;
 ```
 
-Thread keys without libc, for a process of one thread (ca starts none yet): one value per key, process-wide. What libca_runtime's pthread_key_create, setspecific and getspecific are; ca::sys::thread_key_create and thread_key_set call those. As glibc's for the main thread, destructors never run. Linux x86-64 only.
+Thread keys without libc: what libca_runtime's pthread_key_create, setspecific and getspecific are. Values per thread, in thread_local storage; destructors run when a thread ca started exits (run_key_destructors), never for the main thread, as glibc. Linux x86-64 only.
 
 ### function `impl::create_key`
 
 ```c++
-[[nodiscard]] auto create_key(void) noexcept -> ca::result<ca::usz>;
+[[nodiscard]] auto create_key(void (*destructor)(void*)) noexcept -> ca::result<ca::usz>;
 ```
 
-A new key, its value null. errc::try_again once 128 exist.
+A new key, its value null in every thread. errc::try_again once 128 exist.
 
 ### function `impl::set_key`
 
@@ -6427,7 +6878,7 @@ A new key, its value null. errc::try_again once 128 exist.
 [[nodiscard]] auto set_key(ca::usz key, void* value) noexcept -> ca::result<void>;
 ```
 
-Sets key's value. errc::invalid_argument for a key never created.
+Sets key's value in the calling thread. errc::invalid_argument for a key never created.
 
 ### function `impl::key_value`
 
@@ -6435,7 +6886,117 @@ Sets key's value. errc::invalid_argument for a key never created.
 [[nodiscard]] auto key_value(ca::usz key) noexcept -> void*;
 ```
 
-key's value; null for a key never created.
+key's value in the calling thread; null for a key never created.
+
+### function `impl::run_key_destructors`
+
+```c++
+auto run_key_destructors(void) noexcept -> void;
+```
+
+The calling thread's destructors, in key order, of every non-null value (cleared first), again while they set values: four passes at most (PTHREAD_DESTRUCTOR_ITERATIONS).
+
+## `thread/impl/ordered_keys.hpp`
+
+### namespace `impl`
+
+```c++
+namespace impl;
+```
+
+ca's own thread keys: 32 slots, values in thread_local storage, callbacks run by stage from the destructor of one system key, which a thread sets the first time one of its values becomes non-null. What thread_key_create and thread_key_set are.
+
+## `thread/impl/thread_exit.hpp`
+
+### namespace `impl`
+
+```c++
+namespace impl;
+```
+
+What a thread runs as it ends, without libc: the destructors of its thread_local objects (what libca_runtime's __cxa_thread_atexit registers), then its thread key destructors. Lists are per thread, grown with sys::reallocarray. Linux x86-64 only.
+
+### function `impl::at_thread_exit`
+
+```c++
+[[nodiscard]] auto at_thread_exit(void (*function)(void*), void* object) noexcept -> ca::result<void>;
+```
+
+Registers function(object) with the calling thread.
+
+### function `impl::run_thread_exit_handlers`
+
+```c++
+auto run_thread_exit_handlers(void) noexcept -> void;
+```
+
+The calling thread's registrations in reverse, those they make too; the list is freed. What exit runs for the thread calling it.
+
+### function `impl::finish_thread`
+
+```c++
+auto finish_thread(void) noexcept -> void;
+```
+
+run_thread_exit_handlers, then run_key_destructors: the end of a thread ca started, before it leaves the kernel.
+
+## `thread/impl/tls.hpp`
+
+### namespace `impl`
+
+```c++
+namespace impl;
+```
+
+Thread-local storage without libc (x86-64 variant II): each thread's copy of the PT_TLS image sits right below its thread pointer, at the offsets the linker gave the variables, and the control block above it: the pointer itself at %fs:0, the stack canary at %fs:0x28. _start finds the image and lays out the main thread's area; a thread ca starts gets its own area the same way. The functions run before %fs is set: no thread_local, no stack protector, no call that fails. Linux x86-64 only.
+
+### variable `impl::tls_control_block`
+
+```c++
+inline constexpr ca::usz tls_control_block = 256U;
+```
+
+Bytes of the control block above the thread pointer.
+
+### struct `impl::tls_image`
+
+```c++
+struct tls_image final;
+```
+
+The program's TLS image: its initialized bytes, their count, the block's size (p_memsz rounded up to the image's own alignment, as the linker places variables) and the alignment of the thread pointer (the image's, at least 64).
+
+### variable `impl::program_tls`
+
+```c++
+extern constinit ca::sys::impl::tls_image program_tls;
+```
+
+The image of the running program, set by _start; empty (_align 0) in a program started by libc.
+
+### function `impl::find_tls_image`
+
+```c++
+[[nodiscard, gnu::no_stack_protector]] auto find_tls_image(const void* program_headers, ca::usz count) noexcept -> ca::sys::impl::tls_image;
+```
+
+The image from the program headers the kernel passed (AT_PHDR, AT_PHNUM).
+
+### function `impl::tls_area_size`
+
+```c++
+[[nodiscard]] constexpr auto tls_area_size(const ca::sys::impl::tls_image& image) noexcept -> ca::usz;
+```
+
+Bytes an area for image needs: the block, the control block, slack to align.
+
+### function `impl::install_tls`
+
+```c++
+[[nodiscard, gnu::no_stack_protector]] auto install_tls(const ca::sys::impl::tls_image& image, char* area, ca::u64 canary) noexcept -> ca::u64;
+```
+
+Lays out image and a control block in area (tls_area_size bytes, zeroed) with canary; returns the thread pointer, for %fs.
 
 ## `time/`
 

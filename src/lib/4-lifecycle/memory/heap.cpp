@@ -305,7 +305,7 @@ static auto abandon(void* const raw) noexcept -> void {
 		pool_next += sizeof(ca::impl::heap_state);
 	}
 	if (!key_ready) {
-		auto key = ca::sys::thread_key_create(&abandon);
+		auto key = ca::sys::thread_key_create(&abandon, ca::sys::exit_stage::memory);
 		if (key) {
 			   key_id = key->id();
 			key_ready = true;

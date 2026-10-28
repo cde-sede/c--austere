@@ -4,5 +4,11 @@ pointers so that no header names a system type, and defined in `.cpp` files:
 - `native_resource(which)`: the `RLIMIT_*` constant of a `sys::resource`.
 - `to_native(set, native)`, `from_native(native)`: a `sys::signal_set` to and from `sigset_t`,
   signals 1 to 64.
-- `wait_status_of(raw)`: the int status word of `waitpid` decoded into a `sys::wait_status`
-  (exit code or terminating signal), with the platform's `WIFEXITED` family.
+- `wait_status_of(child, raw)`: the int status word of `waitpid` decoded into a
+  `sys::wait_status` of child (exit code or terminating signal), with the platform's
+  `WIFEXITED` family.
+- `start_child(...)`: what `posix_spawn` and `posix_spawnp` share. A `spawn_options` that sets
+  nothing passes no `posix_spawnattr_t`; otherwise one is made, filled and destroyed around the
+  call. Without libc, libca_runtime's `posix_spawnattr_*` keep a `spawn_attributes` in that
+  storage (flags and group) for `spawn_process`, whose child calls setpgid before the file
+  actions, as glibc's does.

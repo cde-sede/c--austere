@@ -10,6 +10,7 @@ closes; buffers are spans, so a `char` array or any contiguous container passes 
 | names | `rename`, `rename_noreplace`, `renameat`, `link`, `linkat`, `symlink`, `symlinkat`, `readlink`, `readlinkat`, `realpath`, `unlink`, `unlinkat` |
 | directories | `mkdir`, `mkdirat`, `mkdtemp`, `rmdir`, `opendir`, `fdopendir`, `readdir`, `dirfd`, `closedir`, `chdir`, `getcwd` |
 | ownership | `chmod`, `fchmod`, `chown`, `fchown`, `lchown`, `umask`, `utimens` |
+| file systems | `mount`, `umount` (flags in `mount_flags`, `umount_flags`), `sync` |
 
 The flags of `open` are the raw values of the `ca::fs` options (`fs::access::READ_ONLY`,
 `fs::create_t::OPEN_VALUE`, ...), defined without `<fcntl.h>`; `fs::descriptor` (layer 6)
@@ -83,5 +84,7 @@ auto main(void) -> int {
 - The `*at` variants resolve relative paths against an open directory (`sys::at::cwd` for the
   working directory), which avoids races on paths that change underneath; their flags are in
   `sys::at` (`symlink_nofollow`, `remove_directory`, ...).
+- `mount` and `umount` are Linux only (`errc::not_supported` elsewhere) and need CAP_SYS_ADMIN,
+  failing with `errc::not_permitted` without it; `umount` is umount2.
 - `file_status` gives times in nanoseconds since the epoch, permissions as the 07777 bits, and the
   type as a `file_kind`.

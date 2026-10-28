@@ -1,0 +1,53 @@
+Queues shared between threads: elements go in on one thread and come out on another, in order.
+
+| Type | Threads | Waiting |
+|---|---|---|
+| `spsc_queue<T, A>` | one producer, one consumer | never: `try_push`, `try_emplace`, `try_pop` |
+| `mpmc_queue<T, A>` | any number of each | never: the same three |
+| `channel<T, A>` | any number of each | `push`/`pop` sleep while full/empty; `_until`, `_for` and `try_` variants; `close` |
+| `io::spsc_ring_buffer<A>` (in `io/`) | one writer, one reader | never; a byte stream, `format_to` writes into it in place |
+
+All are bounded: the capacity, rounded up to a power of two, is fixed when the factory makes
+the queue (`make(capacity)`, `make_in(allocator, capacity)`), and nothing allocates after that.
+None takes a lock. A full queue refuses a push with `errc::no_space` and leaves the argument as
+it was, so a move-only value is not lost; a pop answers an optional, empty when the queue is.
+The channel adds sleeping on futexes, `errc::timed_out` for the timed variants, and
+`errc::broken_pipe` for pushes once closed and for pops once closed and drained.
+
+The queue object is a handle on a block the threads share. Share it by reference; moving it
+or calling `cleanup()` while another thread may still use it is a bug nothing detects. The
+single-threaded containers (`deque`, `io::ring_buffer`) stay what they were, with no atomic
+operation in their way: these types are what to reach for when threads are involved.
+
+```c++
+#include "ca/channel.hpp"
+#include "ca/error.hpp"
+#include "ca/mpmc_queue.hpp"
+#include "ca/spsc_queue.hpp"
+
+auto main(void) -> int {
+	auto jobs = ca::spsc_queue<int>::make(2U);
+	if (!jobs || !jobs->try_push(1) || !jobs->try_push(2))
+		return 1;
+	auto full = jobs->try_push(3);
+	if (full || full.error() != ca::errc::no_space)
+		return 2;
+	auto first = jobs->try_pop();
+	if (!first || *first != 1 || !jobs->cleanup())
+		return 3;
+
+	auto shared = ca::mpmc_queue<int>::make(8U);
+	if (!shared || !shared->try_emplace(7) || shared->try_pop() != 7 || !shared->cleanup())
+		return 4;
+
+	auto results = ca::channel<int>::make(4U);
+	if (!results || !results->push(42))
+		return 5;
+	results->close();
+	auto answer = results->pop();
+	auto after = results->pop();
+	if (!answer || *answer != 42 || after || after.error() != ca::errc::broken_pipe)
+		return 6;
+	return results->cleanup() ? 0 : 7;
+}
+```

@@ -9,6 +9,32 @@ scatter and gather I/O, terminals.
 | `sys::readv(fd, buffers)`, `sys::writev(fd, buffers)` | one call over several `io_buffer`s |
 | `sys::isatty(fd)` | whether fd is a terminal |
 | `sys::get_terminal_size(fd)` | rows and columns of the terminal fd is attached to |
+| `sys::tcgetattr(fd)` | the terminal's settings, as `terminal_settings`; `not_a_terminal` otherwise |
+| `sys::tcsetattr(fd, settings, when)` | applies settings `now` (the default), after a `drain`, or with a `flush` of unread input |
+| `sys::enter_raw_mode(fd)` | puts the terminal in raw mode; returns the settings it had, to restore |
+| `sys::tcgetpgrp(fd)`, `sys::tcsetpgrp(fd, group)` | the foreground process group of the controlling terminal, read or given |
+
+`terminal_settings` is struct termios without `<termios.h>`: the flag words `input()`,
+`output()`, `control()`, `local()` with their `set_` counterparts, bits from
+`sys::terminal_input`, `terminal_output`, `terminal_control` and `terminal_local`, and the
+control characters by slot (`character(slot)`, `set_character(slot, value)`, slots in
+`sys::terminal_character`). `raw()` is a copy in raw mode, as cfmakeraw makes it. On Linux the
+settings have the kernel's layout and go to ioctl as they are.
+
+```c++
+#include "ca/error.hpp"
+#include "ca/io.hpp"
+
+auto main(void) -> int {
+	auto previous = ca::sys::enter_raw_mode(0);
+	if (!previous)
+		return previous.error() == ca::errc::not_a_terminal ? 0 : 1;
+	auto raw = ca::sys::tcgetattr(0);
+	if (!raw || (raw->local() & ca::sys::terminal_local::echo) != 0U)
+		return 2;
+	return ca::sys::tcsetattr(0, *previous) ? 0 : 3;
+}
+```
 
 `poll_events` holds the event bits without `<poll.h>`: `readable`, `writable`, `urgent`, and the
 reported-only `error`, `hangup` and `invalid`. A `poll_entry` records the events asked for and,

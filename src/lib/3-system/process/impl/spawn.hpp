@@ -28,7 +28,7 @@ namespace ca {
 		   CLONE_VM and CLONE_VFORK (no copy of the address space; the parent sleeps until the
 		   child execs or exits) onto a stack of its own. The child sets caught signals back to
 		   their default (a handler of the parent must not run in a child sharing its memory),
-		   restores the mask, applies the file actions, execs; a failure leaves its error in
+		   restores the mask, joins its process group when asked, applies the file actions, execs; a failure leaves its error in
 		   shared memory and exits 127, and the parent then reaps the child and returns that
 		   error. The child makes raw syscalls only: it shares the parent's memory and thread
 		   pointer, so it must not touch thread_local state (sys::last_error). */
@@ -54,6 +54,17 @@ namespace ca {
 					ca::sys::impl::spawn_action* _actions;
 			}; // struct spawn_list
 
+			/* @DOC POSIX_SPAWN_SETPGROUP: the child joins _process_group. */
+			inline constexpr short spawn_sets_process_group = 0x2;
+
+			/* @DOC The attributes of a spawn, in the storage of a posix_spawnattr_t: the
+			   POSIX_SPAWN_* flags set, and the group for spawn_sets_process_group. */
+			struct spawn_attributes final {
+					using self = ca::sys::impl::spawn_attributes;
+					short _flags;
+					ca::i32 _process_group;
+			}; // struct spawn_attributes
+
 			/* @DOC An empty list. */
 			auto spawn_list_init(ca::sys::impl::spawn_list& list) noexcept -> void;
 
@@ -72,9 +83,10 @@ namespace ca {
 			[[nodiscard]] auto spawn_list_add_open(ca::sys::impl::spawn_list& list, int fd, const char* path, int flags, ca::u32 mode) noexcept -> ca::result<void>;
 
 			/* @DOC Starts path as a child with argv and envp (null: the environment), looked up in
-			   $PATH when search and it has no '/', the actions applied first (null for none);
-			   returns its id. The error of what failed in the child, when something did. */
-			[[nodiscard]] auto spawn_process(const char* path, bool search, const ca::sys::impl::spawn_list* actions, char* const* argv, char* const* envp) noexcept -> ca::result<ca::i32>;
+			   $PATH when search and it has no '/', the attributes applied first, then the actions
+			   (null for none of either); returns its id. The error of what failed in the child,
+			   when something did. */
+			[[nodiscard]] auto spawn_process(const char* path, bool search, const ca::sys::impl::spawn_list* actions, const ca::sys::impl::spawn_attributes* attributes, char* const* argv, char* const* envp) noexcept -> ca::result<ca::i32>;
 
 			/* @DOC execve of file with argv and envp, looked up in $PATH (/bin:/usr/bin when unset;
 			   an empty entry is ".") when it has no '/'. Returns only on failure, its error:

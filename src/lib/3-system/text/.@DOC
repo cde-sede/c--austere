@@ -1,4 +1,5 @@
-Floating point to text, without the C library: the shortest digits by Ryu, all others exact
+Numbers and text without the C library: integers parsed from text (below), and floating point
+to text: the shortest digits by Ryu, all others exact
 (every decimal digit of the double, rounded to nearest, ties to even), digit for digit what
 glibc's printf prints. Built on `1-primitives/floats/impl/` (shortest_decimal, exact_decimal).
 
@@ -37,3 +38,29 @@ The decimal point is always '.', whatever setlocale says. Two outputs differ fro
 purpose: `%#g` when rounding carries into a new exponent keeps all its digits, as C specifies
 (glibc prints `1.e+02` for 99.5 at `%#.2g`, ca `1.0e+02`), and the shortest form of a
 subnormal is truly the shortest (`5e-324`, where `%.15g` gave 15 digits).
+
+### Integers from text
+
+`sys::parse_integer<T>(text, base)` reads the whole of text as an integer of any integer type
+but bool and the character types, in base 10 or any base 2 to 36: an optional `+` or `-` (`-`
+for a signed T only) then digits, as `std::from_chars` takes them but with a `+` allowed and no
+text left over. It fails with `errc::invalid_argument` for anything else (empty text, spaces,
+an `0x` prefix, a stray character) and `errc::out_of_range` when the value does not fit in T,
+the minimum of a signed T included. constexpr, header only.
+
+```c++
+#include "ca/error.hpp"
+#include "ca/integers.hpp"
+#include "ca/text.hpp"
+
+auto main(void) -> int {
+	auto status = ca::sys::parse_integer<int>("-42");
+	if (!status || *status != -42)
+		return 1;
+	auto mask = ca::sys::parse_integer<ca::u32>("1ff", 16);
+	if (!mask || *mask != 0x1FFU)
+		return 2;
+	auto big = ca::sys::parse_integer<ca::u8>("256");
+	return !big && big.error() == ca::errc::out_of_range ? 0 : 3;
+}
+```

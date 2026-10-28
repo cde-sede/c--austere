@@ -8,7 +8,8 @@ contracts.
 | `map/` | `hashmap`, `map` (B-tree), `set`, `item`, `ca::hash` |
 | `list/` | `list`, `intrusive_list` |
 | `format/` | `format`, `format_to`, `printf_to`, `format_string`: `{}` and `%` checked at compile time |
-| `io/` | in-memory readers and writers, `ring_buffer`, `read_line`, `read_to_end` |
+| `io/` | in-memory readers and writers, `ring_buffer`, `spsc_ring_buffer`, `read_line`, `read_to_end` |
+| `concurrent/` | `spsc_queue`, `mpmc_queue`, `channel`: queues shared between threads |
 | `fs/` | `fs::path` |
 | `trace/` | `ca::report`, `ca::context`: owned error traces with formatted messages |
 

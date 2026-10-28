@@ -36,6 +36,7 @@ namespace ca {
 					const char* _path;
 					bool _search;
 					const ca::sys::impl::spawn_list* _actions;
+					const ca::sys::impl::spawn_attributes* _attributes;
 					char* const* _argv;
 					char* const* _envp;
 					ca::u64 _mask;
@@ -123,6 +124,13 @@ static auto spawned(void* const argument) noexcept -> int {
 		}
 	}
 	static_cast<void>(raw(ca::syscall::number::rt_sigprocmask, 2, &job._mask, 0, 8));
+	if (job._attributes != nullptr && (job._attributes->_flags & ca::sys::impl::spawn_sets_process_group) != 0) {
+		const ca::isz joined = raw(ca::syscall::number::setpgid, 0, job._attributes->_process_group);
+		if (failed(joined)) {
+			job._error = static_cast<int>(-joined);
+			return 127;
+		}
+	}
 	if (job._actions != nullptr) {
 		for (int i = 0; i < job._actions->_used; ++i) {
 			const ca::sys::impl::spawn_action& action = job._actions->_actions[i];
@@ -250,9 +258,9 @@ auto ca::sys::impl::spawn_list_destroy(ca::sys::impl::spawn_list& list) noexcept
 	return ca::error{static_cast<int>(-result)};
 }
 
-[[nodiscard]] auto ca::sys::impl::spawn_process(const char* const path, const bool search, const ca::sys::impl::spawn_list* const actions, char* const* const argv, char* const* const envp) noexcept -> ca::result<ca::i32> {
+[[nodiscard]] auto ca::sys::impl::spawn_process(const char* const path, const bool search, const ca::sys::impl::spawn_list* const actions, const ca::sys::impl::spawn_attributes* const attributes, char* const* const argv, char* const* const envp) noexcept -> ca::result<ca::i32> {
 
-	ca::sys::impl::spawn_job job{path, search && searches(path), actions, argv, envp != nullptr ? envp : ca::sys::environ(), 0U, 0};
+	ca::sys::impl::spawn_job job{path, search && searches(path), actions, attributes, argv, envp != nullptr ? envp : ca::sys::environ(), 0U, 0};
 	const auto stack = ca::sys::mmap_anonymous(CHILD_STACK, ca::sys::protection::read | ca::sys::protection::write);
 	if (!stack) [[unlikely]]
 		return ca::failure{stack.error()};

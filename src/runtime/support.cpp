@@ -1,6 +1,6 @@
 /* What compiled code and libca.a's remaining libc paths expect from libc, for programs linked
    without it (see start_x86_64.cpp): the stack protector's failure, errno (ca's own last error:
-   one error code per thread, not two), and thread keys (ca::sys::impl's single-thread table,
+   one error code per thread, not two), and thread keys (ca::sys::impl's table,
    thread/impl/key_table). */
 
 #include "1-primitives/config/architecture.hpp"
@@ -21,9 +21,9 @@ extern "C" {
 		return &ca::sys::impl::last_code;
 	}
 
-	auto pthread_key_create(unsigned* const key, void (*)(void*)) noexcept -> int { // ns-leak: ignore
+	auto pthread_key_create(unsigned* const key, void (* const destructor)(void*)) noexcept -> int { // ns-leak: ignore
 
-		const auto made = ca::sys::impl::create_key();
+		const auto made = ca::sys::impl::create_key(destructor);
 		if (!made) [[unlikely]]
 			return made.error().code();
 		*key = static_cast<unsigned>(*made);

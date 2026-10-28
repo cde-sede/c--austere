@@ -25,9 +25,13 @@
 #include "3-system/process/setrlimit.hpp"
 #include "3-system/process/setsid.hpp"
 #include "3-system/process/sigaction.hpp"
+#include "3-system/process/sigaltstack.hpp"
 #include "3-system/process/signals.hpp"
 #include "3-system/process/sigprocmask.hpp"
+#include "3-system/process/sigqueue.hpp"
+#include "3-system/process/sigtimedwait.hpp"
 #include "3-system/process/sigwait.hpp"
+#include "3-system/process/sigwaitinfo.hpp"
 #include "3-system/process/try_waitpid.hpp"
 #include "3-system/process/waitpid.hpp"
 

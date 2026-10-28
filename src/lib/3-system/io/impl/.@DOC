@@ -1,0 +1,6 @@
+`terminal_layout.hpp`: the friend of `terminal_settings` that knows struct termios. On Linux the
+settings already have the kernel's layout (checked field by field against `<asm/termbits.h>`), so
+`tcgetattr` and `tcsetattr` hand them to the TCGETS and TCSETS ioctls as they are, and the copies
+go unused. Elsewhere `to_native` and `from_native` copy to and from libc's `termios`, whose flag
+words are wider and whose speeds are separate fields, kept in the settings so a round trip
+leaves them unchanged.

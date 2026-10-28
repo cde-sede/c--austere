@@ -6,7 +6,8 @@ line and whole-input readers that work over any buffered reader, a file or a str
 | `io::memory_writer` | writes into fixed memory the caller provides: the snprintf of `format_to` |
 | `io::string_writer<S>` | appends to a `ca::str` or `inline_str`, formatting in place in its spare capacity |
 | `io::memory_reader` | a buffered reader over text it does not own: parse a string like a file |
-| `io::ring_buffer<A>` | an in-memory byte stream (FIFO) over a power-of-two ring |
+| `io::ring_buffer<A>` | an in-memory byte stream (FIFO) over a power-of-two ring, for one thread |
+| `io::spsc_ring_buffer<A>` | the same between two threads, one writing, one reading, lock-free |
 | `io::read_line(reader, line)` | the next line, without its `'\n'`, into a string or char array |
 | `io::read_to_end(reader, out)` | the rest of the input appended to a string or char array |
 

@@ -19,7 +19,8 @@ namespace ca {
 
 		// -- TRY WAITPID ----------------------------------------------------
 
-		/* @DOC waitpid without blocking: nothing while child pid still runs. */
+		/* @DOC waitpid without blocking: nothing while child pid (every child of the matching ones,
+		   for -1 or a process group) still runs; the status names the child reaped. */
 		[[nodiscard]] auto try_waitpid(ca::i32 pid) noexcept -> ca::result<ca::optional<ca::sys::wait_status>>;
 
 	} // namespace sys

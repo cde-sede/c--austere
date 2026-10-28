@@ -75,11 +75,11 @@ c++ -std=c++2c -nostdinc++ -fno-exceptions -fno-rtti -I src/lib prog.cpp -nostdl
 |---|---|---|
 | [1-primitives](1-primitives.md) | 239 | 200/200 |
 | [2-vocabulary](2-vocabulary.md) | 65 | 20/20 |
-| [3-system](3-system.md) | 194 | 5/5 |
+| [3-system](3-system.md) | 222 | 5/5 |
 | [4-lifecycle](4-lifecycle.md) | 37 | 31/31 |
-| [5-collections](5-collections.md) | 67 | 38/38 |
+| [5-collections](5-collections.md) | 73 | 41/41 |
 | [6-resources](6-resources.md) | 15 | 4/4 |
-| [ca](ca.md) | 118 | 0/0 |
+| [ca](ca.md) | 123 | 0/0 |
 
 ## [1-primitives](1-primitives.md)
 
@@ -441,6 +441,8 @@ Layer 3: the boundary with the operating system.
 - [`file/mkdirat.hpp`](3-system.md#filemkdirathpp) - Creates directory path relative to directory dir with mode (umask applies).
 - [`file/mkdtemp.hpp`](3-system.md#filemkdtemphpp) - Creates a new directory, mode 0700, from pattern: a path ending in "XXXXXX", rewritten in place t...
 - [`file/mkstemp.hpp`](3-system.md#filemkstemphpp) - Creates and opens a new file, read-write, mode 0600, from pattern: a path ending in "XXXXXX", rew...
+- [`file/mount.hpp`](3-system.md#filemounthpp) - Attaches the file system source of kind type at directory target, with mount_flags and file-syste...
+- [`file/mount_flags.hpp`](3-system.md#filemountflagshpp) - The flags argument of mount, Linux's MS_* values without \<sys/mount.h>.
 - [`file/open.hpp`](3-system.md#fileopenhpp) - open(2) with raw flags; retries on EINTR.
 - [`file/openat.hpp`](3-system.md#fileopenathpp) - open(2) relative to directory fd dir (or sys::at::cwd) with raw flags; retries on EINTR.
 - [`file/opendir.hpp`](3-system.md#fileopendirhpp) - Opens directory path for listing; close it with closedir.
@@ -460,8 +462,11 @@ Layer 3: the boundary with the operating system.
 - [`file/stat.hpp`](3-system.md#filestathpp) - Status of path, following symlinks.
 - [`file/symlink.hpp`](3-system.md#filesymlinkhpp) - Creates a symlink at link pointing to target.
 - [`file/symlinkat.hpp`](3-system.md#filesymlinkathpp) - Creates symlink link (relative to directory dir) pointing at target, stored as given.
+- [`file/sync.hpp`](3-system.md#filesynchpp) - () causes all pending modifications to filesystem metadata and cached file data to be written to...
 - [`file/truncate.hpp`](3-system.md#filetruncatehpp) - Sets the size of file path: cut, or extended with zeros.
 - [`file/umask.hpp`](3-system.md#fileumaskhpp) - Sets the mask of permission bits that file creation clears; returns the previous one.
+- [`file/umount.hpp`](3-system.md#fileumounthpp) - Detaches the file system mounted at target, with umount_flags (umount2).
+- [`file/umount_flags.hpp`](3-system.md#fileumountflagshpp) - The flags argument of umount, Linux's MNT_* and UMOUNT_* values without \<sys/mount.h>.
 - [`file/unchanged_id.hpp`](3-system.md#fileunchangedidhpp) - User or group id that chown, fchown and lchown leave as it is.
 - [`file/unlink.hpp`](3-system.md#fileunlinkhpp) - Removes the directory entry path (not a directory).
 - [`file/unlinkat.hpp`](3-system.md#fileunlinkathpp) - Removes path relative to directory dir; flags: 0 for a file, sys::at::remove_directory for an emp...
@@ -473,6 +478,7 @@ Layer 3: the boundary with the operating system.
 - [`file/impl/temporary_name.hpp`](3-system.md#fileimpltemporarynamehpp)
 - [`fs/options.hpp`](3-system.md#fsoptionshpp) - Files, paths and descriptors.
 - [`io/dup2.hpp`](3-system.md#iodup2hpp) - Makes target a copy of fd, closing what target held; the copy is not close-on-exec.
+- [`io/enter_raw_mode.hpp`](3-system.md#ioenterrawmodehpp) - Puts the terminal fd is attached to in raw mode (terminal_settings::raw), discarding unread input...
 - [`io/get_terminal_size.hpp`](3-system.md#iogetterminalsizehpp) - Size of the terminal fd is attached to; fails on anything but a terminal.
 - [`io/io_buffer.hpp`](3-system.md#ioiobufferhpp) - One run of bytes for readv and writev.
 - [`io/isatty.hpp`](3-system.md#ioisattyhpp) - Whether fd is a terminal.
@@ -482,8 +488,16 @@ Layer 3: the boundary with the operating system.
 - [`io/poll_entry.hpp`](3-system.md#iopollentryhpp) - One descriptor to watch with poll: the events requested (sys::poll_events), and those reported.
 - [`io/poll_events.hpp`](3-system.md#iopolleventshpp) - poll event bits, without <poll.h>.
 - [`io/readv.hpp`](3-system.md#ioreadvhpp) - Reads into buffers in order, filling each before the next; 0 at end of file.
+- [`io/tcgetattr.hpp`](3-system.md#iotcgetattrhpp) - Settings of the terminal fd is attached to; fails with not_a_terminal on anything else.
+- [`io/tcgetpgrp.hpp`](3-system.md#iotcgetpgrphpp) - Foreground process group of the terminal fd is attached to, which must be the calling process's c...
+- [`io/tcsetattr.hpp`](3-system.md#iotcsetattrhpp) - Gives the terminal fd is attached to settings, applied when says; retries on EINTR.
+- [`io/tcsetpgrp.hpp`](3-system.md#iotcsetpgrphpp) - Makes group the foreground process group of the terminal fd is attached to, the caller's controll...
+- [`io/terminal_change.hpp`](3-system.md#ioterminalchangehpp) - When tcsetattr applies new settings: at once, once pending output is written, or then also discar...
+- [`io/terminal_flags.hpp`](3-system.md#ioterminalflagshpp) - termios input flags (c_iflag), without <termios.h>.
+- [`io/terminal_settings.hpp`](3-system.md#ioterminalsettingshpp) - A terminal's settings, struct termios without <termios.h>: the four flag words (sys::terminal_inp...
 - [`io/terminal_size.hpp`](3-system.md#ioterminalsizehpp) - Size of a terminal window, in character cells.
 - [`io/writev.hpp`](3-system.md#iowritevhpp) - Writes buffers in order, as one write; returns how many bytes.
+- [`io/impl/terminal_layout.hpp`](3-system.md#ioimplterminallayouthpp)
 - [`machine/gethostname.hpp`](3-system.md#machinegethostnamehpp) - Writes the host name into buffer, NUL-terminated; returns its length.
 - [`machine/processor_count.hpp`](3-system.md#machineprocessorcounthpp) - Processors this process may run on now (its affinity mask, as nproc counts them on Linux; the onl...
 - [`machine/system_name.hpp`](3-system.md#machinesystemnamehpp) - What uname reports: the kernel, its release and version, the host and the hardware.
@@ -531,19 +545,28 @@ Layer 3: the boundary with the operating system.
 - [`process/setrlimit.hpp`](3-system.md#processsetrlimithpp) - Sets the current and maximum bound of which.
 - [`process/setsid.hpp`](3-system.md#processsetsidhpp) - Makes the process the leader of a new session and process group, without a controlling terminal;...
 - [`process/sigaction.hpp`](3-system.md#processsigactionhpp) - Runs handler on each delivery of signal, with interrupted calls restarted (SA_RESTART).
+- [`process/sigaction_flags.hpp`](3-system.md#processsigactionflagshpp) - The flags of sigaction, SA_* without <signal.h>.
+- [`process/sigaltstack.hpp`](3-system.md#processsigaltstackhpp) - Makes stack the calling thread's alternate signal stack, where handlers installed with sigaction_...
 - [`process/signal_disposition.hpp`](3-system.md#processsignaldispositionhpp) - What sigaction makes a signal do without a handler: its default action, or nothing.
+- [`process/signal_info.hpp`](3-system.md#processsignalinfohpp) - How a signal was sent, as signal_info::code reports it: user by kill or raise, queue by sigqueue.
 - [`process/signal_set.hpp`](3-system.md#processsignalsethpp) - A set of signal numbers, 1..64, for sigprocmask and sigwait.
 - [`process/signals.hpp`](3-system.md#processsignalshpp) - Signal numbers, without <signal.h>.
 - [`process/sigprocmask.hpp`](3-system.md#processsigprocmaskhpp) - Changes the signals the calling thread blocks; returns those it blocked before.
+- [`process/sigqueue.hpp`](3-system.md#processsigqueuehpp) - Sends signal to process pid with value, which the receiver's signal_info carries.
+- [`process/sigtimedwait.hpp`](3-system.md#processsigtimedwaithpp) - sigwaitinfo for at most nanoseconds: errc::timed_out when no signal of set came by then, at once...
 - [`process/sigwait.hpp`](3-system.md#processsigwaithpp) - Waits for one signal of set to be pending, takes it, and returns its number.
+- [`process/sigwaitinfo.hpp`](3-system.md#processsigwaitinfohpp) - sigwait that also returns who sent the signal and its sigqueue value.
 - [`process/spawn_actions.hpp`](3-system.md#processspawnactionshpp) - Descriptor changes posix_spawn applies in the child, in order, before it runs the program (posix_...
-- [`process/try_waitpid.hpp`](3-system.md#processtrywaitpidhpp) - waitpid without blocking: nothing while child pid still runs.
+- [`process/spawn_options.hpp`](3-system.md#processspawnoptionshpp) - What posix_spawn sets up in the child besides its descriptors (posix_spawnattr_t, held by value:...
+- [`process/try_waitpid.hpp`](3-system.md#processtrywaitpidhpp) - waitpid without blocking: nothing while child pid (every child of the matching ones, for -1 or a...
 - [`process/usage_target.hpp`](3-system.md#processusagetargethpp) - Whose usage getrusage reports: the process, or its waited-for children.
-- [`process/wait_status.hpp`](3-system.md#processwaitstatushpp) - How a child process ended: an exit code, or the signal that killed it.
+- [`process/wait_status.hpp`](3-system.md#processwaitstatushpp) - How a child process ended: which child, and an exit code or the signal that killed it.
 - [`process/waitpid.hpp`](3-system.md#processwaitpidhpp) - Waits for child pid to end and reaps it.
 - [`process/impl/native_resource.hpp`](3-system.md#processimplnativeresourcehpp)
+- [`process/impl/native_signal_info.hpp`](3-system.md#processimplnativesignalinfohpp)
 - [`process/impl/native_signal_set.hpp`](3-system.md#processimplnativesignalsethpp)
 - [`process/impl/spawn.hpp`](3-system.md#processimplspawnhpp) - Processes without libc, on raw syscalls: what libca_runtime's fork, execvp, posix_spawn, posix_sp...
+- [`process/impl/start_child.hpp`](3-system.md#processimplstartchildhpp)
 - [`process/impl/wait_status_of.hpp`](3-system.md#processimplwaitstatusofhpp)
 - [`random/getentropy.hpp`](3-system.md#randomgetentropyhpp) - Fills buffer from the kernel's secure random source, any size (fetched 256 bytes at a time).
 - [`sync/condition.hpp`](3-system.md#syncconditionhpp) - Threads sleeping until another signals a change made under a mutex: a sequence number bumped by e...
@@ -561,7 +584,9 @@ Layer 3: the boundary with the operating system.
 - [`syscall/table/linux_x86_64.hpp`](3-system.md#syscalltablelinuxx8664hpp) - Syscall numbers of linux x86_64 implemented by kernel 7.0.0-38-generic.
 - [`text/format_float.hpp`](3-system.md#textformatfloathpp) - Writes value as printf's %\<conversion> would (conversion one of f F e E g G a A), with precision...
 - [`text/format_float_shortest.hpp`](3-system.md#textformatfloatshortesthpp) - Writes the fewest %g digits that read back as the same value: 0.1 is "0.1", not "0.10000000000000...
+- [`text/parse_integer.hpp`](3-system.md#textparseintegerhpp) - The integer text spells, the whole of it, in base (2 to 36; letters either case above 9): an opti...
 - [`text/impl/float_text.hpp`](3-system.md#textimplfloattexthpp)
+- [`thread/exit_stage.hpp`](3-system.md#threadexitstagehpp) - When a thread key's exit callback runs, among those of the exiting thread: every user one, then e...
 - [`thread/futex_wait.hpp`](3-system.md#threadfutexwaithpp) - Sleeps while word holds expected, until a futex_wake on it.
 - [`thread/futex_wait_until.hpp`](3-system.md#threadfutexwaituntilhpp) - futex_wait with a deadline on the monotonic clock (sys::now(clock::monotonic) nanoseconds): errc:...
 - [`thread/futex_wake.hpp`](3-system.md#threadfutexwakehpp) - Wakes up to count threads sleeping in futex_wait on word; ca::limits\<u32>::max() wakes all.
@@ -569,7 +594,10 @@ Layer 3: the boundary with the operating system.
 - [`thread/thread_key_create.hpp`](3-system.md#threadthreadkeycreatehpp) - A new per-thread slot, null in every thread.
 - [`thread/thread_key_set.hpp`](3-system.md#threadthreadkeysethpp) - Stores value in the calling thread's slot of key.
 - [`thread/yield.hpp`](3-system.md#threadyieldhpp) - Gives the CPU to another runnable thread, if any.
-- [`thread/impl/key_table.hpp`](3-system.md#threadimplkeytablehpp) - Thread keys without libc, for a process of one thread (ca starts none yet): one value per key, pr...
+- [`thread/impl/key_table.hpp`](3-system.md#threadimplkeytablehpp) - Thread keys without libc: what libca_runtime's pthread_key_create, setspecific and getspecific are.
+- [`thread/impl/ordered_keys.hpp`](3-system.md#threadimplorderedkeyshpp) - ca's own thread keys: 32 slots, values in thread_local storage, callbacks run by stage from the d...
+- [`thread/impl/thread_exit.hpp`](3-system.md#threadimplthreadexithpp) - What a thread runs as it ends, without libc: the destructors of its thread_local objects (what li...
+- [`thread/impl/tls.hpp`](3-system.md#threadimpltlshpp) - Thread-local storage without libc (x86-64 variant II): each thread's copy of the PT_TLS image sit...
 - [`time/calendar_time.hpp`](3-system.md#timecalendartimehpp) - A moment as a date and time of day in some time zone, by utc_time or local_time.
 - [`time/clock.hpp`](3-system.md#timeclockhpp) - Clocks to read with now().
 - [`time/local_time.hpp`](3-system.md#timelocaltimehpp) - Date and time of seconds since the epoch, in the local time zone (TZ, or /etc/localtime, re-read...
@@ -650,6 +678,11 @@ Layer 5: the owning data structures, and formatting, which only needs them and t
 - [`array/slice.hpp`](5-collections.md#arrayslicehpp) - Performance of ca::slice<T, A>.
 - [`array/small_array.hpp`](5-collections.md#arraysmallarrayhpp) - Performance of ca::small_array<T, N, A>.
 - [`array/impl/bit_methods.hpp`](5-collections.md#arrayimplbitmethodshpp)
+- [`concurrent/channel.hpp`](5-collections.md#concurrentchannelhpp) - Performance of ca::channel<T, A>.
+- [`concurrent/mpmc_queue.hpp`](5-collections.md#concurrentmpmcqueuehpp) - Performance of ca::mpmc_queue<T, A>.
+- [`concurrent/spsc_queue.hpp`](5-collections.md#concurrentspscqueuehpp) - Performance of ca::spsc_queue<T, A>.
+- [`concurrent/impl/mpmc_core.hpp`](5-collections.md#concurrentimplmpmccorehpp)
+- [`concurrent/impl/queue_parts.hpp`](5-collections.md#concurrentimplqueuepartshpp)
 - [`format/format.hpp`](5-collections.md#formatformathpp) - Formats args into a new string, `{}` syntax checked at compile time (see format_string): `auto s...
 - [`format/format_append.hpp`](5-collections.md#formatformatappendhpp) - Formats args at the end of string (ca::str, any basic_str<char, A>, inline_str\<N>), `{}` syntax c...
 - [`format/format_string.hpp`](5-collections.md#formatformatstringhpp) - A print format for arguments Args, parsed and checked when it compiles: a mismatch is a compile e...
@@ -677,6 +710,7 @@ Layer 5: the owning data structures, and formatting, which only needs them and t
 - [`io/read_line.hpp`](5-collections.md#ioreadlinehpp) - Replaces line (ca::str, dynamic_array\<char>, inline_str\<N>: errc::no_space past N) with the next...
 - [`io/read_to_end.hpp`](5-collections.md#ioreadtoendhpp) - Appends the rest of reader's input to out (ca::str, dynamic_array\<char>, inline_str\<N>); how many...
 - [`io/ring_buffer.hpp`](5-collections.md#ioringbufferhpp) - In-memory byte stream over a fixed ring of bytes from an allocator.
+- [`io/spsc_ring_buffer.hpp`](5-collections.md#iospscringbufferhpp) - Performance of ca::io::spsc_ring_buffer\<A>.
 - [`io/string_writer.hpp`](5-collections.md#iostringwriterhpp) - Writer appending to a char string (ca::str, any basic_str<char, A>, inline_str\<N>), lending its s...
 - [`io/impl/is_char_buffer.hpp`](5-collections.md#ioimplischarbufferhpp)
 - [`list/intrusive_list.hpp`](5-collections.md#listintrusivelisthpp) - Performance of ca::intrusive_list<T, Tag>.
@@ -743,7 +777,9 @@ The include facade: what programs include.
 - [`buffered_reader.hpp`](ca.md#bufferedreaderhpp) - `#include "ca/buffered_reader.hpp"`: 6-resources/io/buffered_reader.hpp.
 - [`buffered_writer.hpp`](ca.md#bufferedwriterhpp) - `#include "ca/buffered_writer.hpp"`: 6-resources/io/buffered_writer.hpp.
 - [`buffering.hpp`](ca.md#bufferinghpp) - `#include "ca/buffering.hpp"`: 6-resources/io/buffering.hpp.
+- [`channel.hpp`](ca.md#channelhpp) - `#include "ca/channel.hpp"`: 5-collections/concurrent/channel.hpp.
 - [`collect.hpp`](ca.md#collecthpp) - `#include "ca/collect.hpp"`: 5-collections/array/collect.hpp.
+- [`concurrent.hpp`](ca.md#concurrenthpp) - `#include "ca/concurrent.hpp"`: 5-collections/concurrent/.
 - [`config.hpp`](ca.md#confighpp) - `#include "ca/config.hpp"`: 1-primitives/config/.
 - [`context.hpp`](ca.md#contexthpp) - `#include "ca/context.hpp"`: 5-collections/trace/context.hpp.
 - [`context_manager.hpp`](ca.md#contextmanagerhpp) - `#include "ca/context_manager.hpp"`: 4-lifecycle/context_manager.hpp.
@@ -798,6 +834,7 @@ The include facade: what programs include.
 - [`memory.hpp`](ca.md#memoryhpp) - `#include "ca/memory.hpp"`: 1-primitives/memory/, 3-system/memory/, 4-lifecycle/memory/.
 - [`memory_reader.hpp`](ca.md#memoryreaderhpp) - `#include "ca/memory_reader.hpp"`: 5-collections/io/memory_reader.hpp.
 - [`memory_writer.hpp`](ca.md#memorywriterhpp) - `#include "ca/memory_writer.hpp"`: 5-collections/io/memory_writer.hpp.
+- [`mpmc_queue.hpp`](ca.md#mpmcqueuehpp) - `#include "ca/mpmc_queue.hpp"`: 5-collections/concurrent/mpmc_queue.hpp.
 - [`nullopt.hpp`](ca.md#nullopthpp) - `#include "ca/nullopt.hpp"`: 2-vocabulary/nullopt.hpp.
 - [`numeric.hpp`](ca.md#numerichpp) - `#include "ca/numeric.hpp"`: 1-primitives/numeric/.
 - [`ok.hpp`](ca.md#okhpp) - `#include "ca/ok.hpp"`: 2-vocabulary/ok.hpp.
@@ -825,6 +862,8 @@ The include facade: what programs include.
 - [`slice.hpp`](ca.md#slicehpp) - `#include "ca/slice.hpp"`: 5-collections/array/slice.hpp.
 - [`small_array.hpp`](ca.md#smallarrayhpp) - `#include "ca/small_array.hpp"`: 5-collections/array/small_array.hpp.
 - [`span.hpp`](ca.md#spanhpp) - `#include "ca/span.hpp"`: 2-vocabulary/span.hpp.
+- [`spsc_queue.hpp`](ca.md#spscqueuehpp) - `#include "ca/spsc_queue.hpp"`: 5-collections/concurrent/spsc_queue.hpp.
+- [`spsc_ring_buffer.hpp`](ca.md#spscringbufferhpp) - `#include "ca/spsc_ring_buffer.hpp"`: 5-collections/io/spsc_ring_buffer.hpp.
 - [`str.hpp`](ca.md#strhpp) - `#include "ca/str.hpp"`: 5-collections/string/str.hpp.
 - [`stream.hpp`](ca.md#streamhpp) - `#include "ca/stream.hpp"`: 6-resources/io/stream.hpp.
 - [`string.hpp`](ca.md#stringhpp) - `#include "ca/string.hpp"`: 5-collections/string/.

@@ -21,7 +21,7 @@
 	});
 	if (!reaped) [[unlikely]]
 		return reaped.propagate();
-	return ca::sys::impl::wait_status_of(raw);
+	return ca::sys::impl::wait_status_of(static_cast<ca::i32>(*reaped), raw);
 #else
 	pid_t reaped{-1};
 	do
@@ -29,6 +29,6 @@
 	while (reaped == -1 && errno == EINTR);
 	if (reaped == -1) [[unlikely]]
 		return ca::failure{ca::sys::impl::libc_error()};
-	return ca::sys::impl::wait_status_of(raw);
+	return ca::sys::impl::wait_status_of(static_cast<ca::i32>(reaped), raw);
 #endif
 }

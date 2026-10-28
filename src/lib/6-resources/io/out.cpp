@@ -70,7 +70,7 @@ static auto register_thread_exit(ca::io::writer* const writer) noexcept -> void 
 
 	ca::u32 state = key_none;
 	if (key_state.compare_exchange_strong(state, key_creating)) {
-		auto key = ca::sys::thread_key_create(&flush_at_thread_exit);
+		auto key = ca::sys::thread_key_create(&flush_at_thread_exit, ca::sys::exit_stage::buffers);
 		if (key)
 			key_id = key->id();
 		key_state.store(key ? key_ready : key_failed);

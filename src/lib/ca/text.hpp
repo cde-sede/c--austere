@@ -6,5 +6,6 @@
 #include "1-primitives/text/is_character.hpp"
 #include "3-system/text/format_float.hpp"
 #include "3-system/text/format_float_shortest.hpp"
+#include "3-system/text/parse_integer.hpp"
 
 #endif // ca_include_text_hpp

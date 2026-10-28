@@ -17,14 +17,14 @@
 	const auto reaped = ca::syscall::wait4(pid, &raw, WNOHANG, nullptr);
 	if (!reaped) [[unlikely]]
 		return reaped.propagate();
-	if (*reaped == 0)
-		return ca::optional<ca::sys::wait_status>{};
+	const auto child = static_cast<ca::i32>(*reaped);
 #else
 	const pid_t reaped = ::waitpid(static_cast<pid_t>(pid), &raw, WNOHANG);
 	if (reaped == -1) [[unlikely]]
 		return ca::failure{ca::sys::impl::libc_error()};
-	if (reaped == 0)
-		return ca::optional<ca::sys::wait_status>{};
+	const auto child = static_cast<ca::i32>(reaped);
 #endif
-	return ca::optional<ca::sys::wait_status>{ca::sys::impl::wait_status_of(raw)};
+	if (child == 0)
+		return ca::optional<ca::sys::wait_status>{};
+	return ca::optional<ca::sys::wait_status>{ca::sys::impl::wait_status_of(child, raw)};
 }
