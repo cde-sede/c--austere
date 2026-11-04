@@ -15,8 +15,8 @@ auto main(void) -> int {
 	auto traced = ca::format_to(m, "{}|", extended);
 
 	const ca::error unnamed = ca::trace::fail(ca::errc::exists).error();
-	auto rest = ca::format_to(m, "{}|{}|{}|{}|{d}|{>8}", unnamed, failed, ca::errc::no_entry, ca::error{33}, ca::errc::no_entry, ca::errc::exists);
+	auto rest = ca::format_to(m, "{}|{}|{}|{}|{d}|{>8}", unnamed, failed, ca::errc::no_entry, ca::error{61}, ca::errc::no_entry, ca::errc::exists);
 	if (!traced || !rest)
 		return 1;
-	return m.view() == ca::sv::str{"should_fail|exists|invalid_argument|no_entry|Numerical argument out of domain|2|  exists"} ? 0 : 2;
+	return m.view() == ca::sv::str{"should_fail|exists|invalid_argument|no_entry|No data available|2|  exists"} ? 0 : 2;
 }

@@ -5,6 +5,7 @@
 #include "1-primitives/integers/byte.hpp"
 #include "1-primitives/integers/usz.hpp"
 #include "1-primitives/utility/exchange.hpp"
+#include "1-primitives/utility/move.hpp"
 #include "2-vocabulary/borrowed_slice.hpp"
 #include "2-vocabulary/result.hpp"
 #include "2-vocabulary/span.hpp"
@@ -12,6 +13,8 @@
 #include "3-system/trace/backtrace.hpp"
 #include "3-system/trace/impl/debug_info.hpp"
 #include "3-system/trace/location.hpp"
+#include "5-collections/array/dynamic_array.hpp"
+#include "6-resources/trace/impl/mapped_image.hpp"
 
 
 // -- CA NAMESPACE -----------------------------------------------------------
@@ -42,8 +45,9 @@ namespace ca {
 		   /proc/self/exe: lookup turns an address of a ca::trace::backtrace into the functions
 		   it is in, innermost first (inlined ones, then the function they were inlined into),
 		   each with its source file and line when the program was built with -g; of(addresses)
-		   prints a whole backtrace that way with `{}`. Addresses outside the executable (shared
-		   libraries) are not found. Mapped once by make(); clean up with cleanup(). */
+		   prints a whole backtrace that way with `{}`. The shared objects ca's loader
+		   (ca::dl) holds when make() runs are read too, from their files; libraries libc's
+		   loader mapped are not found. Mapped once by make(); clean up with cleanup(). */
 		class symbolizer final {
 
 
@@ -61,6 +65,7 @@ namespace ca {
 				ca::usz _bias;
 				ca::usz _begin;
 				ca::usz _end;
+				ca::dynamic_array<ca::trace::impl::mapped_image> _objects;
 
 
 			public:
@@ -68,13 +73,14 @@ namespace ca {
 				// -- public lifecycle ---------------------------------------
 
 				constexpr symbolizer(void) noexcept
-				: _mapping{}, _image{}, _bias{0U}, _begin{0U}, _end{0U} {
+				: _mapping{}, _image{}, _bias{0U}, _begin{0U}, _end{0U}, _objects{} {
 				}
 
 				symbolizer(const self&) = delete;
 
 				constexpr symbolizer(self&& other) noexcept
-				: _mapping{ca::exchange(other._mapping, ca::span<ca::byte>{nullptr, 0U})}, _image{other._image}, _bias{other._bias}, _begin{other._begin}, _end{other._end} {
+				: _mapping{ca::exchange(other._mapping, ca::span<ca::byte>{nullptr, 0U})}, _image{other._image}, _bias{other._bias}, _begin{other._begin}, _end{other._end},
+				  _objects{ca::move(other._objects)} {
 				}
 
 				/* @DOC Maps the running executable and reads where its sections are. */
@@ -97,6 +103,7 @@ namespace ca {
 					   _bias = other._bias;
 					  _begin = other._begin;
 					    _end = other._end;
+					_objects = ca::move(other._objects);
 					return *this;
 				}
 

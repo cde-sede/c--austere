@@ -62,7 +62,7 @@ The habits it shows run through the whole library: every allocation is a `result
 
 ### Without libc
 
-On Linux x86-64, ca reaches the kernel itself: `ca::sys` makes its syscalls through `ca::syscall` (the vDSO for the clock), formats and reads floats, finds time zones and copies memory without the C library, and defines `memcpy`, `memset`, `memcmp`, `strlen` and the other functions compilers call by name. A program can therefore link without libc at all, with `build/<compiler>-<mode>/libca_runtime.a` (from `src/runtime/`) in its place: the process entry (`_start`, the main thread's TLS, constructors, `exit` and `atexit`), the environment, `malloc` on `ca::heap`, `fork` and `posix_spawn`, and what C++ code compiles to calls of: guards of function-local statics (a recursive initialization traps), `thread_local` destructors (run at exit before static ones), the pure virtual trap, and `operator new` and `delete` on `malloc` (trapping when memory runs out). It is not part of `libca.a`: it defines what libc's own startup files define, and must not be linked next to them.
+On Linux x86-64, ca reaches the kernel itself: `ca::sys` makes its syscalls through `ca::syscall` (the vDSO for the clock), formats and reads floats, finds time zones and copies memory without the C library, and defines `memcpy`, `memset`, `memcmp`, `strlen` and the other functions compilers call by name. A program can therefore link without libc at all, with `build/<compiler>-<mode>/libca_runtime.a` (from `src/runtime/`) in its place: the process entry (`_start`, the main thread's TLS, constructors, `exit` and `atexit`), the environment, `malloc` on `ca::heap`, `fork` and `posix_spawn`, and what C++ code compiles to calls of: guards of function-local statics (a recursive initialization traps), `thread_local` destructors (run at exit before static ones), the pure virtual trap, and `operator new` and `delete` on `malloc` (trapping when memory runs out). It also has what libm functions builtins such as `__builtin_fmod`, `__builtin_floor` and `__builtin_sqrt` lower to: the exact ones, whose result IEEE 754 fixes to the bit (fmod and remainder on the x87 fprem loop, rounding, sqrt, fma, fmin/fmax, ldexp, frexp, modf, logb, nextafter, ... for float, double and long double, fma only for float and double), each with glibc's result and errno (`sys::impl` in `3-system/math/impl/`). Transcendental functions (exp, sin, ...) are not provided. It is not part of `libca.a`: it defines what libc's own startup files define, and must not be linked next to them.
 
 ```sh
 c++ -std=c++2c -nostdinc++ -fno-exceptions -fno-rtti -I src/lib prog.cpp -nostdlib -static-pie \
@@ -74,12 +74,12 @@ c++ -std=c++2c -nostdinc++ -fno-exceptions -fno-rtti -I src/lib prog.cpp -nostdl
 | Layer | Headers | Documented entities |
 |---|---|---|
 | [1-primitives](1-primitives.md) | 239 | 200/200 |
-| [2-vocabulary](2-vocabulary.md) | 65 | 20/20 |
-| [3-system](3-system.md) | 222 | 5/5 |
+| [2-vocabulary](2-vocabulary.md) | 67 | 20/20 |
+| [3-system](3-system.md) | 238 | 5/5 |
 | [4-lifecycle](4-lifecycle.md) | 37 | 31/31 |
-| [5-collections](5-collections.md) | 73 | 41/41 |
-| [6-resources](6-resources.md) | 15 | 4/4 |
-| [ca](ca.md) | 123 | 0/0 |
+| [5-collections](5-collections.md) | 95 | 47/47 |
+| [6-resources](6-resources.md) | 22 | 4/4 |
+| [ca](ca.md) | 134 | 0/0 |
 
 ## [1-primitives](1-primitives.md)
 
@@ -389,9 +389,11 @@ Layer 2: the value types every signature in ca is written with.
 - [`unicode/transcoded.hpp`](2-vocabulary.md#unicodetranscodedhpp) - What one transcode call did: code units read from the input and written to the output.
 - [`unicode/transcoded_size.hpp`](2-vocabulary.md#unicodetranscodedsizehpp) - Code units transcode(text, ...) writes in To's encoding, invalid sequences counting as U+FFFD: th...
 - [`unicode/impl/char_record.hpp`](2-vocabulary.md#unicodeimplcharrecordhpp)
+- [`unicode/impl/class_ranges.hpp`](2-vocabulary.md#unicodeimplclassrangeshpp)
 - [`unicode/impl/decode_at.hpp`](2-vocabulary.md#unicodeimpldecodeathpp)
 - [`unicode/impl/decode_before.hpp`](2-vocabulary.md#unicodeimpldecodebeforehpp)
 - [`unicode/impl/flags_of.hpp`](2-vocabulary.md#unicodeimplflagsofhpp)
+- [`unicode/impl/point_range.hpp`](2-vocabulary.md#unicodeimplpointrangehpp)
 - [`unicode/impl/skip_ascii.hpp`](2-vocabulary.md#unicodeimplskipasciihpp)
 - [`unicode/impl/tables.hpp`](2-vocabulary.md#unicodeimpltableshpp)
 
@@ -399,6 +401,16 @@ Layer 2: the value types every signature in ca is written with.
 
 Layer 3: the boundary with the operating system.
 
+- [`elf/auxiliary_entry.hpp`](3-system.md#elfauxiliaryentryhpp) - Types of the auxiliary vector's entries (AT_*), what the kernel tells a process it starts: its pr...
+- [`elf/dynamic_entry.hpp`](3-system.md#elfdynamicentryhpp) - d_tag: what an entry of the dynamic section gives (DT_*).
+- [`elf/file.hpp`](3-system.md#elffilehpp) - A view of the bytes of an ELF64 little-endian file, read as it is on disk: header, program header...
+- [`elf/file_header.hpp`](3-system.md#elffileheaderhpp) - The identification bytes opening every ELF file (e_ident): indices into them, and the values ca r...
+- [`elf/hashed_name.hpp`](3-system.md#elfhashednamehpp) - A symbol name with both of its ELF hashes (DT_GNU_HASH and DT_HASH), computed once so a lookup th...
+- [`elf/image.hpp`](3-system.md#elfimagehpp) - An ELF64 object mapped for execution (the vDSO, the running program, a library a loader mapped):...
+- [`elf/program_header.hpp`](3-system.md#elfprogramheaderhpp) - p_type: what a segment is (PT_*).
+- [`elf/relocation.hpp`](3-system.md#elfrelocationhpp) - The x86-64 relocation types a dynamic loader applies (R_X86_64_*).
+- [`elf/section_header.hpp`](3-system.md#elfsectionheaderhpp) - sh_type: what a section holds (SHT_*).
+- [`elf/symbol.hpp`](3-system.md#elfsymbolhpp) - What a symbol names (STT_*).
 - [`environment/environ.hpp`](3-system.md#environmentenvironhpp) - The environment as a null-terminated array of "NAME=value", as execve takes it.
 - [`environment/getenv.hpp`](3-system.md#environmentgetenvhpp) - Value of environment variable name, or nothing when unset.
 - [`environment/setenv.hpp`](3-system.md#environmentsetenvhpp) - Sets environment variable name to value; an existing one is kept unless overwrite.
@@ -502,13 +514,16 @@ Layer 3: the boundary with the operating system.
 - [`machine/processor_count.hpp`](3-system.md#machineprocessorcounthpp) - Processors this process may run on now (its affinity mask, as nproc counts them on Linux; the onl...
 - [`machine/system_name.hpp`](3-system.md#machinesystemnamehpp) - What uname reports: the kernel, its release and version, the host and the hardware.
 - [`machine/uname.hpp`](3-system.md#machineunamehpp) - Names of the running system.
+- [`math/impl/exact_math.hpp`](3-system.md#mathimplexactmathhpp) - The functions of libm whose result IEEE 754 fixes to the bit, without libm: what libca_runtime's...
 - [`memory/advice.hpp`](3-system.md#memoryadvicehpp) - How a mapping will be used, for madvise.
 - [`memory/free.hpp`](3-system.md#memoryfreehpp) - Releases a block from mallocarray or reallocarray; nullptr does nothing.
 - [`memory/madvise.hpp`](3-system.md#memorymadvisehpp) - Tells the kernel how region, page-aligned, will be used.
 - [`memory/malloc_alignment.hpp`](3-system.md#memorymallocalignmenthpp) - Alignment of every block mallocarray and reallocarray return.
 - [`memory/mallocarray.hpp`](3-system.md#memorymallocarrayhpp) - Allocates an uninitialized block of count * size bytes, aligned to malloc_alignment; release it w...
 - [`memory/mmap_anonymous.hpp`](3-system.md#memorymmapanonymoushpp) - Maps size bytes of fresh zeroed memory, private to the process, page-aligned, with protection (sy...
+- [`memory/mmap_anonymous_fixed.hpp`](3-system.md#memorymmapanonymousfixedhpp) - Maps fresh zeroed pages over region, page-aligned, replacing the pages there (MAP_FIXED), private...
 - [`memory/mmap_file.hpp`](3-system.md#memorymmapfilehpp) - Maps size bytes of open file fd from offset (a multiple of page_size), page-aligned, with protect...
+- [`memory/mmap_file_fixed.hpp`](3-system.md#memorymmapfilefixedhpp) - Maps the bytes of open file fd from offset (a multiple of page_size) over region, page-aligned, r...
 - [`memory/move_paths.hpp`](3-system.md#memorymovepathshpp) - The paths ca's memcpy and memmove take, one function per size class and instruction set, for code...
 - [`memory/mprotect.hpp`](3-system.md#memorymprotecthpp) - Sets the protection (sys::protection bits) of the pages of region, page-aligned.
 - [`memory/mremap.hpp`](3-system.md#memorymremaphpp) - Resizes page-aligned mapping to size bytes, keeping its pages: a move relocates them without copy...
@@ -562,6 +577,7 @@ Layer 3: the boundary with the operating system.
 - [`process/usage_target.hpp`](3-system.md#processusagetargethpp) - Whose usage getrusage reports: the process, or its waited-for children.
 - [`process/wait_status.hpp`](3-system.md#processwaitstatushpp) - How a child process ended: which child, and an exit code or the signal that killed it.
 - [`process/waitpid.hpp`](3-system.md#processwaitpidhpp) - Waits for child pid to end and reaps it.
+- [`process/impl/clone_onto.hpp`](3-system.md#processimplcloneontohpp)
 - [`process/impl/native_resource.hpp`](3-system.md#processimplnativeresourcehpp)
 - [`process/impl/native_signal_info.hpp`](3-system.md#processimplnativesignalinfohpp)
 - [`process/impl/native_signal_set.hpp`](3-system.md#processimplnativesignalsethpp)
@@ -575,12 +591,13 @@ Layer 3: the boundary with the operating system.
 - [`sync/once.hpp`](3-system.md#synconcehpp) - Runs a function once among every thread calling call: the first runs it, the others sleep until i...
 - [`sync/semaphore.hpp`](3-system.md#syncsemaphorehpp) - A counter of permits: acquire takes one, sleeping while there is none; release gives some back.
 - [`syscall/argument.hpp`](3-system.md#syscallargumenthpp) - What a raw syscall takes in a register: an integer, an enum or a pointer.
-- [`syscall/auxiliary.hpp`](3-system.md#syscallauxiliaryhpp) - Value of entry type (AT_*) of the auxiliary vector the kernel handed the process, 0 when absent.
+- [`syscall/auxiliary.hpp`](3-system.md#syscallauxiliaryhpp) - Value of entry type (elf::auxiliary_types) of the auxiliary vector the kernel handed the process,...
 - [`syscall/invoke.hpp`](3-system.md#syscallinvokehpp) - Raw kernel entry points: invoke, plus one function per syscall of the target (number::* and a cal...
 - [`syscall/restarting.hpp`](3-system.md#syscallrestartinghpp) - call() again while it fails with errc::interrupted (a signal handler ran before the syscall did a...
 - [`syscall/syscalls.hpp`](3-system.md#syscallsyscallshpp) - Whether the target has a generated table: number::\<name> and \<name>(args...).
 - [`syscall/vdso.hpp`](3-system.md#syscallvdsohpp) - Address of function name in the vDSO, the shared object the kernel maps into every process (clock...
 - [`syscall/impl/enter.hpp`](3-system.md#syscallimplenterhpp) - enter(number, args...) makes syscall number with exactly the arguments given, 0 to 6, and returns...
+- [`syscall/impl/read_own.hpp`](3-system.md#syscallimplreadownhpp)
 - [`syscall/table/linux_x86_64.hpp`](3-system.md#syscalltablelinuxx8664hpp) - Syscall numbers of linux x86_64 implemented by kernel 7.0.0-38-generic.
 - [`text/format_float.hpp`](3-system.md#textformatfloathpp) - Writes value as printf's %\<conversion> would (conversion one of f F e E g G a A), with precision...
 - [`text/format_float_shortest.hpp`](3-system.md#textformatfloatshortesthpp) - Writes the fewest %g digits that read back as the same value: 0.1 is "0.1", not "0.10000000000000...
@@ -590,6 +607,7 @@ Layer 3: the boundary with the operating system.
 - [`thread/futex_wait.hpp`](3-system.md#threadfutexwaithpp) - Sleeps while word holds expected, until a futex_wake on it.
 - [`thread/futex_wait_until.hpp`](3-system.md#threadfutexwaituntilhpp) - futex_wait with a deadline on the monotonic clock (sys::now(clock::monotonic) nanoseconds): errc:...
 - [`thread/futex_wake.hpp`](3-system.md#threadfutexwakehpp) - Wakes up to count threads sleeping in futex_wait on word; ca::limits\<u32>::max() wakes all.
+- [`thread/thread.hpp`](3-system.md#threadthreadhpp) - A thread on raw clone, without libc: one mapping holds a guard page, its stack, a control block a...
 - [`thread/thread_key.hpp`](3-system.md#threadthreadkeyhpp) - A per-thread slot from thread_key_create, holding one pointer per thread.
 - [`thread/thread_key_create.hpp`](3-system.md#threadthreadkeycreatehpp) - A new per-thread slot, null in every thread.
 - [`thread/thread_key_set.hpp`](3-system.md#threadthreadkeysethpp) - Stores value in the calling thread's slot of key.
@@ -597,7 +615,7 @@ Layer 3: the boundary with the operating system.
 - [`thread/impl/key_table.hpp`](3-system.md#threadimplkeytablehpp) - Thread keys without libc: what libca_runtime's pthread_key_create, setspecific and getspecific are.
 - [`thread/impl/ordered_keys.hpp`](3-system.md#threadimplorderedkeyshpp) - ca's own thread keys: 32 slots, values in thread_local storage, callbacks run by stage from the d...
 - [`thread/impl/thread_exit.hpp`](3-system.md#threadimplthreadexithpp) - What a thread runs as it ends, without libc: the destructors of its thread_local objects (what li...
-- [`thread/impl/tls.hpp`](3-system.md#threadimpltlshpp) - Thread-local storage without libc (x86-64 variant II): each thread's copy of the PT_TLS image sit...
+- [`thread/impl/tls.hpp`](3-system.md#threadimpltlshpp) - Thread-local storage without libc (x86-64 variant II): each thread's copy of the elf::segment_typ...
 - [`time/calendar_time.hpp`](3-system.md#timecalendartimehpp) - A moment as a date and time of day in some time zone, by utc_time or local_time.
 - [`time/clock.hpp`](3-system.md#timeclockhpp) - Clocks to read with now().
 - [`time/local_time.hpp`](3-system.md#timelocaltimehpp) - Date and time of seconds since the epoch, in the local time zone (TZ, or /etc/localtime, re-read...
@@ -731,6 +749,28 @@ Layer 5: the owning data structures, and formatting, which only needs them and t
 - [`map/impl/range.hpp`](5-collections.md#mapimplrangehpp)
 - [`map/impl/swar_group.hpp`](5-collections.md#mapimplswargrouphpp)
 - [`map/impl/vector_group.hpp`](5-collections.md#mapimplvectorgrouphpp)
+- [`regex/basic_regex.hpp`](5-collections.md#regexbasicregexhpp) - Performance of ca::basic_regex\<A>.
+- [`regex/regex.hpp`](5-collections.md#regexregexhpp) - A compiled regular expression from the heap: Python's re.Pattern (see basic_regex).
+- [`regex/regex_error.hpp`](5-collections.md#regexregexerrorhpp) - Why a pattern does not compile and where: kind, the offset of the code unit it was found at, and...
+- [`regex/regex_flags.hpp`](5-collections.md#regexregexflagshpp) - The flags of Python's re, combined with `|`: ignore_case (re.I: Unicode caseless classes as re ta...
+- [`regex/regex_match.hpp`](5-collections.md#regexregexmatchhpp) - One match of a basic_regex in a text: Python's re.Match.
+- [`regex/regex_matches.hpp`](5-collections.md#regexregexmatcheshpp) - The matches of a regex R (a basic_regex) in a text, one per next(): what finditer returns, R::mat...
+- [`regex/regex_pattern.hpp`](5-collections.md#regexregexpatternhpp) - The text of a regular expression, what basic_regex::make compiles.
+- [`regex/impl/pike_vm.hpp`](5-collections.md#regeximplpikevmhpp)
+- [`regex/impl/regex_analysis.hpp`](5-collections.md#regeximplregexanalysishpp) - What a compiled pattern tells the matcher before it runs, so it can skip text no match starts in.
+- [`regex/impl/regex_compiler.hpp`](5-collections.md#regeximplregexcompilerhpp)
+- [`regex/impl/regex_errors.hpp`](5-collections.md#regeximplregexerrorshpp) - Never defined: a literal pattern is checked in a consteval constructor, where calling one of thes...
+- [`regex/impl/regex_limits.hpp`](5-collections.md#regeximplregexlimitshpp) - Bounds of a pattern: group nesting, capture groups, a counted repeat's numbers and the compiled p...
+- [`regex/impl/regex_look.hpp`](5-collections.md#regeximplregexlookhpp)
+- [`regex/impl/regex_names.hpp`](5-collections.md#regeximplregexnameshpp)
+- [`regex/impl/regex_node.hpp`](5-collections.md#regeximplregexnodehpp)
+- [`regex/impl/regex_parser.hpp`](5-collections.md#regeximplregexparserhpp)
+- [`regex/impl/regex_program.hpp`](5-collections.md#regeximplregexprogramhpp)
+- [`regex/impl/regex_ranges.hpp`](5-collections.md#regeximplregexrangeshpp) - Sets of code points as sorted, disjoint ranges: what a character class becomes.
+- [`regex/impl/regex_replacement.hpp`](5-collections.md#regeximplregexreplacementhpp)
+- [`regex/impl/regex_tree.hpp`](5-collections.md#regeximplregextreehpp)
+- [`regex/impl/regex_validator.hpp`](5-collections.md#regeximplregexvalidatorhpp)
+- [`regex/impl/utf8_sequences.hpp`](5-collections.md#regeximplutf8sequenceshpp)
 - [`string/basic_str.hpp`](5-collections.md#stringbasicstrhpp) - Performance of ca::basic_str<C, A>.
 - [`string/inline_str.hpp`](5-collections.md#stringinlinestrhpp) - Performance of ca::inline_str<N, C>.
 - [`string/join.hpp`](5-collections.md#stringjoinhpp) - The items of a range (anything converting to sv::basic\<C>: views, strings, C strings, the pieces...
@@ -746,6 +786,11 @@ Layer 5: the owning data structures, and formatting, which only needs them and t
 
 Layer 6: objects backed by the operating system, and the services a program uses through them.
 
+- [`dl/host_symbol.hpp`](6-resources.md#dlhostsymbolhpp) - A symbol the program offers to the libraries it loads: a name and the address of what it names, a...
+- [`dl/library.hpp`](6-resources.md#dllibraryhpp) - ca::dl::library: a shared object loaded by ca's own dynamic loader, owned until cleanup.
+- [`dl/impl/loader.hpp`](6-resources.md#dlimplloaderhpp)
+- [`dl/impl/object.hpp`](6-resources.md#dlimplobjecthpp)
+- [`dl/impl/tls.hpp`](6-resources.md#dlimpltlshpp)
 - [`fs/descriptor.hpp`](6-resources.md#fsdescriptorhpp) - An owned POSIX file descriptor whose flags are typed options, combined at compile time: `descript...
 - [`io/buffered_reader.hpp`](6-resources.md#iobufferedreaderhpp) - Input writer owning its buffer (and optionally its descriptor).
 - [`io/buffered_writer.hpp`](6-resources.md#iobufferedwriterhpp) - Writer owning its buffer (and optionally its descriptor).
@@ -761,6 +806,8 @@ Layer 6: objects backed by the operating system, and the services a program uses
 - [`print/print_trace.hpp`](6-resources.md#printprinttracehpp) - Prints error and its thread trace (see ca::trace::record), then a newline: `ca::print_trace(r.err...
 - [`print/printf.hpp`](6-resources.md#printprintfhpp) - print with C % syntax (see printf_string), typed and checked at compile time, no varargs: `ca::pr...
 - [`trace/symbolizer.hpp`](6-resources.md#tracesymbolizerhpp) - The running executable's symbols and debug information, mapped from /proc/self/exe: lookup turns...
+- [`trace/impl/loaded_objects.hpp`](6-resources.md#traceimplloadedobjectshpp)
+- [`trace/impl/mapped_image.hpp`](6-resources.md#traceimplmappedimagehpp)
 
 ## [ca](ca.md)
 
@@ -770,6 +817,7 @@ The include facade: what programs include.
 - [`array.hpp`](ca.md#arrayhpp) - `#include "ca/array.hpp"`: 5-collections/array/.
 - [`ask.hpp`](ca.md#askhpp) - `#include "ca/ask.hpp"`: 2-vocabulary/ask.hpp.
 - [`atomic.hpp`](ca.md#atomichpp) - `#include "ca/atomic.hpp"`: 1-primitives/atomic/.
+- [`basic_regex.hpp`](ca.md#basicregexhpp) - `#include "ca/basic_regex.hpp"`: 5-collections/regex/basic_regex.hpp.
 - [`basic_str.hpp`](ca.md#basicstrhpp) - `#include "ca/basic_str.hpp"`: 5-collections/string/basic_str.hpp.
 - [`bit.hpp`](ca.md#bithpp) - `#include "ca/bit.hpp"`: 1-primitives/bit/.
 - [`bit_array.hpp`](ca.md#bitarrayhpp) - `#include "ca/bit_array.hpp"`: 5-collections/array/bit_array.hpp.
@@ -787,8 +835,10 @@ The include facade: what programs include.
 - [`debug.hpp`](ca.md#debughpp) - `#include "ca/debug.hpp"`: 1-primitives/debug/.
 - [`deque.hpp`](ca.md#dequehpp) - `#include "ca/deque.hpp"`: 5-collections/array/deque.hpp.
 - [`descriptor.hpp`](ca.md#descriptorhpp) - `#include "ca/descriptor.hpp"`: 6-resources/fs/descriptor.hpp.
+- [`dl.hpp`](ca.md#dlhpp) - `#include "ca/dl.hpp"`: 6-resources/dl/.
 - [`dynamic_array.hpp`](ca.md#dynamicarrayhpp) - `#include "ca/dynamic_array.hpp"`: 5-collections/array/dynamic_array.hpp.
 - [`dynamic_bit_array.hpp`](ca.md#dynamicbitarrayhpp) - `#include "ca/dynamic_bit_array.hpp"`: 5-collections/array/dynamic_bit_array.hpp.
+- [`elf.hpp`](ca.md#elfhpp) - `#include "ca/elf.hpp"`: 3-system/elf/.
 - [`environment.hpp`](ca.md#environmenthpp) - `#include "ca/environment.hpp"`: 3-system/environment/.
 - [`err.hpp`](ca.md#errhpp) - `#include "ca/err.hpp"`: 6-resources/io/err.hpp.
 - [`error.hpp`](ca.md#errorhpp) - `#include "ca/error.hpp"`: 2-vocabulary/error.hpp, 3-system/error/.
@@ -805,6 +855,7 @@ The include facade: what programs include.
 - [`handler.hpp`](ca.md#handlerhpp) - `#include "ca/handler.hpp"`: 4-lifecycle/handler.hpp.
 - [`hash.hpp`](ca.md#hashhpp) - `#include "ca/hash.hpp"`: 1-primitives/hash/, 5-collections/map/hash.hpp.
 - [`hashmap.hpp`](ca.md#hashmaphpp) - `#include "ca/hashmap.hpp"`: 5-collections/map/hashmap.hpp.
+- [`host_symbol.hpp`](ca.md#hostsymbolhpp) - `#include "ca/host_symbol.hpp"`: 6-resources/dl/host_symbol.hpp.
 - [`in.hpp`](ca.md#inhpp) - `#include "ca/in.hpp"`: 6-resources/io/in.hpp.
 - [`in_place.hpp`](ca.md#inplacehpp) - `#include "ca/in_place.hpp"`: 2-vocabulary/in_place.hpp.
 - [`inline_array.hpp`](ca.md#inlinearrayhpp) - `#include "ca/inline_array.hpp"`: 5-collections/array/inline_array.hpp.
@@ -823,6 +874,7 @@ The include facade: what programs include.
 - [`is_realizable.hpp`](ca.md#isrealizablehpp) - `#include "ca/is_realizable.hpp"`: 2-vocabulary/is_realizable.hpp.
 - [`item.hpp`](ca.md#itemhpp) - `#include "ca/item.hpp"`: 5-collections/map/item.hpp.
 - [`join.hpp`](ca.md#joinhpp) - `#include "ca/join.hpp"`: 5-collections/string/join.hpp.
+- [`library.hpp`](ca.md#libraryhpp) - `#include "ca/library.hpp"`: 6-resources/dl/library.hpp.
 - [`limits.hpp`](ca.md#limitshpp) - `#include "ca/limits.hpp"`: 1-primitives/limits.hpp.
 - [`list.hpp`](ca.md#listhpp) - `#include "ca/list.hpp"`: 5-collections/list/.
 - [`list_link.hpp`](ca.md#listlinkhpp) - `#include "ca/list_link.hpp"`: 5-collections/list/list_link.hpp.
@@ -854,6 +906,12 @@ The include facade: what programs include.
 - [`read_to_end.hpp`](ca.md#readtoendhpp) - `#include "ca/read_to_end.hpp"`: 5-collections/io/read_to_end.hpp.
 - [`reader.hpp`](ca.md#readerhpp) - `#include "ca/reader.hpp"`: 6-resources/io/reader.hpp.
 - [`realized.hpp`](ca.md#realizedhpp) - `#include "ca/realized.hpp"`: 2-vocabulary/realized.hpp.
+- [`regex.hpp`](ca.md#regexhpp) - `#include "ca/regex.hpp"`: 5-collections/regex/.
+- [`regex_error.hpp`](ca.md#regexerrorhpp) - `#include "ca/regex_error.hpp"`: 5-collections/regex/regex_error.hpp.
+- [`regex_flags.hpp`](ca.md#regexflagshpp) - `#include "ca/regex_flags.hpp"`: 5-collections/regex/regex_flags.hpp.
+- [`regex_match.hpp`](ca.md#regexmatchhpp) - `#include "ca/regex_match.hpp"`: 5-collections/regex/regex_match.hpp.
+- [`regex_matches.hpp`](ca.md#regexmatcheshpp) - `#include "ca/regex_matches.hpp"`: 5-collections/regex/regex_matches.hpp.
+- [`regex_pattern.hpp`](ca.md#regexpatternhpp) - `#include "ca/regex_pattern.hpp"`: 5-collections/regex/regex_pattern.hpp.
 - [`report.hpp`](ca.md#reporthpp) - `#include "ca/report.hpp"`: 5-collections/trace/report.hpp.
 - [`result.hpp`](ca.md#resulthpp) - `#include "ca/result.hpp"`: 2-vocabulary/result.hpp.
 - [`ring_buffer.hpp`](ca.md#ringbufferhpp) - `#include "ca/ring_buffer.hpp"`: 5-collections/io/ring_buffer.hpp.

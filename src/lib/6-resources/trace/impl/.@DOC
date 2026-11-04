@@ -1,0 +1,10 @@
+The symbolizer's internals. `mapped_image` is one ELF file it mapped: its sections
+(`trace::impl::debug_image`, layer 3) and where its code runs, as a bias and an address range.
+The executable is one, every shared object ca's loader held when the symbolizer was made is
+another.
+
+`loaded_objects` is how the symbolizer learns of those objects without depending on the
+loader: an atomic pointer to a function visiting each of them (`loaded_object`: path, device
+and inode, bias, range), null until `ca::dl` loads something. The symbolizer maps each file
+again by its path and keeps it only when its device and inode still match, so a file replaced
+since it was loaded is left out rather than read wrong.

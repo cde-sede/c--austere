@@ -19,16 +19,17 @@
 #                        --bench); B='hashmap map' runs only those
 #   make syscalls        regenerate the ca::syscall table of this machine
 #                        (see tooling/gen_syscalls.py)
-#   make unicode         regenerate the ca::unicode character database from the running
-#                        Python and the UCD of its Unicode version (see tooling/gen_unicode.py)
+#   make unicode         regenerate the ca::unicode character database and the classes of
+#                        ca::regex from the running Python and the UCD of its Unicode version
+#                        (see tooling/gen_unicode.py)
 #   make gen             run every generator, in dependency order: traits, syscall table,
 #                        unicode tables, include facade (derived from the tree), str_python
-#                        test, doc (md and html)
+#                        and regex_python tests, doc (md and html)
 #   make clean           remove objects (.o) and dependency files (.d) of every build, and the
 #                        generators' scratch (downloads, bytecode: tooling/<gen>.py --clean)
 #   make fclean          clean, then remove build/ entirely and everything the generators
 #                        wrote (--fclean: traits, facade, syscall table, unicode tables,
-#                        str_python test, doc); make gen brings them back
+#                        str_python and regex_python tests, doc); make gen brings them back
 #
 #   make CXX=g++ MODE=release
 #   make MODE=release FRAME_POINTERS=1   keep frame pointers, for full trap backtraces
@@ -75,7 +76,7 @@ ifeq ($(FRAME_POINTERS),1)
 CXXFLAGS += -fno-omit-frame-pointer -mno-omit-leaf-frame-pointer
 endif
 
-GENERATORS := gen_traits gen_syscalls gen_unicode gen_float_tables gen_includes gen_str_test autodoc
+GENERATORS := gen_traits gen_syscalls gen_unicode gen_float_tables gen_includes gen_str_test gen_regex_test autodoc
 
 BUILD := build/$(notdir $(CXX))-$(MODE)
 LIB   := $(BUILD)/libca.a

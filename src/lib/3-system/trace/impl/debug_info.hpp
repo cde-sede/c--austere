@@ -4,8 +4,10 @@
 #include "1-primitives/integers/byte.hpp"
 #include "1-primitives/integers/u64.hpp"
 #include "1-primitives/integers/usz.hpp"
+#include "2-vocabulary/borrowed_slice.hpp"
 #include "2-vocabulary/optional.hpp"
 #include "2-vocabulary/span.hpp"
+#include "3-system/elf/symbol.hpp"
 #include "3-system/trace/location.hpp"
 
 
@@ -30,9 +32,9 @@ namespace ca {
 
 					using self = ca::trace::impl::debug_image;
 
-					ca::span<const ca::byte> _symtab;
+					ca::borrowed_slice<const ca::elf::symbol> _symtab;
 					ca::span<const ca::byte> _symstr;
-					ca::span<const ca::byte> _dynsym;
+					ca::borrowed_slice<const ca::elf::symbol> _dynsym;
 					ca::span<const ca::byte> _dynstr;
 					ca::span<const ca::byte> _info;
 					ca::span<const ca::byte> _abbrev;

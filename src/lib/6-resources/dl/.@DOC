@@ -1,0 +1,100 @@
+A dynamic loader of ca's own, in `ca::dl`: it loads ELF64 x86-64 shared objects without
+`ld.so` or libc, so freestanding programs (linked with libca_runtime, `-static` or
+`-static-pie`) can load plugins too. It is built on `ca::elf` (layer 3) and does what `dlopen`
+does with `RTLD_NOW | RTLD_LOCAL`:
+
+- maps the load segments of the file into one reservation, aligned as they ask, each with the
+  protection it asks for, the zero-filled tail of a segment included;
+- loads what it needs (DT_NEEDED), breadth first: a name with a slash is a path, any other is
+  first matched against the DT_SONAME of what is loaded, then searched for in the requester's
+  DT_RPATH (when it has no DT_RUNPATH), LD_LIBRARY_PATH (not in a setuid program), DT_RUNPATH,
+  and `/lib/x86_64-linux-gnu`, `/usr/lib/x86_64-linux-gnu`, `/lib64`, `/usr/lib64`, `/lib`,
+  `/usr/lib`; `$ORIGIN` is the requester's directory; files of another class or machine are
+  skipped;
+- applies every relocation at once: relative ones (RELA and the packed DT_RELR) first, then the
+  ones naming symbols, then indirect relative ones (their resolvers may read what the others
+  wrote); then makes PT_GNU_RELRO read-only;
+- runs the initializers, dependencies first (DT_INIT, then DT_INIT_ARRAY, each called with 0,
+  nullptr and the environment, as glibc calls them).
+
+A symbol a library leaves undefined resolves, in order, to:
+
+- the program's explicit offers (the `host` argument, `dl::host_symbol`: a name and an address),
+  which always win;
+- the library's own definition, when it is linked `-Bsymbolic` (DT_SYMBOLIC);
+- what the running program exports, as ld.so puts the executable first in the global scope: the
+  defined, non-local symbols of its dynamic symbol table (`elf::image::program()`, read once on
+  the first load). A program exports its functions and variables when linked with
+  `-Wl,--export-dynamic` (`-rdynamic`); without it, only what the shared libraries it was
+  linked against reference (under libc: `environ`, copy-relocated data). A static non-PIE
+  program exports nothing: GNU ld gives it no dynamic section, even with `--export-dynamic`;
+- the loader's built-ins (`__tls_get_addr`);
+- the first definition in the scope of the library loaded: itself, then what it needs, breadth
+  first.
+
+An undefined weak symbol is 0. Hidden symbol versions are skipped; other versions are not
+checked. Indirect functions (STT_GNU_IFUNC) are resolved by calling their resolver, the
+program's included. A thread-local variable the program exports cannot be bound: the program's
+own block sits next to the thread pointer and has no module id in the loader's table. A
+library's reference to one goes on to the library's scope, so a copy the library defines itself
+(an inline `thread_local`) is used; when only the program defines it, the load fails with
+`errc::not_supported` naming the variable.
+
+Objects are shared: loading a file already loaded (same device and inode), or a name matching a
+loaded DT_SONAME, adds a reference. `library::cleanup()` drops one; the last one runs the
+finalizers (DT_FINI_ARRAY in reverse, then DT_FINI), releases what the object needs and unmaps
+it. A failed load is all or nothing: what it mapped is unmapped, what it shared is released, and
+no initializer has run.
+
+Failures come as a `ca::report<>` naming what failed: `undefined symbol host_note, needed by
+plugins/libgreet.so`, `libz.so.1: not found`, `x.so: not an ELF64 x86-64 shared object`.
+
+Thread-local storage works as the general and local dynamic models (what `-fPIC` code uses)
+expect: each object with a PT_TLS segment gets a module id (R_X86_64_DTPMOD64), its variables
+offsets in its block (R_X86_64_DTPOFF64), and the loader provides `__tls_get_addr` itself. A
+thread's block for a module is made on its first access, from the segment's image, and freed
+when the thread exits (a thread key, so threads libc starts are covered too); blocks of a
+released module are freed when their thread next reaches its id, or exits. It never touches
+the thread pointer, so it works the same under libc, which owns `%fs`, and in freestanding
+programs. `find` of a thread-local variable gives the calling thread's copy. At most
+`dl::impl::tls_modules` (1024) objects with thread-local storage are loaded at once.
+
+Loaded objects are visible to `ca::trace::symbolizer`: one made while they are loaded maps
+their files too, so a backtrace through plugin code shows its functions, files and lines.
+
+Not supported, each refused with `errc::not_supported` rather than loaded wrong: the
+initial-exec TLS model (R_X86_64_TPOFF64, DF_STATIC_TLS: it needs room next to the thread
+pointer reserved before threads start), TLS descriptors (`-mtls-dialect=gnu2`), relocations in
+read-only segments (DT_TEXTREL), copy relocations, binding to the program's thread-local
+variables. Lazy binding is not offered: every symbol is
+bound at load. `libc.so.6` uses initial-exec TLS, so objects needing libc cannot be loaded:
+this loader is for plugins built `-nostdlib` against what the host offers or exports, or
+against other such objects. One lock serializes loading and unloading, held while initializers and
+finalizers run: they must not load or release libraries, nor make a symbolizer.
+
+```c++
+#include "ca/dl.hpp"
+#include "ca/error.hpp"
+#include "ca/format.hpp"
+#include "ca/report.hpp"
+
+static auto log_line(const char* text) -> void {
+	static_cast<void>(text);
+}
+
+auto main(void) -> int {
+	const ca::dl::host_symbol host[] = {{"log_line", reinterpret_cast<void*>(&log_line)}};
+	auto plugin = ca::dl::library::make("libca_example_plugin.so", host);
+	if (plugin) {
+		const auto run = plugin->find_as<int(int)>("plugin_run");
+		const int result = run ? (*run)(1) : -1;
+		return plugin->cleanup() && result >= 0 ? 0 : 1;
+	}
+	ca::report<>& why = plugin.error();
+	auto text = ca::format("{}", why);
+	const bool explained = text && text->view().contains("libca_example_plugin.so: not found");
+	if (text)
+		static_cast<void>(text->cleanup());
+	return why.error() == ca::errc::no_entry && explained && why.cleanup() ? 0 : 2;
+}
+```

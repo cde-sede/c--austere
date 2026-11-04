@@ -1,0 +1,122 @@
+Regular expressions with Python's `re` syntax and API, matched in time linear in the text.
+
+| Type | What it is | Python |
+|---|---|---|
+| `ca::regex` (`basic_regex<A>`) | a compiled pattern, in memory from A | `re.Pattern` |
+| `ca::regex_pattern` | a pattern's text: checked when it compiles if literal | the pattern string |
+| `ca::regex_flags` | `ignore_case`, `multiline`, `dot_all`, `verbose`, `ascii` | `re.I`, `re.M`, `re.S`, `re.X`, `re.A` |
+| `ca::regex_match<A>` | one match: groups, positions, `expand` | `re.Match` |
+| `regex_matches<R>` (`R::matches_type`) | the matches one by one, from `finditer` | the iterator of `finditer` |
+| `ca::regex_error` | why a pattern does not compile, and where | `re.error` (`msg`, `pos`) |
+
+`ca::regex::make(pattern, flags)` (or `compile`) acquires a regex: `result<regex>`, failing with
+`errc::invalid_argument` and the syntax error's message as the trace frame, or out of memory. A
+literal pattern is checked when the program compiles, like a format string: `make("a)b")` is a
+compile error naming `regex_has_unbalanced_paren`. Text known only at runtime goes in explicitly,
+`ca::regex_pattern{text}`, and `regex_pattern{text}.check(flags)` gives the error's kind and
+position without building anything (constexpr).
+
+The methods are Python's: `search`, `match`, `fullmatch` (`result<optional<regex_match>>`, the
+result failing only out of memory), `finditer`, `findall`, `split`, `sub` (a template with `\1`,
+`\g<name>`, or a function of the match), `escape`, `group_count`, `group_index`. A match borrows
+the text and the regex's group names; `m[1]` traps on a group the pattern does not have and is
+empty for one that took no part, `m.group(1)`, `m.start(1)`, `m.end(1)` give nothing then.
+Positions count code units (bytes of UTF-8), as everywhere in ca; `search(text, pos)` starts at
+pos while `^` and `\b` still see what precedes it, and a prefix of the text plays Python's endpos.
+
+```c++
+#include "ca/regex.hpp"
+#include "ca/sv.hpp"
+
+auto main(void) -> int {
+	auto date = ca::regex::make("(?P<year>\\d{4})-(?P<month>\\d\\d)");
+	if (!date)
+		return 1;
+	auto found = date->search("paid 2026-11, due 2026-12");
+	if (!found || !*found)
+		return 2;
+	ca::regex_match<>& m = **found;
+	if (m.group() != ca::sv::str{"2026-11"} || m["month"] != ca::sv::str{"11"} || m.start() != 5U)
+		return 3;
+	auto swapped = date->sub("\\g<month>/\\g<year>", "2026-11 and 2026-12");
+	if (!swapped || *swapped != ca::sv::str{"11/2026 and 12/2026"})
+		return 4;
+	auto words = ca::regex::make("\\W+");
+	if (!words)
+		return 5;
+	auto pieces = words->split("one, two;three");
+	if (!pieces || pieces->size() != 3U || (*pieces)[2U] != ca::sv::str{"three"})
+		return 6;
+	return m.cleanup() && swapped->cleanup() && pieces->cleanup() && words->cleanup() && date->cleanup() ? 0 : 7;
+}
+```
+
+### Syntax
+
+Python's, over UTF-8: literals and escapes (`\n \t \xhh \uhhhh \Uhhhhhhhh`, octal `\0` and
+`\ooo`), `.`, classes `[a-z]`, `[^...]` with `\d \w \s` and their negations inside, anchors
+`^ $ \A \Z \b \B`, groups `(...)`, `(?:...)`, `(?P<name>...)`, comments `(?#...)`, alternation,
+the greedy and lazy repeats `* + ? {n} {n,} {,m} {n,m}`, inline flags `(?imsxa)` at the start and
+`(?i:...)`, `(?-i:...)` for a group. Unknown escapes of ASCII letters are errors, as in Python.
+
+`\w \d \s` are Unicode's (Python's `str.isalnum` or `_`, `str.isdecimal`, `str.isspace`), ASCII
+under `ascii`; `ignore_case` takes characters as Python's re does (same simple lowercase, plus
+re's extra pairs: `k`, `K` and the Kelvin sign; `s`, `S` and `ſ`; ...). The classes and the
+caseless pairs are tables generated from the running Python and checked against its re for every
+code point (`make unicode`). `\B` matches an empty text, as in Python 3.14 (not 3.12).
+
+### What a linear-time engine leaves out
+
+Backreferences (`\1` in a pattern, `(?P=name)`), lookahead and lookbehind, conditionals `(?(1)...)`,
+atomic groups and possessive repeats, `\N{name}`: each is an error of its own kind
+(`regex_error::kind::backreference`, ...), at compile time for a literal. In exchange no pattern
+backtracks: matching costs O(text size * program size) whatever the input, with memory fixed when
+the regex is made. Patterns are bounded (groups nested 128 deep, repeats up to 100000, a program of
+2^18 instructions and transitions), so a regex cannot take unbounded memory either.
+
+### Matching
+
+The pattern compiles to a Thompson NFA over UTF-8 bytes (a character class becomes a trie of byte
+ranges), run as a Pike VM: every possible thread advances one byte at a time, in priority order,
+so the first thread to match is the match Python's backtracker would find (leftmost-first, greedy
+and lazy repeats as written), groups included. A loop whose body can match empty iterates as
+Python's does: past its minimum, an iteration that matched empty ends it, keeping its groups.
+Before running, the matcher skips the text to where a match can begin: the literal every match
+starts with (a substring search), else the bytes a match can start with. A pattern that is only a
+literal never runs the VM.
+
+The scratch memory of the VM is taken by `make`, so matching allocates only what it returns (a
+match's groups when the pattern has groups, the lists of findall and split, sub's string). The
+matching methods therefore change the regex: one thread uses it at a time, `clone()` makes one
+for another thread. Text that is not valid UTF-8 can be searched: invalid bytes match no
+character, `.` and negated classes included.
+
+```c++
+#include "ca/regex.hpp"
+#include "ca/sv.hpp"
+
+auto main(void) -> int {
+	auto vowels = ca::regex::make("[aeiouy]+", ca::regex_flags::ignore_case);
+	if (!vowels)
+		return 1;
+	auto all = vowels->findall("SEA Breeze");
+	if (!all || all->size() != 3U || (*all)[0U] != ca::sv::str{"EA"})
+		return 2;
+	auto matches = vowels->finditer("Kepler");
+	ca::usz count = 0U;
+	while (true) {
+		auto next = matches.next();
+		if (!next)
+			return 3;
+		if (!*next)
+			break;
+		++count;
+		if (!(*next)->cleanup())
+			return 4;
+	}
+	const ca::optional<ca::regex_error> problem = ca::regex_pattern{ca::sv::str{"(a)\\1"}}.check();
+	if (count != 2U || !problem || problem->what() != ca::regex_error::kind::backreference)
+		return 5;
+	return all->cleanup() && vowels->cleanup() ? 0 : 6;
+}
+```

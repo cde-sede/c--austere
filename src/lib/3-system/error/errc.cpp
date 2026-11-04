@@ -24,6 +24,7 @@ static_assert(ca::errc::not_a_terminal.code() == ENOTTY);
 static_assert(ca::errc::no_space.code() == ENOSPC);
 static_assert(ca::errc::not_seekable.code() == ESPIPE);
 static_assert(ca::errc::broken_pipe.code() == EPIPE);
+static_assert(ca::errc::out_of_domain.code() == EDOM);
 static_assert(ca::errc::out_of_range.code() == ERANGE);
 static_assert(ca::errc::try_again.code() == EAGAIN);
 static_assert(ca::errc::name_too_long.code() == ENAMETOOLONG);

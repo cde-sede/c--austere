@@ -1,5 +1,6 @@
 #include "1-primitives/config/architecture.hpp"
 #include "1-primitives/config/platform.hpp"
+#include "3-system/elf/auxiliary_entry.hpp"
 #include "3-system/syscall/auxiliary.hpp"
 #include "3-system/syscall/restarting.hpp"
 #include "3-system/syscall/syscalls.hpp"
@@ -15,7 +16,7 @@
 	});
 	if (!fd) [[unlikely]]
 		return 0U;
-	ca::u64 entries[128] = {};
+	ca::elf::auxiliary_entry entries[64] = {};
 	ca::usz filled = 0U;
 	for (;;) {
 		const auto done = ca::syscall::restarting([&] {
@@ -26,9 +27,11 @@
 		filled += static_cast<ca::usz>(*done);
 	}
 	static_cast<void>(ca::syscall::close(*fd));
-	for (ca::usz i = 0U; i + 1U < filled / sizeof(ca::u64); i += 2U) {
-		if (entries[i] == type)
-			return entries[i + 1U];
+	for (ca::usz i = 0U; i < filled / sizeof(ca::elf::auxiliary_entry); ++i) {
+		if (entries[i]._type == ca::elf::auxiliary_types::null)
+			break;
+		if (entries[i]._type == type)
+			return entries[i]._value;
 	}
 	return 0U;
 #else

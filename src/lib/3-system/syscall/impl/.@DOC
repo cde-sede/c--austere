@@ -5,6 +5,11 @@ place and keeps everything else live across the call. Memory is clobbered, since
 and writes through the pointers it is given. It returns the raw kernel value: -errno, between
 -4095 and -1, on failure; `invoke` turns that into a `ca::result`.
 
+`read_own(address, out)` copies the process's own memory through `process_vm_readv`, which
+fails instead of faulting on an unmapped address: the backtrace walks frame records with it, and
+`elf::image::program()` reads the ELF header of a static PIE. It goes through `enter`, so a
+failure leaves the last error as it was.
+
 `inline_entry` tells whether `enter` is the inlined instruction (true on those three CPUs) or a
 call to libc's `syscall(2)`. Functions that must not return, such as `exit`, are generated as
 `[[noreturn]]` and end in `ca::unreachable()` after the instruction.

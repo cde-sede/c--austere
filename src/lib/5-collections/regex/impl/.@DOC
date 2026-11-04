@@ -1,0 +1,36 @@
+The regex engine, in the order a pattern goes through it.
+
+### Parsing
+
+- `regex_parser.hpp`: Python's grammar, one pass over the UTF-8 pattern with a fixed stack of open
+  groups (no recursion, no allocation), so the same code checks a literal in a consteval
+  constructor and builds the tree at runtime. What it recognises goes to a sink.
+- `regex_validator.hpp`: the sink that builds nothing, for `regex_pattern::check`.
+- `regex_tree.hpp`: the sink that builds the tree (`regex_node.hpp`: nodes linked by index), with
+  every character set resolved there to sorted code point ranges.
+- `regex_ranges.hpp`: that set algebra: sorting and merging ranges, complements within the
+  scalar values, the named classes (`\w \d \s`, Unicode from
+  `2-vocabulary/unicode/impl/class_ranges.hpp` or ASCII), and the caseless closure of
+  `ignore_case` from the caseless cycles of the same generated header.
+- `regex_errors.hpp`: one undefined function per syntax error, called by the consteval check.
+
+### Compiling
+
+- `regex_compiler.hpp`: the tree to a Thompson NFA (`regex_program.hpp`: `regex_inst`, transitions
+  of byte ranges), each node compiled knowing its successor. Counted repeats are unrolled; a set
+  becomes a trie of the UTF-8 sequences of its ranges (`utf8_sequences.hpp` splits a range into
+  byte range sequences), built as the sorted sequences stream in, identical states shared.
+  A loop whose body can match empty gets a hidden slot holding where its iteration began and a
+  `progress` instruction at the end of the body: leave when nothing was consumed, as Python's re.
+- `regex_analysis.hpp`: what the matcher can skip by: the bytes a match can start with, whether
+  it is anchored at the text's start, the literal every match starts with.
+
+### Matching
+
+`pike_vm.hpp` / `.cpp`: the Pike VM. Two thread lists (sparse sets: O(1) clear, insertion order is
+priority), the epsilon closure walked with an explicit stack that also restores capture slots,
+one byte of text per step. Every thread is told apart by its instruction and, inside a loop that
+can iterate empty, by whether its iteration is still empty (`guards`): two threads differing in
+that would end differently, so neither may stand for the other. All memory comes from one scratch
+block the regex takes when made. `regex_names.hpp` looks group names up; `regex_replacement.hpp`
+walks sub's templates, checking them before any text is produced.

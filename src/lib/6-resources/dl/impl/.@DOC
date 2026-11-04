@@ -1,0 +1,26 @@
+The loader's internals. `impl::object` is one mapped shared object: its path, a copy of its
+program headers, its `elf::image`, its pages, its reference count, the objects it needs and
+its lookup scope. `impl::load`, `impl::release` and `impl::lookup` are what `dl::library`
+calls.
+
+The objects live in one registry (an array of `ca::unique<object>` on `ca::heap`, so an object
+never moves) behind one mutex. The running program's `elf::image` is read under that mutex on
+the first load and kept (the program never moves; no global constructor), and every load's
+session points at it for symbol resolution. A load works in phases on the objects it maps, in the order it
+mapped them, breadth first from the root: map, resolve DT_NEEDED, build each scope, apply the
+relative relocations of all, then the symbolic ones from the last mapped to the first (so a
+dependency's indirect functions are callable when its users bind to them), protect RELRO, and
+run the initializers depth first. Any failure releases the root, which unmaps every object the
+load made and gives back every reference it took.
+
+`impl::tls` is the dynamic thread vector. A fixed table of `tls_modules` entries, each the
+image, sizes and alignment of one PT_TLS segment, and a generation that changes at every
+registration and release, published last; each thread has a `thread_local` array of slots
+indexed by module id, each a block and the generation it was made for. `tls_get_addr`, the
+loader's `__tls_get_addr`, compares the two and makes a fresh block on a mismatch, so a module
+id handed to another object never shows the old one's data. It takes no lock: the table only
+changes under the loader's lock, and code reaching a module's variables runs while the module is
+loaded. The first registration creates a thread key whose exit callback frees the thread's
+blocks. `walk_objects` lets the symbolizer visit what is loaded
+(`ca::trace::impl::loaded_objects`), set on the first load so a program that never loads
+anything does not link the loader through the symbolizer.

@@ -51,6 +51,268 @@ auto main(void) -> int {
 
 Standard output is per thread and buffered (line-buffered on a terminal), so `ca::print` takes no lock and each message reaches fd 1 whole. `ca::flush()` is its explicit cleanup: it writes out what is pending and reports the first error since the last flush, which a program should check before it exits.
 
+## `dl/`
+
+A dynamic loader of ca's own, in `ca::dl`: it loads ELF64 x86-64 shared objects without `ld.so` or libc, so freestanding programs (linked with libca_runtime, `-static` or `-static-pie`) can load plugins too. It is built on `ca::elf` (layer 3) and does what `dlopen` does with `RTLD_NOW | RTLD_LOCAL`:
+
+- maps the load segments of the file into one reservation, aligned as they ask, each with the protection it asks for, the zero-filled tail of a segment included;
+- loads what it needs (DT_NEEDED), breadth first: a name with a slash is a path, any other is first matched against the DT_SONAME of what is loaded, then searched for in the requester's DT_RPATH (when it has no DT_RUNPATH), LD_LIBRARY_PATH (not in a setuid program), DT_RUNPATH, and `/lib/x86_64-linux-gnu`, `/usr/lib/x86_64-linux-gnu`, `/lib64`, `/usr/lib64`, `/lib`, `/usr/lib`; `$ORIGIN` is the requester's directory; files of another class or machine are skipped;
+- applies every relocation at once: relative ones (RELA and the packed DT_RELR) first, then the ones naming symbols, then indirect relative ones (their resolvers may read what the others wrote); then makes PT_GNU_RELRO read-only;
+- runs the initializers, dependencies first (DT_INIT, then DT_INIT_ARRAY, each called with 0, nullptr and the environment, as glibc calls them).
+
+A symbol a library leaves undefined resolves, in order, to:
+
+- the program's explicit offers (the `host` argument, `dl::host_symbol`: a name and an address), which always win;
+- the library's own definition, when it is linked `-Bsymbolic` (DT_SYMBOLIC);
+- what the running program exports, as ld.so puts the executable first in the global scope: the defined, non-local symbols of its dynamic symbol table (`elf::image::program()`, read once on the first load). A program exports its functions and variables when linked with `-Wl,--export-dynamic` (`-rdynamic`); without it, only what the shared libraries it was linked against reference (under libc: `environ`, copy-relocated data). A static non-PIE program exports nothing: GNU ld gives it no dynamic section, even with `--export-dynamic`;
+- the loader's built-ins (`__tls_get_addr`);
+- the first definition in the scope of the library loaded: itself, then what it needs, breadth first.
+
+An undefined weak symbol is 0. Hidden symbol versions are skipped; other versions are not checked. Indirect functions (STT_GNU_IFUNC) are resolved by calling their resolver, the program's included. A thread-local variable the program exports cannot be bound: the program's own block sits next to the thread pointer and has no module id in the loader's table. A library's reference to one goes on to the library's scope, so a copy the library defines itself (an inline `thread_local`) is used; when only the program defines it, the load fails with `errc::not_supported` naming the variable.
+
+Objects are shared: loading a file already loaded (same device and inode), or a name matching a loaded DT_SONAME, adds a reference. `library::cleanup()` drops one; the last one runs the finalizers (DT_FINI_ARRAY in reverse, then DT_FINI), releases what the object needs and unmaps it. A failed load is all or nothing: what it mapped is unmapped, what it shared is released, and no initializer has run.
+
+Failures come as a `ca::report<>` naming what failed: `undefined symbol host_note, needed by plugins/libgreet.so`, `libz.so.1: not found`, `x.so: not an ELF64 x86-64 shared object`.
+
+Thread-local storage works as the general and local dynamic models (what `-fPIC` code uses) expect: each object with a PT_TLS segment gets a module id (R_X86_64_DTPMOD64), its variables offsets in its block (R_X86_64_DTPOFF64), and the loader provides `__tls_get_addr` itself. A thread's block for a module is made on its first access, from the segment's image, and freed when the thread exits (a thread key, so threads libc starts are covered too); blocks of a released module are freed when their thread next reaches its id, or exits. It never touches the thread pointer, so it works the same under libc, which owns `%fs`, and in freestanding programs. `find` of a thread-local variable gives the calling thread's copy. At most `dl::impl::tls_modules` (1024) objects with thread-local storage are loaded at once.
+
+Loaded objects are visible to `ca::trace::symbolizer`: one made while they are loaded maps their files too, so a backtrace through plugin code shows its functions, files and lines.
+
+Not supported, each refused with `errc::not_supported` rather than loaded wrong: the initial-exec TLS model (R_X86_64_TPOFF64, DF_STATIC_TLS: it needs room next to the thread pointer reserved before threads start), TLS descriptors (`-mtls-dialect=gnu2`), relocations in read-only segments (DT_TEXTREL), copy relocations, binding to the program's thread-local variables. Lazy binding is not offered: every symbol is bound at load. `libc.so.6` uses initial-exec TLS, so objects needing libc cannot be loaded: this loader is for plugins built `-nostdlib` against what the host offers or exports, or against other such objects. One lock serializes loading and unloading, held while initializers and finalizers run: they must not load or release libraries, nor make a symbolizer.
+
+```c++
+#include "ca/dl.hpp"
+#include "ca/error.hpp"
+#include "ca/format.hpp"
+#include "ca/report.hpp"
+
+static auto log_line(const char* text) -> void {
+	static_cast<void>(text);
+}
+
+auto main(void) -> int {
+	const ca::dl::host_symbol host[] = {{"log_line", reinterpret_cast<void*>(&log_line)}};
+	auto plugin = ca::dl::library::make("libca_example_plugin.so", host);
+	if (plugin) {
+		const auto run = plugin->find_as<int(int)>("plugin_run");
+		const int result = run ? (*run)(1) : -1;
+		return plugin->cleanup() && result >= 0 ? 0 : 1;
+	}
+	ca::report<>& why = plugin.error();
+	auto text = ca::format("{}", why);
+	const bool explained = text && text->view().contains("libca_example_plugin.so: not found");
+	if (text)
+		static_cast<void>(text->cleanup());
+	return why.error() == ca::errc::no_entry && explained && why.cleanup() ? 0 : 2;
+}
+```
+
+## `dl/host_symbol.hpp`
+
+### struct `host_symbol`
+
+```c++
+struct host_symbol final;
+```
+
+A symbol the program offers to the libraries it loads: a name and the address of what it names, a function or a variable. Looked up first, before the program's exported symbols and any library.
+
+## `dl/library.hpp`
+
+ca::dl::library: a shared object loaded by ca's own dynamic loader, owned until cleanup.
+
+### class `library`
+
+```c++
+class library final;
+```
+
+A reference to a shared object ca loaded and to everything it needs, as dlopen gives (RTLD_NOW | RTLD_LOCAL): mapped, every relocation applied, initializers run. Loading what is already loaded (same file, or a name matching a DT_SONAME) shares it; the last cleanup() of a shared object runs its finalizers and unmaps it. ELF64 x86-64 shared objects on Linux, thread-local storage in the dynamic models.
+
+### function `library::library`
+
+```c++
+constexpr library(void) noexcept
+: _object{nullptr};
+```
+
+Owning nothing.
+
+### function `library::make`
+
+```c++
+[[nodiscard]] static auto make(const ca::sv::str name, const ca::borrowed_slice<const ca::dl::host_symbol> host = {}) noexcept -> ca::result<self, ca::report<>>;
+```
+
+Loads name: a path when it has a slash, else a file name searched for as ld.so does (LD_LIBRARY_PATH unless the program is setuid, then the default directories; a dependency also looks in its requester's DT_RPATH and DT_RUNPATH, $ORIGIN expanded; no ld.so.cache). Symbols a library leaves undefined resolve to host first, then to what the running program exports (its dynamic symbol table: link it with --export-dynamic; a static non-PIE program has none), then to the first definition in the library and what it needs, breadth first; an undefined weak symbol is 0. A thread-local variable only the program defines is refused (errc::not_supported). The report names the symbol or file that failed. Initializers and finalizers must not load or release libraries.
+
+### function `library::open`
+
+```c++
+[[nodiscard]] static auto open(const ca::sv::str name, const ca::borrowed_slice<const ca::dl::host_symbol> host = {}) noexcept -> ca::result<self, ca::report<>>;
+```
+
+make, named for what it does.
+
+### function `library::operator=`
+
+```c++
+auto operator=(self&& other) noexcept -> self&;
+```
+
+Takes other's library. Traps when this one is still open: cleanup() first.
+
+### function `library::path`
+
+```c++
+[[nodiscard]] auto path(void) const noexcept -> ca::sv::str;
+```
+
+The file it was loaded from; empty when not open.
+
+### function `library::soname`
+
+```c++
+[[nodiscard]] auto soname(void) const noexcept -> ca::sv::str;
+```
+
+Its DT_SONAME; empty without one or when not open.
+
+### function `library::image`
+
+```c++
+[[nodiscard]] auto image(void) const noexcept -> ca::elf::image;
+```
+
+The mapped image, for its segments and dynamic section; empty when not open.
+
+### function `library::find`
+
+```c++
+[[nodiscard]] auto find(const ca::sv::str name) const noexcept -> ca::optional<void*>;
+```
+
+The address of the symbol named name in the library or what it needs, breadth first, as dlsym: an indirect function resolved, a thread-local variable the calling thread's copy. None when it is undefined or the library is not open.
+
+### function `library::find_as`
+
+```c++
+template <typename T>
+[[nodiscard]] auto find_as(const ca::sv::str name) const noexcept -> ca::optional<T*>;
+```
+
+find, as a pointer to T: a function type (`find_as<int(int)>("f")`) or an object type.
+
+### function `library::cleanup`
+
+```c++
+[[nodiscard]] auto cleanup(void) noexcept -> ca::result<void>;
+```
+
+Gives the reference back: the last one to a shared object runs its finalizers (DT_FINI_ARRAY in reverse, then DT_FINI), releases what it needs and unmaps it. Not open afterwards, whatever the result.
+
+## `dl/impl/`
+
+The loader's internals. `impl::object` is one mapped shared object: its path, a copy of its program headers, its `elf::image`, its pages, its reference count, the objects it needs and its lookup scope. `impl::load`, `impl::release` and `impl::lookup` are what `dl::library` calls.
+
+The objects live in one registry (an array of `ca::unique<object>` on `ca::heap`, so an object never moves) behind one mutex. The running program's `elf::image` is read under that mutex on the first load and kept (the program never moves; no global constructor), and every load's session points at it for symbol resolution. A load works in phases on the objects it maps, in the order it mapped them, breadth first from the root: map, resolve DT_NEEDED, build each scope, apply the relative relocations of all, then the symbolic ones from the last mapped to the first (so a dependency's indirect functions are callable when its users bind to them), protect RELRO, and run the initializers depth first. Any failure releases the root, which unmaps every object the load made and gives back every reference it took.
+
+`impl::tls` is the dynamic thread vector. A fixed table of `tls_modules` entries, each the image, sizes and alignment of one PT_TLS segment, and a generation that changes at every registration and release, published last; each thread has a `thread_local` array of slots indexed by module id, each a block and the generation it was made for. `tls_get_addr`, the loader's `__tls_get_addr`, compares the two and makes a fresh block on a mismatch, so a module id handed to another object never shows the old one's data. It takes no lock: the table only changes under the loader's lock, and code reaching a module's variables runs while the module is loaded. The first registration creates a thread key whose exit callback frees the thread's blocks. `walk_objects` lets the symbolizer visit what is loaded (`ca::trace::impl::loaded_objects`), set on the first load so a program that never loads anything does not link the loader through the symbolizer.
+
+## `dl/impl/loader.hpp`
+
+### function `impl::load`
+
+```c++
+[[nodiscard]] auto load(ca::sv::str name, ca::borrowed_slice<const ca::dl::host_symbol> host) noexcept -> ca::result<ca::dl::impl::object*, ca::report<>>;
+```
+
+Loads name (a path, or a file name searched for) and what it needs, relocates and initializes what is new, and returns it with one more reference. Undefined symbols resolve against host first, then the running program's exported symbols, then the new object's scope. All or nothing: a failure leaves every object as it was. Serialized by one lock, held through the initializers.
+
+### function `impl::release`
+
+```c++
+[[nodiscard]] auto release(ca::dl::impl::object* object) noexcept -> ca::result<void>;
+```
+
+Drops a reference to object; the last one runs its finalizers, releases what it needs and unmaps it.
+
+### function `impl::lookup`
+
+```c++
+[[nodiscard]] auto lookup(const ca::dl::impl::object& object, ca::sv::str name) noexcept -> ca::optional<void*>;
+```
+
+The address of the symbol named name in object's scope: an indirect function resolved, a thread-local variable the calling thread's copy; none when undefined.
+
+## `dl/impl/object.hpp`
+
+### struct `impl::object`
+
+```c++
+struct object final;
+```
+
+One shared object the loader mapped: where it came from, its program headers (copied, so the image never depends on them being mapped), its image, the pages it owns, its TLS module id (0 without thread-local storage), how many owners it has (libraries and the objects needing it), the objects it needs, and its lookup scope: itself, then what it needs, breadth first.
+
+### function `impl::object::soname`
+
+```c++
+[[nodiscard]] auto soname(void) const noexcept -> ca::sv::str;
+```
+
+Its DT_SONAME, empty without one.
+
+### function `impl::object::cleanup`
+
+```c++
+[[nodiscard]] auto cleanup(void) noexcept -> ca::result<void>;
+```
+
+Frees its path and arrays; the pages are the loader's to unmap.
+
+## `dl/impl/tls.hpp`
+
+### variable `impl::tls_modules`
+
+```c++
+inline constexpr ca::usz tls_modules = 1024U;
+```
+
+Most loaded objects with thread-local storage at once.
+
+### struct `impl::tls_index`
+
+```c++
+struct tls_index final;
+```
+
+The argument of __tls_get_addr, as the general and local dynamic models pass it: a module id (from R_X86_64_DTPMOD64) and an offset in its block (from R_X86_64_DTPOFF64).
+
+### function `impl::tls_register`
+
+```c++
+[[nodiscard]] auto tls_register(const ca::byte* image, ca::usz file_size, ca::usz size, ca::usz align) noexcept -> ca::result<ca::u64>;
+```
+
+A module id for a TLS image (its initialized bytes, then zeros up to size, aligned to align); errc::no_space when tls_modules are in use. Under the loader's lock.
+
+### function `impl::tls_unregister`
+
+```c++
+auto tls_unregister(ca::u64 module) noexcept -> void;
+```
+
+Gives module back: blocks other threads hold for it are freed when they next reach the id or exit; the calling thread's now. Under the loader's lock.
+
+### function `impl::tls_get_addr`
+
+```c++
+[[gnu::force_align_arg_pointer]] auto tls_get_addr(const ca::dl::impl::tls_index* index) noexcept -> void*;
+```
+
+__tls_get_addr, the address of index's variable in the calling thread: its block for the module allocated and initialized on first use, freed when the thread exits. Realigns the stack, as callers built by old compilers leave it at 8 mod 16. Traps when memory runs out.
+
 ## `fs/`
 
 `ca::fs::descriptor`: an owned POSIX file descriptor whose flags are typed options (the `ca::fs` options of layer 3), combined and checked at compile time.
@@ -1288,9 +1550,9 @@ auto main(void) -> int {
 | no `-g` | from the symbol table, mangled (`_ZL7deepestv`) | no | no |
 | stripped | none | no | no |
 
-DWARF 4 and 5 are read (clang and gcc defaults), including indexed strings, addresses and range lists; compressed debug sections (`-gz`) and split DWARF (`-gsplit-dwarf`) are not. Names are not demangled: DWARF names need no demangling, symbol-table names stay mangled. Addresses in shared libraries (libc) are not found and print as they are.
+DWARF 4 and 5 are read (clang and gcc defaults), including indexed strings, addresses and range lists; compressed debug sections (`-gz`) and split DWARF (`-gsplit-dwarf`) are not. Names are not demangled: DWARF names need no demangling, symbol-table names stay mangled. Shared objects ca's own loader (`ca::dl`) holds when make() runs are read as well, from their files; addresses in libraries libc's loader mapped (libc itself) are not found and print as they are, and so are those of libraries loaded after make().
 
-make() maps the whole executable read-only; names, files and lines borrow from that mapping until cleanup(). A lookup scans the unit holding the address entry by entry, so it is for reports, not hot paths.
+make() maps the whole executable read-only, and each of those shared objects; names, files and lines borrow from those mappings until cleanup(), even after a library is released. A lookup scans the unit holding the address entry by entry, so it is for reports, not hot paths.
 
 ## `trace/symbolizer.hpp`
 
@@ -1300,7 +1562,7 @@ make() maps the whole executable read-only; names, files and lines borrow from t
 class symbolizer final;
 ```
 
-The running executable's symbols and debug information, mapped from /proc/self/exe: lookup turns an address of a ca::trace::backtrace into the functions it is in, innermost first (inlined ones, then the function they were inlined into), each with its source file and line when the program was built with -g; of(addresses) prints a whole backtrace that way with `{}`. Addresses outside the executable (shared libraries) are not found. Mapped once by make(); clean up with cleanup().
+The running executable's symbols and debug information, mapped from /proc/self/exe: lookup turns an address of a ca::trace::backtrace into the functions it is in, innermost first (inlined ones, then the function they were inlined into), each with its source file and line when the program was built with -g; of(addresses) prints a whole backtrace that way with `{}`. The shared objects ca's loader (ca::dl) holds when make() runs are read too, from their files; libraries libc's loader mapped are not found. Mapped once by make(); clean up with cleanup().
 
 ### function `symbolizer::make`
 
@@ -1349,3 +1611,37 @@ class symbolized final;
 ```
 
 A backtrace as a symbolizer reads it, printed with `{}` one frame per line, inlined functions first: ``` #0 ca::trap (src/lib/1-primitives/debug/trap.hpp:23) inlined deepest+0x1e (test.cpp:8) #1 middle+0x9 (test.cpp:14) ``` Borrows the symbolizer and the addresses.
+
+## `trace/impl/`
+
+The symbolizer's internals. `mapped_image` is one ELF file it mapped: its sections (`trace::impl::debug_image`, layer 3) and where its code runs, as a bias and an address range. The executable is one, every shared object ca's loader held when the symbolizer was made is another.
+
+`loaded_objects` is how the symbolizer learns of those objects without depending on the loader: an atomic pointer to a function visiting each of them (`loaded_object`: path, device and inode, bias, range), null until `ca::dl` loads something. The symbolizer maps each file again by its path and keeps it only when its device and inode still match, so a file replaced since it was loaded is left out rather than read wrong.
+
+## `trace/impl/loaded_objects.hpp`
+
+### struct `impl::loaded_object`
+
+```c++
+struct loaded_object final;
+```
+
+A shared object a loader mapped, as a symbolizer needs it: the file (path, and device and inode to tell it was not replaced), its bias and the addresses it spans. Borrowed for the visit.
+
+### variable `impl::loaded_objects`
+
+```c++
+extern constinit ca::atomic<ca::trace::impl::loaded_object_walker> loaded_objects;
+```
+
+Visits every object ca's loader holds, set by the loader on its first load; null in a program that never loaded one, so the symbolizer does not pull the loader in.
+
+## `trace/impl/mapped_image.hpp`
+
+### struct `impl::mapped_image`
+
+```c++
+struct mapped_image final;
+```
+
+An ELF file a symbolizer mapped to read, its sections, and where the code it describes runs: the bias and the addresses it spans.

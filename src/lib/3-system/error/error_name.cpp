@@ -25,6 +25,7 @@
 		case ca::errc::no_space.code():         return "no_space";
 		case ca::errc::not_seekable.code():     return "not_seekable";
 		case ca::errc::broken_pipe.code():      return "broken_pipe";
+		case ca::errc::out_of_domain.code():    return "out_of_domain";
 		case ca::errc::out_of_range.code():     return "out_of_range";
 		case ca::errc::try_again.code():        return "try_again";
 		case ca::errc::name_too_long.code():    return "name_too_long";

@@ -1,4 +1,11 @@
-Futexes, yield, and per-thread slots with an exit callback.
+Threads, futexes, yield, and per-thread slots with an exit callback.
+
+`sys::thread::make(entry, argument)` starts a thread on raw clone: one mapping holds a guard page,
+its stack, a control block and its own TLS area. When entry returns the thread runs its
+`thread_local` destructors and key destructors, then leaves. `join()` waits for that and unmaps;
+`cleanup()` does the same and also accepts a thread already joined. Results travel through
+argument. It works only in programs started by libca_runtime: in a program started by libc,
+libc owns `%fs`, and make fails with `errc::not_supported`.
 
 `sys::futex_wait(word, expected)` sleeps while a `ca::atomic<u32>` holds expected, until a
 `sys::futex_wake(word, count)`; `futex_wait_until(word, expected, deadline)` gives up with

@@ -1,0 +1,79 @@
+The ELF64 format, in `ca::elf`: the structures and constants of `<elf.h>` without including it,
+and two views that read them safely. Everything in ca that reads ELF goes through here: the
+vDSO lookup (`syscall::vdso_symbol`), the runtime's self-relocation and TLS setup, the
+executable range of a backtrace, and the symbolizer's sections. It is also the base of the
+dynamic loader.
+
+The structures have the layout of their `<elf.h>` counterparts, checked field by field when the
+library builds (`layout.cpp`), so they overlay mapped memory and file bytes directly:
+
+| ca::elf | elf.h | Constants |
+|---|---|---|
+| `file_header` | `Elf64_Ehdr` | `identity`, `file_types`, `machines` |
+| `program_header` | `Elf64_Phdr` | `segment_types`, `segment_flags` |
+| `section_header` | `Elf64_Shdr` | `section_types`, `section_flags`, `section_indices` |
+| `symbol` | `Elf64_Sym` | `symbol_types`, `symbol_bindings`, `symbol_visibilities` |
+| `dynamic_entry` | `Elf64_Dyn` | `dynamic_tags`, `dynamic_flags`, `dynamic_flags_1` |
+| `relocation` | `Elf64_Rela` | `x86_64_relocations` |
+| `auxiliary_entry` | `Elf64_auxv_t` | `auxiliary_types` |
+
+Fields keep the ELF order with descriptive names (`_segments_offset` is `e_phoff`, `_address`
+is `p_vaddr`); the packed fields have accessors (`symbol::type()`, `relocation::symbol()`). Only
+ELF64 little-endian is read; ELF32 and big-endian files are refused.
+
+Two views, owning nothing:
+
+- `elf::file` reads a file as it lies on disk (usually a read-only mapping of it). `from` checks
+  the header and that the program and section header tables fit inside the bytes, aligned; then
+  `sections()`, `name(section)`, `find(".symtab")`, `linked(section)`, `contents(section)`,
+  `string(table, offset)` and `symbols(table)` all stay inside the bytes, so a malformed or
+  truncated file gives empty results instead of a fault.
+- `elf::image` reads an object mapped for execution: the vDSO, the running program, or a library
+  a loader mapped. `at(header)` takes a mapped file header, `of(segments, bias)` program headers
+  whose bias is known (`bias_of` gives it from the program-headers segment), and `program()` is
+  the running program. It reads the dynamic section once: `string`, `symbols`, `value(tag)`, the
+  three relocation tables, and `find(name)`, a lookup through the GNU hash table (bloom filter
+  first) or else the SysV one.
+
+`image::program()` takes the program headers from the auxiliary vector and the bias from their
+PT_PHDR segment. A static PIE (how freestanding ca programs are linked with `-static-pie`) has
+none; its ELF header then sits right before its program headers, in the load segment at file
+offset 0, so `program()` reads that header through the kernel (`process_vm_readv`, which fails
+rather than faults), checks it is ELF64 with its program headers right after it, and takes the
+bias from that segment. It works the same under libc, in a static program and in a static PIE.
+The program's dynamic section is there only when it has one: a static non-PIE program has none,
+even linked with `--export-dynamic`, and its image has empty `dynamic()` and `symbols()`. Only
+what the program exports (`--export-dynamic`, or what the shared libraries it links reference)
+is in its dynamic symbol table. `ca::trace` takes the executable's range from it, and `ca::dl`
+binds plugins to what the program exports.
+
+`elf::hashed_name::of(name)` computes both ELF hashes of a symbol name once, at compile time
+when the name is a constant, so a lookup through several images hashes the name only once.
+
+The dynamic section's addresses are link-time addresses in the file, but libc's loader rewrites
+them in place to where they were mapped, in the objects it loads (the program included). An
+`image` takes an address inside the range the load segments were linked at as link-time and adds
+the bias, takes one inside the range they are mapped at as already rebased, and treats any other
+as absent. The vDSO, a static program and anything ca maps keep link-time addresses.
+
+```c++
+#include "ca/elf.hpp"
+#include "ca/syscall.hpp"
+
+auto main(void) -> int {
+	const ca::u64 base = ca::syscall::auxiliary(ca::elf::auxiliary_types::vdso);
+	if (base == 0U)
+		return 0;
+	const auto vdso = ca::elf::image::at(*reinterpret_cast<const ca::elf::file_header*>(base));
+	if (!vdso)
+		return 1;
+	constexpr auto name = ca::elf::hashed_name::of("__vdso_clock_gettime");
+	const auto symbol = vdso->find(name);
+	if (!symbol || symbol->type() != ca::elf::symbol_types::function)
+		return 2;
+	using clock_gettime = int (*)(int, void*);
+	const auto call = reinterpret_cast<clock_gettime>(vdso->address(symbol->_value));
+	long time[2] = {};
+	return call(1, time) == 0 && time[0] > 0 ? 0 : 3;
+}
+```

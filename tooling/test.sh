@@ -19,6 +19,12 @@
 #   // link: libc              against libc only (threads, or libc compared on purpose)
 #   // link: both              checked twice: against libc, then freestanding; what a test
 #                              that runs (exit, trap) does without a link line
+#   // ldflags: FLAGS...       added to every link of the test (-Wl,--export-dynamic, ...)
+#   // shared: NAME SOURCE [FLAGS...]
+#                              before the test, builds tests/SOURCE into BUILD/tests/NAME_libraries/
+#                              libNAME.so (-fPIC -shared, no libc, no stack protector, FLAGS
+#                              after; {dir} in FLAGS is that directory), in the order of the
+#                              lines; the test sees the directory as the string CA_TEST_LIBRARIES
 
 ulimit -c 0
 test=$1
@@ -40,17 +46,39 @@ if [ -n "$mode" ] && [ "$mode" != "$MODE" ]; then
 	exit 0
 fi
 
+ldflags=$(sed -n 's|^// ldflags: ||p' "$test")
+libraries=$BUILD/tests/${name}_libraries
+shared=$(sed -n 's|^// shared: ||p' "$test")
+extra=
+if [ -n "$shared" ]; then
+	mkdir -p "$libraries"
+	extra=-DCA_TEST_LIBRARIES=\"$libraries\"
+	while read -r library source flags; do
+		flags=$(printf '%s' "$flags" | sed "s|{dir}|$libraries|g")
+		# shellcheck disable=SC2086
+		if ! out=$($CXX $CXXFLAGS -fPIC -shared -nostdlib -fno-stack-protector "tests/$source" \
+			-o "$libraries/lib$library.so" $flags 2>&1); then
+			printf '  FAIL  %s%-36s fixture lib%s.so does not build\n%s\n' "$tag" "$name" "$library" \
+				"$(printf '%s\n' "$out" | grep -m3 'error')"
+			echo fail > "$result"
+			exit 0
+		fi
+	done <<EOF
+$shared
+EOF
+fi
+
 # check MODE BIN: builds the test as BIN, against libc (MODE libc) or without it (freestanding),
 # runs it, and sets failure (empty when it behaved as expected), out and built.
 check() {
 	if [ "$1" = freestanding ]; then
-		out=$($CXX $CXXFLAGS -c "$test" -o "$2.o" 2>&1) &&
-		out=$($CXX "$2.o" -o "$2" -nostdlib -static -Wl,-u,_start \
+		out=$($CXX $CXXFLAGS $extra -c "$test" -o "$2.o" 2>&1) &&
+		out=$($CXX "$2.o" -o "$2" -nostdlib -static -Wl,-u,_start $ldflags \
 			-Wl,--start-group "$LIB" "$RUNTIME" -Wl,--end-group 2>&1) &&
-		out=$($CXX "$2.o" -o "$2_pie" -nostdlib -static-pie -Wl,-u,_start \
+		out=$($CXX "$2.o" -o "$2_pie" -nostdlib -static-pie -Wl,-u,_start $ldflags \
 			-Wl,--start-group "$LIB" "$RUNTIME" -Wl,--end-group 2>&1)
 	else
-		out=$($CXX $CXXFLAGS "$test" -o "$2" "$LIB" $LDFLAGS 2>&1)
+		out=$($CXX $CXXFLAGS $extra "$test" -o "$2" "$LIB" $LDFLAGS $ldflags 2>&1)
 	fi
 	built=$?
 	failure=

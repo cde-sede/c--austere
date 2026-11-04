@@ -3,7 +3,8 @@ System error codes and where they come from.
 `ca::errc` names the errno values ca uses as `ca::error` constants, written per platform in
 `errc.hpp` and checked against `<errno.h>` when the library builds, so no program needs the
 header: `errc::no_entry` (ENOENT), `errc::access_denied` (EACCES), `errc::exists`,
-`errc::invalid_argument`, `errc::no_space`, `errc::out_of_range`, `errc::try_again`,
+`errc::invalid_argument`, `errc::no_space`, `errc::out_of_range` (ERANGE),
+`errc::out_of_domain` (EDOM), `errc::try_again`,
 `errc::interrupted`, `errc::not_supported`, `errc::not_recoverable` (what a trapped context
 fails with), and the rest of the common set.
 

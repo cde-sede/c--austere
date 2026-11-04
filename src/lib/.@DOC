@@ -81,8 +81,13 @@ functions compilers call by name. A program can therefore link without libc at a
 on `ca::heap`, `fork` and `posix_spawn`, and what C++ code compiles to calls of: guards of
 function-local statics (a recursive initialization traps), `thread_local` destructors (run at
 exit before static ones), the pure virtual trap, and `operator new` and `delete` on `malloc`
-(trapping when memory runs out). It is not part of `libca.a`: it defines what libc's own startup
-files define, and must not be linked next to them.
+(trapping when memory runs out). It also has what libm functions builtins such as
+`__builtin_fmod`, `__builtin_floor` and `__builtin_sqrt` lower to: the exact ones, whose result
+IEEE 754 fixes to the bit (fmod and remainder on the x87 fprem loop, rounding, sqrt, fma,
+fmin/fmax, ldexp, frexp, modf, logb, nextafter, ... for float, double and long double, fma only
+for float and double), each with glibc's result and errno (`sys::impl` in `3-system/math/impl/`).
+Transcendental functions (exp, sin, ...) are not provided. It is not part of `libca.a`: it
+defines what libc's own startup files define, and must not be linked next to them.
 
 ```sh
 c++ -std=c++2c -nostdinc++ -fno-exceptions -fno-rtti -I src/lib prog.cpp -nostdlib -static-pie \

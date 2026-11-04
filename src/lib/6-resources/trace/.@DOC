@@ -42,9 +42,11 @@ from its start. Printed with `{}`, `symbols.of(backtrace.addresses())` reads:
 
 DWARF 4 and 5 are read (clang and gcc defaults), including indexed strings, addresses and range
 lists; compressed debug sections (`-gz`) and split DWARF (`-gsplit-dwarf`) are not. Names are not
-demangled: DWARF names need no demangling, symbol-table names stay mangled. Addresses in shared
-libraries (libc) are not found and print as they are.
+demangled: DWARF names need no demangling, symbol-table names stay mangled. Shared objects ca's
+own loader (`ca::dl`) holds when make() runs are read as well, from their files; addresses in
+libraries libc's loader mapped (libc itself) are not found and print as they are, and so are
+those of libraries loaded after make().
 
-make() maps the whole executable read-only; names, files and lines borrow from that mapping until
-cleanup(). A lookup scans the unit holding the address entry by entry, so it is for reports, not
+make() maps the whole executable read-only, and each of those shared objects; names, files and
+lines borrow from those mappings until cleanup(), even after a library is released. A lookup scans the unit holding the address entry by entry, so it is for reports, not
 hot paths.

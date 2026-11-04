@@ -81,7 +81,7 @@ SECTION_RANK = {name: rank for rank, names in enumerate(SECTIONS) for name in na
 # -- patterns ----------------------------------------------------------------
 
 BODY_KINDS = ('function', 'block', 'switch')
-SPEC_WORDS = {'static', 'constexpr', 'consteval', 'inline', 'virtual', 'explicit', 'friend', 'extern', 'constinit'}
+SPEC_WORDS = {'static', 'constexpr', 'consteval', 'inline', 'virtual', 'explicit', 'friend', 'extern', 'constinit', 'template'}
 NOT_FUNC = {'decltype', 'sizeof', 'alignof', 'alignas', 'noexcept', 'static_assert', 'requires', 'typeid', '__attribute__'}
 FLAG_AFTER = {
 	'return', 'const', 'constexpr', 'consteval', 'constinit', 'static', 'typename', 'inline', 'volatile',

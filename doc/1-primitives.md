@@ -1440,7 +1440,7 @@ The variants compare_bytes_variant and differ_bytes_variant pick from, for tests
 struct cpu_features final;
 ```
 
-What the byte primitives pick their variant and thresholds from.
+What the byte primitives pick their variant and thresholds from, and the runtime's fma its instruction.
 
 ### function `impl::read_cpu_features`
 
@@ -1448,7 +1448,7 @@ What the byte primitives pick their variant and thresholds from.
 auto read_cpu_features(void) noexcept -> ca::impl::cpu_features;
 ```
 
-The features of this CPU, from cpuid: AVX2 only when the OS saves the YMM state, the last-level cache 8 MiB when cpuid does not report it. Not cached: each call runs cpuid.
+The features of this CPU, from cpuid: AVX2 and FMA only when the OS saves the YMM state, the last-level cache 8 MiB when cpuid does not report it. Not cached: each call runs cpuid.
 
 ## `memory/impl/fill_bytes.hpp`
 

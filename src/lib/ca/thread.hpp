@@ -6,6 +6,7 @@
 #include "3-system/thread/futex_wait.hpp"
 #include "3-system/thread/futex_wait_until.hpp"
 #include "3-system/thread/futex_wake.hpp"
+#include "3-system/thread/thread.hpp"
 #include "3-system/thread/thread_key_create.hpp"
 #include "3-system/thread/thread_key_set.hpp"
 #include "3-system/thread/yield.hpp"

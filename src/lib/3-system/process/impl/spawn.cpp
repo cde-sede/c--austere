@@ -15,6 +15,7 @@
 #include "3-system/memory/munmap.hpp"
 #include "3-system/memory/protection.hpp"
 #include "3-system/memory/reallocarray.hpp"
+#include "3-system/process/impl/clone_onto.hpp"
 #include "3-system/process/impl/spawn.hpp"
 #include "3-system/process/spawn_actions.hpp"
 #include "3-system/syscall/impl/enter.hpp"
@@ -73,33 +74,6 @@ template <typename... As>
 static auto failed(const ca::isz returned) noexcept -> bool {
 	return returned < 0 && returned > -4096;
 }
-
-/* clone onto stack (its top), child running entry(argument) then exiting with its result. */
-extern "C" auto ca_sys_spawn_clone(ca::isz flags, void* stack, int (*entry)(void*), void* argument) noexcept -> ca::isz; // ns-leak: ignore
-
-asm(".text\n" // norm: ignore
-	".p2align 4\n"
-	"ca_sys_spawn_clone:\n"
-	"\tsubq $16, %rsi\n"
-	"\tmovq %rcx, 8(%rsi)\n"
-	"\tmovq %rdx, (%rsi)\n"
-	"\txorl %edx, %edx\n"
-	"\txorl %r10d, %r10d\n"
-	"\txorl %r8d, %r8d\n"
-	"\tmovl $56, %eax\n"
-	"\tsyscall\n"
-	"\ttestq %rax, %rax\n"
-	"\tjnz 1f\n"
-	"\txorl %ebp, %ebp\n"
-	"\tpopq %rax\n"
-	"\tpopq %rdi\n"
-	"\tcall *%rax\n"
-	"\tmovl %eax, %edi\n"
-	"\tmovl $60, %eax\n"
-	"\tsyscall\n"
-	"\thlt\n"
-	"1:\n"
-	"\tret\n");
 
 static auto searches(const char* const file) noexcept -> bool {
 
@@ -266,17 +240,17 @@ auto ca::sys::impl::spawn_list_destroy(ca::sys::impl::spawn_list& list) noexcept
 		return ca::failure{stack.error()};
 	const ca::u64 all = ~ca::u64{0};
 	static_cast<void>(ca::syscall::rt_sigprocmask(0, &all, &job._mask, 8));
-	const ca::isz child = ca_sys_spawn_clone(CLONE_VM | CLONE_VFORK | SIGCHLD, stack->data() + CHILD_STACK, &spawned, &job);
+	const auto child = ca::sys::impl::clone_onto(CLONE_VM | CLONE_VFORK | SIGCHLD, stack->data() + CHILD_STACK, nullptr, nullptr, 0U, &spawned, &job);
 	static_cast<void>(ca::syscall::rt_sigprocmask(2, &job._mask, nullptr, 8));
 	static_cast<void>(ca::sys::munmap(*stack));
-	if (failed(child)) [[unlikely]]
-		return ca::failure{ca::error{static_cast<int>(-child)}};
+	if (!child) [[unlikely]]
+		return child;
 	if (job._error != 0) {
 		int status = 0;
-		static_cast<void>(ca::syscall::wait4(child, &status, 0, nullptr));
+		static_cast<void>(ca::syscall::wait4(*child, &status, 0, nullptr));
 		return ca::failure{ca::error{job._error}};
 	}
-	return static_cast<ca::i32>(child);
+	return child;
 }
 
 [[nodiscard]] auto ca::sys::impl::fork_process(void) noexcept -> ca::result<ca::i32> {

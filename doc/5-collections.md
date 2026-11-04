@@ -6605,6 +6605,1024 @@ Index in the group of the first slot of a non-empty set.
 
 The slots of set from index lane of the group on.
 
+## `regex/`
+
+Regular expressions with Python's `re` syntax and API, matched in time linear in the text.
+
+| Type | What it is | Python |
+|---|---|---|
+| `ca::regex` (`basic_regex<A>`) | a compiled pattern, in memory from A | `re.Pattern` |
+| `ca::regex_pattern` | a pattern's text: checked when it compiles if literal | the pattern string |
+| `ca::regex_flags` | `ignore_case`, `multiline`, `dot_all`, `verbose`, `ascii` | `re.I`, `re.M`, `re.S`, `re.X`, `re.A` |
+| `ca::regex_match<A>` | one match: groups, positions, `expand` | `re.Match` |
+| `regex_matches<R>` (`R::matches_type`) | the matches one by one, from `finditer` | the iterator of `finditer` |
+| `ca::regex_error` | why a pattern does not compile, and where | `re.error` (`msg`, `pos`) |
+
+`ca::regex::make(pattern, flags)` (or `compile`) acquires a regex: `result<regex>`, failing with `errc::invalid_argument` and the syntax error's message as the trace frame, or out of memory. A literal pattern is checked when the program compiles, like a format string: `make("a)b")` is a compile error naming `regex_has_unbalanced_paren`. Text known only at runtime goes in explicitly, `ca::regex_pattern{text}`, and `regex_pattern{text}.check(flags)` gives the error's kind and position without building anything (constexpr).
+
+The methods are Python's: `search`, `match`, `fullmatch` (`result<optional<regex_match>>`, the result failing only out of memory), `finditer`, `findall`, `split`, `sub` (a template with `\1`, `\g<name>`, or a function of the match), `escape`, `group_count`, `group_index`. A match borrows the text and the regex's group names; `m[1]` traps on a group the pattern does not have and is empty for one that took no part, `m.group(1)`, `m.start(1)`, `m.end(1)` give nothing then. Positions count code units (bytes of UTF-8), as everywhere in ca; `search(text, pos)` starts at pos while `^` and `\b` still see what precedes it, and a prefix of the text plays Python's endpos.
+
+```c++
+#include "ca/regex.hpp"
+#include "ca/sv.hpp"
+
+auto main(void) -> int {
+	auto date = ca::regex::make("(?P<year>\\d{4})-(?P<month>\\d\\d)");
+	if (!date)
+		return 1;
+	auto found = date->search("paid 2026-11, due 2026-12");
+	if (!found || !*found)
+		return 2;
+	ca::regex_match<>& m = **found;
+	if (m.group() != ca::sv::str{"2026-11"} || m["month"] != ca::sv::str{"11"} || m.start() != 5U)
+		return 3;
+	auto swapped = date->sub("\\g<month>/\\g<year>", "2026-11 and 2026-12");
+	if (!swapped || *swapped != ca::sv::str{"11/2026 and 12/2026"})
+		return 4;
+	auto words = ca::regex::make("\\W+");
+	if (!words)
+		return 5;
+	auto pieces = words->split("one, two;three");
+	if (!pieces || pieces->size() != 3U || (*pieces)[2U] != ca::sv::str{"three"})
+		return 6;
+	return m.cleanup() && swapped->cleanup() && pieces->cleanup() && words->cleanup() && date->cleanup() ? 0 : 7;
+}
+```
+
+### Syntax
+
+Python's, over UTF-8: literals and escapes (`\n \t \xhh \uhhhh \Uhhhhhhhh`, octal `\0` and `\ooo`), `.`, classes `[a-z]`, `[^...]` with `\d \w \s` and their negations inside, anchors `^ $ \A \Z \b \B`, groups `(...)`, `(?:...)`, `(?P<name>...)`, comments `(?#...)`, alternation, the greedy and lazy repeats `* + ? {n} {n,} {,m} {n,m}`, inline flags `(?imsxa)` at the start and `(?i:...)`, `(?-i:...)` for a group. Unknown escapes of ASCII letters are errors, as in Python.
+
+`\w \d \s` are Unicode's (Python's `str.isalnum` or `_`, `str.isdecimal`, `str.isspace`), ASCII under `ascii`; `ignore_case` takes characters as Python's re does (same simple lowercase, plus re's extra pairs: `k`, `K` and the Kelvin sign; `s`, `S` and `ſ`; ...). The classes and the caseless pairs are tables generated from the running Python and checked against its re for every code point (`make unicode`). `\B` matches an empty text, as in Python 3.14 (not 3.12).
+
+### What a linear-time engine leaves out
+
+Backreferences (`\1` in a pattern, `(?P=name)`), lookahead and lookbehind, conditionals `(?(1)...)`, atomic groups and possessive repeats, `\N{name}`: each is an error of its own kind (`regex_error::kind::backreference`, ...), at compile time for a literal. In exchange no pattern backtracks: matching costs O(text size * program size) whatever the input, with memory fixed when the regex is made. Patterns are bounded (groups nested 128 deep, repeats up to 100000, a program of 2^18 instructions and transitions), so a regex cannot take unbounded memory either.
+
+### Matching
+
+The pattern compiles to a Thompson NFA over UTF-8 bytes (a character class becomes a trie of byte ranges), run as a Pike VM: every possible thread advances one byte at a time, in priority order, so the first thread to match is the match Python's backtracker would find (leftmost-first, greedy and lazy repeats as written), groups included. A loop whose body can match empty iterates as Python's does: past its minimum, an iteration that matched empty ends it, keeping its groups. Before running, the matcher skips the text to where a match can begin: the literal every match starts with (a substring search), else the bytes a match can start with. A pattern that is only a literal never runs the VM.
+
+The scratch memory of the VM is taken by `make`, so matching allocates only what it returns (a match's groups when the pattern has groups, the lists of findall and split, sub's string). The matching methods therefore change the regex: one thread uses it at a time, `clone()` makes one for another thread. Text that is not valid UTF-8 can be searched: invalid bytes match no character, `.` and negated classes included.
+
+```c++
+#include "ca/regex.hpp"
+#include "ca/sv.hpp"
+
+auto main(void) -> int {
+	auto vowels = ca::regex::make("[aeiouy]+", ca::regex_flags::ignore_case);
+	if (!vowels)
+		return 1;
+	auto all = vowels->findall("SEA Breeze");
+	if (!all || all->size() != 3U || (*all)[0U] != ca::sv::str{"EA"})
+		return 2;
+	auto matches = vowels->finditer("Kepler");
+	ca::usz count = 0U;
+	while (true) {
+		auto next = matches.next();
+		if (!next)
+			return 3;
+		if (!*next)
+			break;
+		++count;
+		if (!(*next)->cleanup())
+			return 4;
+	}
+	const ca::optional<ca::regex_error> problem = ca::regex_pattern{ca::sv::str{"(a)\\1"}}.check();
+	if (count != 2U || !problem || problem->what() != ca::regex_error::kind::backreference)
+		return 5;
+	return all->cleanup() && vowels->cleanup() ? 0 : 6;
+}
+```
+
+## `regex/basic_regex.hpp`
+
+Performance of ca::basic_regex\<A>.
+
+Layout: the program (instructions of 16 bytes, byte-range transitions of 8, a guard word per instruction), the group names, the pattern, the prefix literal, and one scratch block for the matcher, all from A. Scratch per thread key: two sparse-set entries and two lists of slot words (2 per group, group 0 included, plus one per loop that can iterate empty); keys are the instructions, twice that when such a loop exists. The program is bounded by 2^18 instructions and transitions, so a regex takes at most a few MiB.
+
+| Operation | Time | Notes |
+|---|---|---|
+| make | O(pattern + program) | parse, tree, NFA, analyses, one scratch allocation |
+| search, match, fullmatch | O(text * program) worst case | each byte read once; threads deduplicated per position |
+| literal-only pattern | O(text) | one substring search, the VM never runs |
+| skip to a match start | O(text) | the literal every match starts with (substring search), else a 256-bit first-byte set |
+| a match's groups | O(groups) | one allocation from A when the pattern has groups, none otherwise |
+| findall, split, sub | O(text * program) | the scratch reused; only the result allocates |
+| clone | as make | the pattern is compiled again |
+
+No pattern backtracks: (a|b|c)*d, (a*)*b and their kin take linear time where a backtracker takes quadratic or exponential time. The price is a constant per text byte: every live thread advances one byte in turn, binary-searching its transitions past 8, so a match covering most of the text (\w+ over prose) costs more per byte than a backtracker that runs straight through it. A lazy DFA for match bounds, with the VM kept for groups, would remove that cost.
+
+Locality: instructions and transitions are contiguous arrays walked by index; the thread lists are dense arrays in priority order with per-key slot rows, cleared in O(1).
+
+Copy and move: the copy constructor is deleted, clone() recompiles; moves take the pointers, noexcept. Matching methods are not const (they use the scratch): one thread per regex.
+
+Baseline std::regex (ECMAScript, libstdc++'s backtracker): bench/regex.cpp on Intel Core i7-10750H, -O2, min of 9 runs: user cycles relative to the baseline.
+
+| Case | clang 18 | gcc 13 | Notes |
+|---|---|---|---|
+| compile ([a-z]+)@([a-z]+)\.com, 1e4 | 0.028x | 0.028x | ca: parse, tree, NFA, analysis, scratch; std: its NFA |
+| missing 16-char literal in 256 KiB, 4 times | 0.007x | 0.007x | ca: no VM, one substring search |
+| \w+ over 256 KiB, every match | 1.24x | 1.30x | slower: the VM steps every byte of each long match, std runs straight through |
+| [a-z]+ing\b over 256 KiB, every match | 0.90x | 0.92x | ca: one pass per match attempt, no backtracking |
+| ([a-z]+)@([a-z]+)\.com over 256 KiB, groups | 0.90x | 1.04x | ca: captures in the VM threads |
+| a repeated 3-way alternation then d, 4 KiB without d, 20 times | 0.000x | 0.000x | std backtracks from every position: quadratic; ca: linear |
+| sub(\s+, _) of 256 KiB | 0.41x | 0.44x | |
+| split(,) of 256 KiB | 0.063x | 0.067x | ca: literal pattern, no VM |
+
+### struct `impl::regex_slots_view`
+
+```c++
+struct regex_slots_view final;
+```
+
+The groups of the match in a matcher's best slots, as views of the text.
+
+### class `basic_regex`
+
+```c++
+template <ca::is_allocator A>
+class basic_regex final;
+```
+
+A compiled regular expression with Python's re API, in memory from A: make (or compile) from a regex_pattern and regex_flags, then search, match, fullmatch, finditer, findall, split, sub; escape quotes text. Syntax is Python's (see regex_pattern), matching linear in the text whatever the pattern: a Thompson NFA over UTF-8 bytes run as a Pike VM, leftmost-first like Python's backtracker, so no backreferences or lookaround. Positions count code units; invalid UTF-8 in a text matches no character. The matching methods use the regex's own scratch memory (taken by make, so they never allocate but to return results): one thread at a time per regex, clone() for another. Clean up with cleanup().
+
+### alias `basic_regex::rebind`
+
+```c++
+template <ca::is_allocator B>
+using rebind = ca::basic_regex<B>;
+```
+
+The same regex type over allocator B.
+
+### function `basic_regex::make_in`
+
+```c++
+[[nodiscard]] static auto make_in(const A& allocator, const ca::regex_pattern pattern, const ca::regex_flags flags = ca::regex_flags::none) noexcept -> ca::result<self>;
+```
+
+pattern compiled under flags, in memory from allocator. errc::invalid_argument with the syntax error's message as the trace (regex_pattern::check gives its position), or for a program past the size limit; errc::out_of_memory.
+
+### function `basic_regex::compile`
+
+```c++
+[[nodiscard]] static auto compile(const ca::regex_pattern pattern, const ca::regex_flags flags = ca::regex_flags::none) noexcept -> ca::result<self>
+requires ca::is_stateless_allocator<A>;
+```
+
+make: Python's re.compile.
+
+### function `basic_regex::escape_in`
+
+```c++
+[[nodiscard]] static auto escape_in(const A& allocator, const ca::sv::str text) noexcept -> ca::result<string_type>;
+```
+
+text with every character special to a pattern backslashed: Python's re.escape.
+
+### function `basic_regex::operator=`
+
+```c++
+auto operator=(self&& other) noexcept -> self&;
+```
+
+Takes other's program; the previous one is released as by cleanup().
+
+### function `basic_regex::pattern`
+
+```c++
+[[nodiscard]] auto pattern(void) const noexcept -> ca::sv::str;
+```
+
+The pattern's text: Python's Pattern.pattern.
+
+### function `basic_regex::flags`
+
+```c++
+[[nodiscard]] auto flags(void) const noexcept -> ca::regex_flags;
+```
+
+The flags given to make (inline ones not included).
+
+### function `basic_regex::group_count`
+
+```c++
+[[nodiscard]] auto group_count(void) const noexcept -> ca::usz;
+```
+
+Capture groups: Python's Pattern.groups.
+
+### function `basic_regex::group_index`
+
+```c++
+[[nodiscard]] auto group_index(const ca::sv::str name) const noexcept -> ca::optional<ca::usz>;
+```
+
+The index of the group named name, or nothing: Python's Pattern.groupindex.
+
+### function `basic_regex::search`
+
+```c++
+[[nodiscard]] auto search(const ca::sv::str text, const ca::usz pos = 0U) noexcept -> ca::result<ca::optional<match_type>>;
+```
+
+The first match in text from pos on, or nothing: Python's Pattern.search. `^` and `\b` still see the text before pos; pass a prefix of text for Python's endpos. Fails only out of memory (a match's groups).
+
+### function `basic_regex::match`
+
+```c++
+[[nodiscard]] auto match(const ca::sv::str text, const ca::usz pos = 0U) noexcept -> ca::result<ca::optional<match_type>>;
+```
+
+A match starting at pos, or nothing: Python's Pattern.match.
+
+### function `basic_regex::fullmatch`
+
+```c++
+[[nodiscard]] auto fullmatch(const ca::sv::str text, const ca::usz pos = 0U) noexcept -> ca::result<ca::optional<match_type>>;
+```
+
+A match from pos to the end of text, or nothing: Python's Pattern.fullmatch.
+
+### function `basic_regex::finditer`
+
+```c++
+[[nodiscard]] auto finditer(const ca::sv::str text, const ca::usz pos = 0U) noexcept -> matches_type;
+```
+
+The matches in text from pos on, found one by one by next(): Python's Pattern.finditer. Non-overlapping; an empty match is allowed right after a non-empty one but never twice at one position. Borrows the regex and text.
+
+### function `basic_regex::findall`
+
+```c++
+[[nodiscard]] auto findall(const ca::sv::str text, const ca::usz pos = 0U) noexcept -> ca::result<views_type>;
+```
+
+Python's Pattern.findall: for each match, the whole match when the pattern has no group, the group when it has one, every group in turn when it has more (the tuples flattened). A group that took no part is an empty view.
+
+### function `basic_regex::split`
+
+```c++
+[[nodiscard]] auto split(const ca::sv::str text, const ca::usz max = 0U) noexcept -> ca::result<views_type>;
+```
+
+text cut at the matches, at most max times (0: no limit), the groups' texts between the pieces (empty for a group that took no part): Python's Pattern.split. Empty matches cut too.
+
+### function `basic_regex::sub`
+
+```c++
+[[nodiscard]] auto sub(const ca::sv::str replacement, const ca::sv::str text, const ca::usz count = 0U) noexcept -> ca::result<string_type>;
+```
+
+text with its first count matches (0: all) replaced by replacement, its group references filled in (`\1`, `\g<1>`, `\g<name>`, escapes as Python reads them): Python's Pattern.sub. errc::invalid_argument for a bad template, with a trace.
+
+### function `basic_regex::sub`
+
+```c++
+template <typename F>
+requires ca::is_invocable<F&, const ca::regex_match<A>&> && ca::is_convertible<ca::invoke_result<F&, const ca::regex_match<A>&>, ca::sv::str>
+[[nodiscard]] auto sub(F&& replace, const ca::sv::str text, const ca::usz count = 0U) noexcept -> ca::result<string_type>;
+```
+
+sub with the replacement of each match computed by replace(match), returning text (a view the call must keep alive until it returns).
+
+### function `basic_regex::clone`
+
+```c++
+[[nodiscard]] auto clone(void) const noexcept -> ca::result<self>;
+```
+
+Another regex of the same pattern and flags, in memory from the same allocator: one per thread.
+
+### function `basic_regex::cleanup`
+
+```c++
+[[nodiscard]] auto cleanup(void) noexcept -> ca::result<void>;
+```
+
+Frees the program, the names and the scratch memory.
+
+### function `basic_regex::_next`
+
+```c++
+[[nodiscard]] auto _next(const ca::sv::str text, ca::usz& at, ca::usz& forbid) noexcept -> bool;
+```
+
+The next match from at, past the empty one at forbid; moves at and forbid on.
+
+## `regex/regex.hpp`
+
+### alias `regex`
+
+```c++
+using regex = ca::basic_regex<ca::heap>;
+```
+
+A compiled regular expression from the heap: Python's re.Pattern (see basic_regex). make_in\<regex>(arena, pattern) puts one in an arena.
+
+## `regex/regex_error.hpp`
+
+### class `regex_error`
+
+```c++
+class regex_error final;
+```
+
+Why a pattern does not compile and where: kind, the offset of the code unit it was found at, and Python's message for it (re.error's msg and pos). The constructs a linear-time engine cannot run (backreferences, lookaround, conditionals, atomic groups, possessive repeats) are errors of their own kind.
+
+### function `regex_error::position`
+
+```c++
+[[nodiscard]] constexpr auto position(void) const noexcept -> ca::usz;
+```
+
+Offset in the pattern, in code units.
+
+### function `regex_error::message`
+
+```c++
+[[nodiscard]] constexpr auto message(void) const noexcept -> ca::sv::str;
+```
+
+A literal: Python's wording where re has one.
+
+## `regex/regex_flags.hpp`
+
+### enum `regex_flags`
+
+```c++
+enum class regex_flags : ca::u8;
+```
+
+The flags of Python's re, combined with `|`: ignore_case (re.I: Unicode caseless classes as re takes them), multiline (re.M: `^` and `$` at every line), dot_all (re.S: `.` takes '\n' too), verbose (re.X: white space and `#` comments outside classes ignored), ascii (re.A: `\w \d \s \b` and ignore_case on ASCII only). The pattern sets them inline too: `(?imsxa)` at its start, `(?i:...)` and `(?-i:...)` for a group.
+
+## `regex/regex_match.hpp`
+
+### class `impl::regex_appender`
+
+```c++
+template <typename Groups, ca::is_allocator A>
+class regex_appender final;
+```
+
+Appends a template's expansion to a string; the first failed append is kept.
+
+### struct `impl::regex_template_check`
+
+```c++
+struct regex_template_check final;
+```
+
+The template sink that checks only.
+
+### class `regex_match`
+
+```c++
+template <ca::is_allocator A = ca::heap>
+class regex_match final;
+```
+
+One match of a basic_regex in a text: Python's re.Match. Group 0 is the whole match, groups 1 to group_count() the pattern's capture groups, positions in code units of the searched text. It borrows that text and the regex's group names (both must outlive it) and owns the groups' positions, from A when the pattern has groups. operator[] traps on a group past group_count() and gives an empty view for a group that took no part; group, start and end give nothing then. Clean up with cleanup().
+
+### alias `regex_match::rebind`
+
+```c++
+template <ca::is_allocator B>
+using rebind = ca::regex_match<B>;
+```
+
+The same match type over allocator B.
+
+### function `regex_match::string`
+
+```c++
+[[nodiscard]] auto string(void) const noexcept -> ca::sv::str;
+```
+
+The text searched: Python's Match.string.
+
+### function `regex_match::group_count`
+
+```c++
+[[nodiscard]] auto group_count(void) const noexcept -> ca::usz;
+```
+
+The pattern's capture groups, group 0 not counted.
+
+### function `regex_match::start`
+
+```c++
+[[nodiscard]] auto start(const ca::usz group) const noexcept -> ca::optional<ca::usz>;
+```
+
+Where group starts, or nothing when it took no part or is past group_count().
+
+### function `regex_match::operator[]`
+
+```c++
+[[nodiscard]] auto operator[](const ca::usz group) const noexcept -> ca::sv::str;
+```
+
+Text of group; empty when it took no part. Traps when group > group_count().
+
+### function `regex_match::operator[]`
+
+```c++
+[[nodiscard]] auto operator[](const ca::sv::str name) const noexcept -> ca::sv::str;
+```
+
+Text of the group named name; traps when no group has that name.
+
+### function `regex_match::group`
+
+```c++
+[[nodiscard]] auto group(void) const noexcept -> ca::sv::str;
+```
+
+The whole match.
+
+### function `regex_match::group`
+
+```c++
+[[nodiscard]] auto group(const ca::usz group) const noexcept -> ca::optional<ca::sv::str>;
+```
+
+Text of group, or nothing when it took no part or is past group_count().
+
+### function `regex_match::group`
+
+```c++
+[[nodiscard]] auto group(const ca::sv::str name) const noexcept -> ca::optional<ca::sv::str>;
+```
+
+Text of the group named name, or nothing when it took no part or no group has that name.
+
+### function `regex_match::group_index`
+
+```c++
+[[nodiscard]] auto group_index(const ca::sv::str name) const noexcept -> ca::optional<ca::usz>;
+```
+
+The index of the group named name, or nothing.
+
+### function `regex_match::expand`
+
+```c++
+[[nodiscard]] auto expand(const ca::sv::str replacement) const noexcept -> ca::result<string_type>;
+```
+
+replacement with its group references filled in (`\1`, `\g<name>`, as basic_regex::sub reads it): Python's Match.expand. errc::invalid_argument for a bad template, with a trace.
+
+### function `regex_match::expand_into`
+
+```c++
+[[nodiscard]] auto expand_into(const ca::sv::str replacement, string_type& out) const noexcept -> ca::optional<ca::sv::str>;
+```
+
+Appends expand(replacement) to out: nothing, or what went wrong, a literal (the template's error, or "out of memory" when out could not grow; what fit stays).
+
+### function `regex_match::clone`
+
+```c++
+[[nodiscard]] auto clone(void) const noexcept -> ca::result<self>;
+```
+
+A copy in memory from the same allocator.
+
+### function `regex_match::cleanup`
+
+```c++
+[[nodiscard]] auto cleanup(void) noexcept -> ca::result<void>;
+```
+
+Frees the groups' positions.
+
+## `regex/regex_matches.hpp`
+
+### class `regex_matches`
+
+```c++
+template <typename R>
+class regex_matches final;
+```
+
+The matches of a regex R (a basic_regex) in a text, one per next(): what finditer returns, R::matches_type. Python's rules: non-overlapping, the search going on from each match's end, an empty match never twice at one position. Borrows the regex (whose scratch it uses) and the text.
+
+### function `regex_matches::next`
+
+```c++
+[[nodiscard]] auto next(void) noexcept -> ca::result<ca::optional<typename R::match_type>>;
+```
+
+The next match, or nothing once they are all found. Fails only out of memory (a match's groups).
+
+## `regex/regex_pattern.hpp`
+
+### class `regex_pattern`
+
+```c++
+class regex_pattern final;
+```
+
+The text of a regular expression, what basic_regex::make compiles. From a literal it is checked when it compiles: a pattern invalid both plainly and as verbose (flags given at runtime can turn verbose on) is a compile error naming the problem, such as `regex_has_unbalanced_paren`. Text known only at runtime goes in explicitly, `ca::regex_pattern{text}`, and is checked by make.
+
+### function `regex_pattern::regex_pattern`
+
+```c++
+constexpr explicit regex_pattern(const ca::sv::str text) noexcept
+: _text{text};
+```
+
+Runtime text, checked by make.
+
+### function `regex_pattern::check`
+
+```c++
+[[nodiscard]] constexpr auto check(const ca::regex_flags flags = ca::regex_flags::none) const noexcept -> ca::optional<ca::regex_error>;
+```
+
+The first syntax error under flags (what make would fail with, short of memory and program size), or nothing. Python's re.error: kind, position, message. constexpr.
+
+## `regex/impl/`
+
+The regex engine, in the order a pattern goes through it.
+
+### Parsing
+
+- `regex_parser.hpp`: Python's grammar, one pass over the UTF-8 pattern with a fixed stack of open groups (no recursion, no allocation), so the same code checks a literal in a consteval constructor and builds the tree at runtime. What it recognises goes to a sink.
+- `regex_validator.hpp`: the sink that builds nothing, for `regex_pattern::check`.
+- `regex_tree.hpp`: the sink that builds the tree (`regex_node.hpp`: nodes linked by index), with every character set resolved there to sorted code point ranges.
+- `regex_ranges.hpp`: that set algebra: sorting and merging ranges, complements within the scalar values, the named classes (`\w \d \s`, Unicode from `2-vocabulary/unicode/impl/class_ranges.hpp` or ASCII), and the caseless closure of `ignore_case` from the caseless cycles of the same generated header.
+- `regex_errors.hpp`: one undefined function per syntax error, called by the consteval check.
+
+### Compiling
+
+- `regex_compiler.hpp`: the tree to a Thompson NFA (`regex_program.hpp`: `regex_inst`, transitions of byte ranges), each node compiled knowing its successor. Counted repeats are unrolled; a set becomes a trie of the UTF-8 sequences of its ranges (`utf8_sequences.hpp` splits a range into byte range sequences), built as the sorted sequences stream in, identical states shared. A loop whose body can match empty gets a hidden slot holding where its iteration began and a `progress` instruction at the end of the body: leave when nothing was consumed, as Python's re.
+- `regex_analysis.hpp`: what the matcher can skip by: the bytes a match can start with, whether it is anchored at the text's start, the literal every match starts with.
+
+### Matching
+
+`pike_vm.hpp` / `.cpp`: the Pike VM. Two thread lists (sparse sets: O(1) clear, insertion order is priority), the epsilon closure walked with an explicit stack that also restores capture slots, one byte of text per step. Every thread is told apart by its instruction and, inside a loop that can iterate empty, by whether its iteration is still empty (`guards`): two threads differing in that would end differently, so neither may stand for the other. All memory comes from one scratch block the regex takes when made. `regex_names.hpp` looks group names up; `regex_replacement.hpp` walks sub's templates, checking them before any text is produced.
+
+## `regex/impl/pike_vm.hpp`
+
+### struct `impl::regex_threads`
+
+```c++
+struct regex_threads final;
+```
+
+The threads alive at one text position, in priority order: a sparse set of thread keys (see regex_program), and each thread's capture slots, by key.
+
+### struct `impl::regex_frame`
+
+```c++
+struct regex_frame final;
+```
+
+One step of the closure walk: follow instruction target, or (slot != none) put value back into slot.
+
+### struct `impl::regex_scratch`
+
+```c++
+struct regex_scratch final;
+```
+
+The matcher's memory for one program, carved from one block (regex_scratch_size bytes, aligned for a usz) by regex_scratch_at: two thread lists, the slots being built, the best match's slots, the walk's stack. Nothing allocates while matching.
+
+### struct `impl::regex_search`
+
+```c++
+struct regex_search final;
+```
+
+One search: text, where it starts (from), an empty match at forbid ruled out (Python's must-advance after an empty match; regex_no_position for none), matches starting at from only (anchored), or ending at the end only (full).
+
+### function `impl::regex_scratch_size`
+
+```c++
+[[nodiscard]] constexpr auto regex_scratch_size(const ca::usz keys, const ca::u32 slots, ca::usz& bytes) noexcept -> bool;
+```
+
+Into bytes, the scratch for keys thread keys (instructions << shift) and slots per thread; false past memory.
+
+### function `impl::regex_scratch_at`
+
+```c++
+auto regex_scratch_at(void* block, ca::usz keys, ca::u32 slots) noexcept -> ca::impl::regex_scratch;
+```
+
+Lays scratch out over block (regex_scratch_size bytes) and clears the sparse sets' indices.
+
+### function `impl::regex_execute`
+
+```c++
+[[nodiscard]] auto regex_execute(const ca::impl::regex_program& program, const ca::impl::regex_scratch& scratch, const ca::impl::regex_search& search) noexcept -> bool;
+```
+
+Runs program over the search; true when it matches, the slots of the match (leftmost-first, as a backtracker in priority order finds it) in scratch._best: start and end of each group, regex_no_position when it took no part. O(text * program), each text byte read once.
+
+## `regex/impl/regex_analysis.hpp`
+
+### namespace `impl`
+
+```c++
+namespace impl;
+```
+
+What a compiled pattern tells the matcher before it runs, so it can skip text no match starts in.
+
+### function `impl::regex_first_bytes`
+
+```c++
+template <ca::is_allocator A>
+[[nodiscard]] auto regex_first_bytes(const A& allocator, const ca::dynamic_array<ca::impl::regex_inst, A>& insts, const ca::dynamic_array<ca::impl::regex_transition, A>& transitions, const ca::u32 start, ca::u64 (&bytes)[4]) noexcept
+-> ca::result<bool>;
+```
+
+The bytes a match can start with, into bytes (looks taken as passing, so a superset); false when a match can be empty, where every position counts.
+
+### function `impl::regex_anchored`
+
+```c++
+template <ca::is_allocator A>
+[[nodiscard]] auto regex_anchored(const ca::dynamic_array<ca::impl::regex_inst, A>& insts, ca::u32 pc) noexcept -> bool;
+```
+
+Whether every match starts at the text's start (`\A`, or `^` outside multiline, first).
+
+### function `impl::regex_prefix`
+
+```c++
+template <ca::is_allocator A>
+[[nodiscard]] auto regex_prefix(const ca::impl::regex_tree<A>& tree, const ca::u32 index, ca::basic_str<char, A>& out, bool& whole, bool& ok) noexcept -> bool;
+```
+
+Appends the literal text every match of node starts with to out; true when the whole node was that text (no group, look or other construct), false otherwise or when out ran out of memory (ok then false).
+
+## `regex/impl/regex_compiler.hpp`
+
+### class `impl::regex_compiler`
+
+```c++
+template <ca::is_allocator A>
+class regex_compiler final;
+```
+
+Compiles a tree into a Thompson NFA over UTF-8 bytes, each node knowing what follows it (nothing to patch). A set becomes a trie of byte ranges, its UTF-8 sequences merged by prefix and identical states shared; counted repeats are unrolled. Fails with errc::out_of_memory, or errc::invalid_argument when the program passes regex_max_program.
+
+### function `impl::regex_compiler::regex_compiler`
+
+```c++
+regex_compiler(const A& allocator, const ca::impl::regex_tree<A>& tree, const ca::u32 groups, ca::dynamic_array<ca::impl::regex_inst, A>& insts,
+    ca::dynamic_array<ca::impl::regex_transition, A>& transitions, ca::dynamic_array<ca::u32, A>& guards) noexcept
+: _tree{tree}, _insts{insts}, _transitions{transitions}, _guards{guards}, _work{allocator},
+  _levels{ca::dynamic_array<ca::impl::regex_transition, A>{allocator}, ca::dynamic_array<ca::impl::regex_transition, A>{allocator},
+    ca::dynamic_array<ca::impl::regex_transition, A>{allocator}, ca::dynamic_array<ca::impl::regex_transition, A>{allocator}},
+  _shared{allocator}, _slots{2U * groups + 2U}, _guard{ca::impl::regex_none}, _out_of_memory{false}, _too_large{false};
+```
+
+Slots from groups' up are the loops' own (progress); guards gets each instruction's innermost such loop slot, or regex_none.
+
+### function `impl::regex_compiler::slots`
+
+```c++
+[[nodiscard]] auto slots(void) const noexcept -> ca::u32;
+```
+
+Slots per thread: the groups', then one per loop that can iterate empty.
+
+### function `impl::regex_compiler::run`
+
+```c++
+[[nodiscard]] auto run(void) noexcept -> ca::result<ca::u32>;
+```
+
+The entry instruction of the whole tree, ending in one match.
+
+### function `impl::regex_compiler::_checked`
+
+```c++
+[[nodiscard]] auto _checked(const ca::impl::regex_node& node, const ca::u32 slot, const ca::u32 more, const ca::u32 exit) noexcept -> ca::u32;
+```
+
+One iteration of node's child that leaves for exit when it matched empty and goes on to more otherwise (slot holds where it began).
+
+### function `impl::regex_compiler::_repeat`
+
+```c++
+[[nodiscard]] auto _repeat(const ca::impl::regex_node& node, const ca::u32 next) noexcept -> ca::u32;
+```
+
+min copies, then the rest: a loop (unbounded) or max - min optional copies. A child that can match empty is iterated as Python's re does: past min, an iteration that matched empty ends the repeat, its groups kept.
+
+## `regex/impl/regex_errors.hpp`
+
+### namespace `impl`
+
+```c++
+namespace impl;
+```
+
+Never defined: a literal pattern is checked in a consteval constructor, where calling one of these is a compile error naming the problem.
+
+### function `impl::regex_reject`
+
+```c++
+consteval auto regex_reject(const ca::regex_error::kind what) noexcept -> void;
+```
+
+Calls the function naming what: a compile error in constant evaluation.
+
+## `regex/impl/regex_limits.hpp`
+
+### namespace `impl`
+
+```c++
+namespace impl;
+```
+
+Bounds of a pattern: group nesting, capture groups, a counted repeat's numbers and the compiled program (instructions plus transitions), which bounds the memory a regex takes and the time per text byte.
+
+## `regex/impl/regex_look.hpp`
+
+### enum `impl::regex_look`
+
+```c++
+enum class regex_look : ca::u8;
+```
+
+The zero-width assertions: `\A` begin_text, `\Z` end_text, `$` end_text_or_newline (before a final '\n' too), `^` and `$` under multiline begin_line and end_line, `\b` and `\B` over Unicode or (ascii) ASCII word characters.
+
+### enum `impl::regex_class`
+
+```c++
+enum class regex_class : ca::u8;
+```
+
+The named classes `\w \d \s`, Unicode or (ascii) ASCII.
+
+## `regex/impl/regex_names.hpp`
+
+### struct `impl::regex_names`
+
+```c++
+struct regex_names final;
+```
+
+A pattern's group names, borrowed: the entries and the text they point into.
+
+### function `impl::regex_names::find`
+
+```c++
+[[nodiscard]] constexpr auto find(const ca::sv::str name) const noexcept -> ca::optional<ca::u32>;
+```
+
+The group named name, or nothing.
+
+### function `impl::regex_names::name_of`
+
+```c++
+[[nodiscard]] constexpr auto name_of(const ca::u32 group) const noexcept -> ca::optional<ca::sv::str>;
+```
+
+The name of group, or nothing.
+
+## `regex/impl/regex_node.hpp`
+
+### struct `impl::regex_node`
+
+```c++
+struct regex_node final;
+```
+
+One node of a parsed pattern, linked by index: child is the first child (concat, alternate) or the only one (repeat, group), next the following sibling. a and b: a literal's code point; a set's first range and range count; a look's kind; a repeat's min and max; a group's capture index.
+
+## `regex/impl/regex_parser.hpp`
+
+### class `impl::regex_parser`
+
+```c++
+template <typename Sink>
+class regex_parser final;
+```
+
+Python's re grammar over UTF-8, one pass, no recursion (a fixed stack of open groups), so it runs in constant evaluation. What it finds goes to Sink, which builds a tree or (regex_pattern's check) nothing: empty, literal, any, look, set_begin, set_range, set_class, set_end, repeat, group, name (false: a duplicate), concat, alternate (over a chain made with link), root, ok (false stops the parse, out of memory). Handles are the Sink's.
+
+### function `impl::regex_parser::run`
+
+```c++
+[[nodiscard]] constexpr auto run(const ca::regex_flags flags) noexcept -> ca::optional<ca::regex_error>;
+```
+
+Parses the whole pattern under flags; the first syntax error, or nothing (the sink saw it all, unless its ok() turned false).
+
+### function `impl::regex_parser::groups`
+
+```c++
+[[nodiscard]] constexpr auto groups(void) const noexcept -> ca::u32;
+```
+
+Capture groups seen.
+
+## `regex/impl/regex_program.hpp`
+
+### struct `impl::regex_inst`
+
+```c++
+struct regex_inst final;
+```
+
+One instruction of a Thompson NFA over UTF-8 bytes. bytes: transitions x to x + y, sorted, disjoint (none: a dead end); split: x first, then y; save: position into slot y, then x; look: the assertion look, then x; progress: x when the position is still the one in slot y (an iteration that matched empty leaves its loop, as in Python), else z; match.
+
+### struct `impl::regex_transition`
+
+```c++
+struct regex_transition final;
+```
+
+A byte in low..high goes to instruction next.
+
+### struct `impl::regex_name`
+
+```c++
+struct regex_name final;
+```
+
+A capture group's name: name_size units at name_at in the names text.
+
+### struct `impl::regex_program`
+
+```c++
+struct regex_program final;
+```
+
+What the matcher reads: the instructions, transitions, the entry, slots per thread (two per group, group 0 included, then one per loop that can iterate empty), the bytes a match can start with (first_bytes, a 256-bit set; all when skips is false), a literal every match starts with (prefix), and whether matches only start at the search position (anchored). guards (with shift 1; none with shift 0) give each instruction the slot of the innermost loop that can iterate empty around it: a thread is told apart by its instruction and whether that loop's iteration is still empty, which decides where it goes (thread keys are instruction << shift | that bit).
+
+## `regex/impl/regex_ranges.hpp`
+
+### namespace `impl`
+
+```c++
+namespace impl;
+```
+
+Sets of code points as sorted, disjoint ranges: what a character class becomes.
+
+### function `impl::regex_class_ranges`
+
+```c++
+[[nodiscard]] constexpr auto regex_class_ranges(const ca::impl::regex_class which, const bool ascii) noexcept -> ca::borrowed_slice<const ca::impl::regex_range>;
+```
+
+The ranges of a named class, Unicode (Python's str classes) or ASCII.
+
+### function `impl::regex_sort_ranges`
+
+```c++
+constexpr auto regex_sort_ranges(ca::impl::regex_range* const data, const ca::usz count) noexcept -> void;
+```
+
+Heapsort by first point: in place, O(n log n), no allocation.
+
+### function `impl::regex_normalize`
+
+```c++
+template <ca::is_allocator A>
+[[nodiscard]] auto regex_normalize(ca::dynamic_array<ca::impl::regex_range, A>& ranges) noexcept -> ca::result<void>;
+```
+
+Sorts, then merges overlapping and adjacent ranges.
+
+### function `impl::regex_append_complement`
+
+```c++
+template <ca::is_allocator A>
+[[nodiscard]] auto regex_append_complement(const ca::borrowed_slice<const ca::impl::regex_range> ranges, ca::dynamic_array<ca::impl::regex_range, A>& out) noexcept -> ca::result<void>;
+```
+
+Appends the complement of sorted, disjoint ranges within the scalar values.
+
+### function `impl::regex_append_class`
+
+```c++
+template <ca::is_allocator A>
+[[nodiscard]] auto regex_append_class(const ca::impl::regex_class which, const bool negated, const bool ascii, ca::dynamic_array<ca::impl::regex_range, A>& out) noexcept
+-> ca::result<void>;
+```
+
+Appends a named class, or its complement.
+
+### function `impl::regex_caseless_link`
+
+```c++
+[[nodiscard]] constexpr auto regex_caseless_link(const char32_t point) noexcept -> ca::u32;
+```
+
+The index of point's link in the caseless cycles, or CASELESS_LINK_COUNT.
+
+### function `impl::regex_ascii_swap_case`
+
+```c++
+[[nodiscard]] constexpr auto regex_ascii_swap_case(const char32_t point) noexcept -> char32_t;
+```
+
+The other case of an ASCII letter, or point.
+
+### function `impl::regex_append_caseless`
+
+```c++
+template <ca::is_allocator A>
+[[nodiscard]] auto regex_append_caseless(const char32_t point, const bool ascii, ca::dynamic_array<ca::impl::regex_range, A>& out) noexcept -> ca::result<void>;
+```
+
+Appends the points re.IGNORECASE takes as point, point included: its caseless class, or (ascii) the other case of an ASCII letter.
+
+### function `impl::regex_fold`
+
+```c++
+template <ca::is_allocator A>
+[[nodiscard]] auto regex_fold(ca::dynamic_array<ca::impl::regex_range, A>& ranges, const bool ascii) noexcept -> ca::result<void>;
+```
+
+Closes normalized ranges under re.IGNORECASE, then normalizes them again.
+
+## `regex/impl/regex_replacement.hpp`
+
+### function `impl::regex_expand`
+
+```c++
+template <typename Sink>
+[[nodiscard]] constexpr auto regex_expand(const ca::sv::str replacement, const ca::u32 groups, const ca::impl::regex_names& names, Sink& sink) noexcept
+-> ca::optional<ca::sv::str>;
+```
+
+Walks a replacement template as Python's re.sub reads it: text to sink.text(view), escapes (\n, \t, ..., octal \0 \12 \123) to sink.point(code point), \g\<name>, \g\<number>, \1 to \99 to sink.group(index). An unknown escape of an ASCII letter, a group past groups or an unknown name is an error: its message, a literal; nothing when the template is fine. Other escapes (\&) stay as written.
+
+## `regex/impl/regex_tree.hpp`
+
+### class `impl::regex_tree`
+
+```c++
+template <ca::is_allocator A>
+class regex_tree final;
+```
+
+The parser's sink that builds the pattern's tree in memory from A: nodes linked by index, every set resolved to sorted ranges (named classes, case folding and negation applied), group names. A failed allocation turns ok() false, which stops the parse.
+
+### function `impl::regex_tree::take_names`
+
+```c++
+[[nodiscard]] auto take_names(void) noexcept -> ca::dynamic_array<ca::impl::regex_name, A>;
+```
+
+The names, handed over (the tree keeps none).
+
+### function `impl::regex_tree::cleanup`
+
+```c++
+auto cleanup(void) noexcept -> void;
+```
+
+Frees what the tree still owns.
+
+## `regex/impl/regex_validator.hpp`
+
+### class `impl::regex_validator`
+
+```c++
+class regex_validator final;
+```
+
+The parser's sink that builds nothing: a syntax check, constexpr. Group names are checked for duplicates among the first NAMES; past them, only at runtime.
+
+## `regex/impl/utf8_sequences.hpp`
+
+### struct `impl::utf8_sequence`
+
+```c++
+struct utf8_sequence final;
+```
+
+One to four byte ranges: the UTF-8 encodings of a run of code points, byte i in low[i]..high[i].
+
+### class `impl::utf8_sequences`
+
+```c++
+class utf8_sequences final;
+```
+
+The code points first..last (surrogates skipped) as UTF-8 byte range sequences, in increasing order, each a product of ranges: what an automaton over bytes matches a range of code points with. At most 7 sequences per encoding length.
+
+### function `impl::utf8_sequences::next`
+
+```c++
+[[nodiscard]] constexpr auto next(ca::impl::utf8_sequence& out) noexcept -> bool;
+```
+
+The next sequence into out; false when none is left.
+
 ## `string/`
 
 Owned strings with Python's str API.

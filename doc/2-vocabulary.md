@@ -2404,6 +2404,8 @@ struct special_case final;
 
 Full mappings of one code point, each up to 3 code points (0-padded).
 
+## `unicode/impl/class_ranges.hpp`
+
 ## `unicode/impl/decode_at.hpp`
 
 ### function `impl::decode_at`
@@ -2443,6 +2445,24 @@ The class flags of the 128 ASCII code points, one read each, built from the tabl
 ```
 
 The class flags of point (char_record::ALPHA, ...): one read for ASCII.
+
+## `unicode/impl/point_range.hpp`
+
+### struct `impl::point_range`
+
+```c++
+struct point_range final;
+```
+
+Code points first to last, both included.
+
+### struct `impl::caseless_link`
+
+```c++
+struct caseless_link final;
+```
+
+One step of a caseless class: point and the next member of its cycle.
 
 ## `unicode/impl/skip_ascii.hpp`
 

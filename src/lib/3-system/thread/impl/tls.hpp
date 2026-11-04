@@ -18,7 +18,7 @@ namespace ca {
 		// -- TLS ------------------------------------------------------------
 
 		/* @DOC Thread-local storage without libc (x86-64 variant II): each thread's copy of the
-		   PT_TLS image sits right below its thread pointer, at the offsets the linker gave the
+		   elf::segment_types::tls image sits right below its thread pointer, at the offsets the linker gave the
 		   variables, and the control block above it: the pointer itself at %fs:0, the stack canary
 		   at %fs:0x28. _start finds the image and lays out the main thread's area; a thread ca
 		   starts gets its own area the same way. The functions run before %fs is set: no
@@ -38,6 +38,15 @@ namespace ca {
 					ca::usz _size;
 					ca::usz _align;
 			}; // struct tls_image
+
+			/* @DOC Bytes of the TLS block of a PT_TLS segment of memory_size bytes aligned to align:
+			   rounded up to that alignment, as the linker places variables; the block ends at the
+			   thread pointer, so a variable at offset in it is at offset - this from it. */
+			[[nodiscard, gnu::always_inline]] constexpr auto tls_block_size(const ca::u64 memory_size, const ca::u64 align) noexcept -> ca::usz {
+
+				const ca::u64 own = align > 1U ? align : 1U;
+				return static_cast<ca::usz>((memory_size + own - 1U) & ~(own - 1U));
+			}
 
 			/* @DOC The image of the running program, set by _start; empty (_align 0) in a program
 			   started by libc. */

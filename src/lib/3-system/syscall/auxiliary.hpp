@@ -16,7 +16,7 @@ namespace ca {
 
 		// -- AUXILIARY ------------------------------------------------------
 
-		/* @DOC Value of entry type (AT_*) of the auxiliary vector the kernel handed the process, 0
+		/* @DOC Value of entry type (elf::auxiliary_types) of the auxiliary vector the kernel handed the process, 0
 		   when absent. Read from /proc/self/auxv at each call: for one-time lookups (the vDSO). Linux
 		   x86-64; 0 elsewhere. */
 		[[nodiscard]] auto auxiliary(ca::u64 type) noexcept -> ca::u64;

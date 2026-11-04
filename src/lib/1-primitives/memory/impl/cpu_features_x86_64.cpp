@@ -75,7 +75,9 @@ auto ca::impl::read_cpu_features(void) noexcept -> ca::impl::cpu_features {
 		cache = last_level_cache(0x8000001DU);
 	if (cache == 0U)
 		cache = static_cast<ca::usz>(8U) << 20U;
-	return {avx && (more._b >> 5U & 1U) != 0U, (more._b >> 8U & 1U) != 0U, (more._b >> 9U & 1U) != 0U, cache};
+	const bool avx2 = avx && (more._b >> 5U & 1U) != 0U;
+	const bool fma = avx && (basic._c >> 12U & 1U) != 0U;
+	return {avx2, (more._b >> 8U & 1U) != 0U, (more._b >> 9U & 1U) != 0U, fma, cache};
 }
 
 #endif

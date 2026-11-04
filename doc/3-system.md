@@ -39,6 +39,583 @@ auto main(void) -> int {
 
 The wrappers are deliberately thin: they own nothing, so a descriptor from `sys::open` must be closed with `sys::close`. The owning types built on them are in layer 6: `fs::descriptor`, `io::writer`, `io::reader`.
 
+## `elf/`
+
+The ELF64 format, in `ca::elf`: the structures and constants of `<elf.h>` without including it, and two views that read them safely. Everything in ca that reads ELF goes through here: the vDSO lookup (`syscall::vdso_symbol`), the runtime's self-relocation and TLS setup, the executable range of a backtrace, and the symbolizer's sections. It is also the base of the dynamic loader.
+
+The structures have the layout of their `<elf.h>` counterparts, checked field by field when the library builds (`layout.cpp`), so they overlay mapped memory and file bytes directly:
+
+| ca::elf | elf.h | Constants |
+|---|---|---|
+| `file_header` | `Elf64_Ehdr` | `identity`, `file_types`, `machines` |
+| `program_header` | `Elf64_Phdr` | `segment_types`, `segment_flags` |
+| `section_header` | `Elf64_Shdr` | `section_types`, `section_flags`, `section_indices` |
+| `symbol` | `Elf64_Sym` | `symbol_types`, `symbol_bindings`, `symbol_visibilities` |
+| `dynamic_entry` | `Elf64_Dyn` | `dynamic_tags`, `dynamic_flags`, `dynamic_flags_1` |
+| `relocation` | `Elf64_Rela` | `x86_64_relocations` |
+| `auxiliary_entry` | `Elf64_auxv_t` | `auxiliary_types` |
+
+Fields keep the ELF order with descriptive names (`_segments_offset` is `e_phoff`, `_address` is `p_vaddr`); the packed fields have accessors (`symbol::type()`, `relocation::symbol()`). Only ELF64 little-endian is read; ELF32 and big-endian files are refused.
+
+Two views, owning nothing:
+
+- `elf::file` reads a file as it lies on disk (usually a read-only mapping of it). `from` checks the header and that the program and section header tables fit inside the bytes, aligned; then `sections()`, `name(section)`, `find(".symtab")`, `linked(section)`, `contents(section)`, `string(table, offset)` and `symbols(table)` all stay inside the bytes, so a malformed or truncated file gives empty results instead of a fault.
+- `elf::image` reads an object mapped for execution: the vDSO, the running program, or a library a loader mapped. `at(header)` takes a mapped file header, `of(segments, bias)` program headers whose bias is known (`bias_of` gives it from the program-headers segment), and `program()` is the running program. It reads the dynamic section once: `string`, `symbols`, `value(tag)`, the three relocation tables, and `find(name)`, a lookup through the GNU hash table (bloom filter first) or else the SysV one.
+
+`image::program()` takes the program headers from the auxiliary vector and the bias from their PT_PHDR segment. A static PIE (how freestanding ca programs are linked with `-static-pie`) has none; its ELF header then sits right before its program headers, in the load segment at file offset 0, so `program()` reads that header through the kernel (`process_vm_readv`, which fails rather than faults), checks it is ELF64 with its program headers right after it, and takes the bias from that segment. It works the same under libc, in a static program and in a static PIE. The program's dynamic section is there only when it has one: a static non-PIE program has none, even linked with `--export-dynamic`, and its image has empty `dynamic()` and `symbols()`. Only what the program exports (`--export-dynamic`, or what the shared libraries it links reference) is in its dynamic symbol table. `ca::trace` takes the executable's range from it, and `ca::dl` binds plugins to what the program exports.
+
+`elf::hashed_name::of(name)` computes both ELF hashes of a symbol name once, at compile time when the name is a constant, so a lookup through several images hashes the name only once.
+
+The dynamic section's addresses are link-time addresses in the file, but libc's loader rewrites them in place to where they were mapped, in the objects it loads (the program included). An `image` takes an address inside the range the load segments were linked at as link-time and adds the bias, takes one inside the range they are mapped at as already rebased, and treats any other as absent. The vDSO, a static program and anything ca maps keep link-time addresses.
+
+```c++
+#include "ca/elf.hpp"
+#include "ca/syscall.hpp"
+
+auto main(void) -> int {
+	const ca::u64 base = ca::syscall::auxiliary(ca::elf::auxiliary_types::vdso);
+	if (base == 0U)
+		return 0;
+	const auto vdso = ca::elf::image::at(*reinterpret_cast<const ca::elf::file_header*>(base));
+	if (!vdso)
+		return 1;
+	constexpr auto name = ca::elf::hashed_name::of("__vdso_clock_gettime");
+	const auto symbol = vdso->find(name);
+	if (!symbol || symbol->type() != ca::elf::symbol_types::function)
+		return 2;
+	using clock_gettime = int (*)(int, void*);
+	const auto call = reinterpret_cast<clock_gettime>(vdso->address(symbol->_value));
+	long time[2] = {};
+	return call(1, time) == 0 && time[0] > 0 ? 0 : 3;
+}
+```
+
+## `elf/auxiliary_entry.hpp`
+
+### namespace `auxiliary_types`
+
+```c++
+namespace auxiliary_types;
+```
+
+Types of the auxiliary vector's entries (AT_*), what the kernel tells a process it starts: its program headers, page size, interpreter base, entry point, ids, 16 random bytes, the vDSO's ELF header.
+
+### struct `auxiliary_entry`
+
+```c++
+struct auxiliary_entry final;
+```
+
+An entry of the auxiliary vector (Elf64_auxv_t), past the environment on the initial stack; the vector ends at the entry typed auxiliary_types::null.
+
+## `elf/dynamic_entry.hpp`
+
+### namespace `dynamic_tags`
+
+```c++
+namespace dynamic_tags;
+```
+
+d_tag: what an entry of the dynamic section gives (DT_*). Addresses are link-time addresses, sizes in bytes.
+
+### namespace `dynamic_flags`
+
+```c++
+namespace dynamic_flags;
+```
+
+Bits of the dynamic_tags::flags entry (DF_*).
+
+### namespace `dynamic_flags_1`
+
+```c++
+namespace dynamic_flags_1;
+```
+
+Bits of the dynamic_tags::flags_1 entry (DF_1_*).
+
+### struct `dynamic_entry`
+
+```c++
+struct dynamic_entry final;
+```
+
+An entry of the dynamic section (Elf64_Dyn): a tag and its value, an address or a number; the section ends at the entry tagged dynamic_tags::null.
+
+## `elf/file.hpp`
+
+### class `file`
+
+```c++
+class file final;
+```
+
+A view of the bytes of an ELF64 little-endian file, read as it is on disk: header, program headers, sections. Made by from, which checks the header and that both tables lie inside the bytes, aligned; every accessor then stays inside them, so a malformed file gives empty results, never a fault. The bytes must start 8-aligned (a mapping is). Owns nothing.
+
+### function `file::from`
+
+```c++
+[[nodiscard]] static auto from(ca::span<const ca::byte> bytes) noexcept -> ca::optional<self>;
+```
+
+The file in bytes; none when they do not hold an ELF64 little-endian file whose tables fit.
+
+### function `file::bytes`
+
+```c++
+[[nodiscard]] constexpr auto bytes(void) const noexcept -> ca::span<const ca::byte>;
+```
+
+All the bytes of the file.
+
+### function `file::segments`
+
+```c++
+[[nodiscard]] auto segments(void) const noexcept -> ca::borrowed_slice<const ca::elf::program_header>;
+```
+
+The program headers, empty in a file that has none (an object file).
+
+### function `file::sections`
+
+```c++
+[[nodiscard]] auto sections(void) const noexcept -> ca::borrowed_slice<const ca::elf::section_header>;
+```
+
+The section headers, empty in a file stripped of them.
+
+### function `file::contents`
+
+```c++
+[[nodiscard]] auto contents(const ca::elf::section_header& section) const noexcept -> ca::span<const ca::byte>;
+```
+
+The bytes of section in the file; empty for a no_bits section or one past the end.
+
+### function `file::contents`
+
+```c++
+[[nodiscard]] auto contents(const ca::elf::program_header& segment) const noexcept -> ca::span<const ca::byte>;
+```
+
+The bytes of segment present in the file (its _file_size); empty past the end.
+
+### function `file::name`
+
+```c++
+[[nodiscard]] auto name(const ca::elf::section_header& section) const noexcept -> ca::sv::str;
+```
+
+The name of section, empty when the names table lacks it.
+
+### function `file::find`
+
+```c++
+[[nodiscard]] auto find(ca::sv::str name) const noexcept -> ca::optional<const ca::elf::section_header&>;
+```
+
+The first section named name.
+
+### function `file::linked`
+
+```c++
+[[nodiscard]] auto linked(const ca::elf::section_header& section) const noexcept -> ca::optional<const ca::elf::section_header&>;
+```
+
+The section section's _link names (the string table of a symbol table).
+
+### function `file::string`
+
+```c++
+[[nodiscard]] auto string(const ca::elf::section_header& strings, ca::u64 offset) const noexcept -> ca::sv::str;
+```
+
+The NUL-terminated string at offset in string table strings, empty when it does not end inside it.
+
+### function `file::symbols`
+
+```c++
+[[nodiscard]] auto symbols(const ca::elf::section_header& table) const noexcept -> ca::borrowed_slice<const ca::elf::symbol>;
+```
+
+The entries of symbol table table (symbols or dynamic_symbols); empty for another section, or one misaligned or past the end.
+
+## `elf/file_header.hpp`
+
+### namespace `identity`
+
+```c++
+namespace identity;
+```
+
+The identification bytes opening every ELF file (e_ident): indices into them, and the values ca reads, ELF64 little-endian of the current version.
+
+### namespace `file_types`
+
+```c++
+namespace file_types;
+```
+
+e_type: what the file is (ET_*). A position-independent executable is shared.
+
+### namespace `machines`
+
+```c++
+namespace machines;
+```
+
+e_machine: the instruction set (EM_*).
+
+### struct `file_header`
+
+```c++
+struct file_header final;
+```
+
+The ELF64 file header (Elf64_Ehdr), at offset 0 of a file and at the load address of an image mapping it. Same layout, checked against <elf.h> when the library builds.
+
+### function `file_header::is_elf64`
+
+```c++
+[[nodiscard]] constexpr auto is_elf64(void) const noexcept -> bool;
+```
+
+Whether the header opens an ELF64 little-endian file of the current version whose header and table entries have the ELF64 sizes.
+
+## `elf/hashed_name.hpp`
+
+### struct `hashed_name`
+
+```c++
+struct hashed_name final;
+```
+
+A symbol name with both of its ELF hashes (DT_GNU_HASH and DT_HASH), computed once so a lookup through several images hashes it once.
+
+### function `hashed_name::of`
+
+```c++
+[[nodiscard]] static constexpr auto of(const ca::sv::str text) noexcept -> self;
+```
+
+The name and its hashes.
+
+## `elf/image.hpp`
+
+### class `image`
+
+```c++
+class image final;
+```
+
+An ELF64 object mapped for execution (the vDSO, the running program, a library a loader mapped): its segments, its bias (where it sits minus where it was linked) and what its dynamic section gives, read once. An address in the dynamic section is taken as a link-time address when it lies in the range the load segments were linked at, as already rebased when it lies where they are mapped (libc's loader rewrites them so in the objects it loads), and as absent otherwise. Lookups go through the GNU hash table when there is one, else the SysV one. Owns nothing; the mapping must outlive it.
+
+### function `image::image`
+
+```c++
+constexpr image(void) noexcept
+: _bias{0U}, _link_begin{0U}, _link_end{0U}, _segments{}, _dynamic{}, _strings{nullptr}, _strings_size{0U}, _symbols{nullptr},
+  _symbol_count{0U}, _hash{nullptr}, _gnu_hash{nullptr}, _versions{nullptr};
+```
+
+No segments, nothing dynamic: every lookup finds nothing.
+
+### function `image::at`
+
+```c++
+[[nodiscard]] static auto at(const ca::elf::file_header& header) noexcept -> ca::optional<self>;
+```
+
+The image whose file header is mapped at header, as the segment holding file offset 0 maps it (the vDSO from auxiliary_types::vdso, a library a loader mapped); none when it is not a valid ELF64 header or no segment maps it.
+
+### function `image::of`
+
+```c++
+[[nodiscard]] static auto of(ca::borrowed_slice<const ca::elf::program_header> segments, ca::u64 bias) noexcept -> self;
+```
+
+The image of program headers segments, mapped with bias (an object whose program headers and bias are known; the running program is program()).
+
+### function `image::bias_of`
+
+```c++
+[[nodiscard]] static auto bias_of(ca::borrowed_slice<const ca::elf::program_header> segments) noexcept -> ca::optional<ca::u64>;
+```
+
+The bias of the image whose program headers are mapped at segments, from its program_headers segment; none without one (a static PIE, which program() handles through its file header).
+
+### function `image::program`
+
+```c++
+[[nodiscard]] static auto program(void) noexcept -> ca::optional<self>;
+```
+
+The running program, from the program headers in the auxiliary vector (auxiliary_types::program_headers, program_header_count). Its bias comes from its program_headers segment, or, without one (a static PIE), from its ELF header right before the program headers, read through the kernel and checked (ELF64, program headers right after it) and the load segment at file offset 0. Its dynamic section is there only when the program has one: a static non-PIE program has none (GNU ld makes none even with --export-dynamic), and then dynamic() and symbols() are empty. None when the vector gives no program headers or the bias cannot be found; Linux x86-64 only. Reads the auxiliary vector at each call: keep the result, the program never moves.
+
+### function `image::bias`
+
+```c++
+[[nodiscard]] constexpr auto bias(void) const noexcept -> ca::u64;
+```
+
+Address in memory minus link-time address.
+
+### function `image::dynamic`
+
+```c++
+[[nodiscard]] constexpr auto dynamic(void) const noexcept -> ca::borrowed_slice<const ca::elf::dynamic_entry>;
+```
+
+The dynamic section, up to its null entry excluded; empty in a static non-PIE program.
+
+### function `image::symbols`
+
+```c++
+[[nodiscard]] constexpr auto symbols(void) const noexcept -> ca::borrowed_slice<const ca::elf::symbol>;
+```
+
+The dynamic symbol table, as many entries as the hash tables index.
+
+### function `image::address`
+
+```c++
+[[nodiscard]] constexpr auto address(const ca::u64 link_address) const noexcept -> ca::u64;
+```
+
+Where link-time address link_address is in memory.
+
+### function `image::segment`
+
+```c++
+[[nodiscard]] auto segment(ca::u32 type) const noexcept -> ca::optional<const ca::elf::program_header&>;
+```
+
+The first segment of type (segment_types).
+
+### function `image::value`
+
+```c++
+[[nodiscard]] auto value(ca::i64 tag) const noexcept -> ca::optional<ca::u64>;
+```
+
+The value of the first dynamic entry tagged tag (dynamic_tags).
+
+### function `image::address_of`
+
+```c++
+[[nodiscard]] auto address_of(ca::i64 tag) const noexcept -> ca::optional<ca::u64>;
+```
+
+Where the address entry tagged tag points in memory (dynamic_tags::init, fini, ...); none when absent or outside the image.
+
+### function `image::words`
+
+```c++
+[[nodiscard]] auto words(ca::i64 address_tag, ca::i64 size_tag) const noexcept -> ca::borrowed_slice<const ca::u64>;
+```
+
+The words of the table the dynamic section gives by address_tag and size_tag (init_array and init_array_size, fini_array, preinit_array).
+
+### function `image::string`
+
+```c++
+[[nodiscard]] auto string(ca::u64 offset) const noexcept -> ca::sv::str;
+```
+
+The string at offset in the dynamic string table, empty past it.
+
+### function `image::find`
+
+```c++
+[[nodiscard]] auto find(const ca::elf::hashed_name& name) const noexcept -> ca::optional<const ca::elf::symbol&>;
+```
+
+The symbol named name the image defines, a hidden version (one only a versioned reference may bind to) excluded.
+
+### function `image::relocations`
+
+```c++
+[[nodiscard]] auto relocations(void) const noexcept -> ca::borrowed_slice<const ca::elf::relocation>;
+```
+
+The relocations of dynamic_tags::rela.
+
+### function `image::plt_relocations`
+
+```c++
+[[nodiscard]] auto plt_relocations(void) const noexcept -> ca::borrowed_slice<const ca::elf::relocation>;
+```
+
+The relocations of the PLT (dynamic_tags::plt_relocations), when they carry addends.
+
+### function `image::relative_relocations`
+
+```c++
+[[nodiscard]] auto relative_relocations(void) const noexcept -> ca::borrowed_slice<const ca::u64>;
+```
+
+The packed relative relocations (dynamic_tags::relr): an even word is the link-time address of a word to add the bias to, an odd one a bitmap of the 63 words after the last address.
+
+## `elf/program_header.hpp`
+
+### namespace `segment_types`
+
+```c++
+namespace segment_types;
+```
+
+p_type: what a segment is (PT_*).
+
+### namespace `segment_flags`
+
+```c++
+namespace segment_flags;
+```
+
+p_flags: the access a loaded segment gets (PF_*).
+
+### struct `program_header`
+
+```c++
+struct program_header final;
+```
+
+An ELF64 program header (Elf64_Phdr): one segment, where it is in the file and where it goes in memory (a link-time address; add the image's bias).
+
+## `elf/relocation.hpp`
+
+### namespace `x86_64_relocations`
+
+```c++
+namespace x86_64_relocations;
+```
+
+The x86-64 relocation types a dynamic loader applies (R_X86_64_*). S is the symbol's address, A the addend, B the image's bias. absolute: S + A; global_data and jump_slot: S; relative: B + A; indirect_relative: the result of calling B + A; tls_module: the module id; tls_offset: S's offset in its module's block; tls_thread_offset: S's offset from the thread pointer; tls_descriptor: a TLS descriptor for S (-mtls-dialect=gnu2). copy copies S's bytes into the executable.
+
+### struct `relocation`
+
+```c++
+struct relocation final;
+```
+
+An ELF64 relocation with addend (Elf64_Rela): the link-time address to patch, the symbol index and type packed in _info, the addend.
+
+### function `relocation::symbol`
+
+```c++
+[[nodiscard]] constexpr auto symbol(void) const noexcept -> ca::u32;
+```
+
+Index of the symbol in the dynamic symbol table, 0 for none.
+
+### function `relocation::type`
+
+```c++
+[[nodiscard]] constexpr auto type(void) const noexcept -> ca::u32;
+```
+
+The machine's relocation type (x86_64_relocations on x86-64).
+
+## `elf/section_header.hpp`
+
+### namespace `section_types`
+
+```c++
+namespace section_types;
+```
+
+sh_type: what a section holds (SHT_*).
+
+### namespace `section_flags`
+
+```c++
+namespace section_flags;
+```
+
+sh_flags (SHF_*).
+
+### namespace `section_indices`
+
+```c++
+namespace section_indices;
+```
+
+Reserved section indices a symbol's st_shndx may hold (SHN_*).
+
+### struct `section_header`
+
+```c++
+struct section_header final;
+```
+
+An ELF64 section header (Elf64_Shdr). Its name is an offset into the section names table (file_header::_section_names); elf::file reads it.
+
+## `elf/symbol.hpp`
+
+### namespace `symbol_types`
+
+```c++
+namespace symbol_types;
+```
+
+What a symbol names (STT_*).
+
+### namespace `symbol_bindings`
+
+```c++
+namespace symbol_bindings;
+```
+
+Who sees a symbol (STB_*).
+
+### namespace `symbol_visibilities`
+
+```c++
+namespace symbol_visibilities;
+```
+
+Visibility (STV_*): normal is STV_DEFAULT, nonpreemptible STV_PROTECTED.
+
+### struct `symbol`
+
+```c++
+struct symbol final;
+```
+
+An ELF64 symbol (Elf64_Sym). Its name is an offset into the string table linked to its symbol table; its value a link-time address for a defined symbol.
+
+### function `symbol::type`
+
+```c++
+[[nodiscard]] constexpr auto type(void) const noexcept -> ca::u8;
+```
+
+One of elf::symbol_types.
+
+### function `symbol::binding`
+
+```c++
+[[nodiscard]] constexpr auto binding(void) const noexcept -> ca::u8;
+```
+
+One of elf::symbol_bindings.
+
+### function `symbol::visibility`
+
+```c++
+[[nodiscard]] constexpr auto visibility(void) const noexcept -> ca::u8;
+```
+
+One of elf::symbol_visibilities.
+
+### function `symbol::is_defined`
+
+```c++
+[[nodiscard]] constexpr auto is_defined(void) const noexcept -> bool;
+```
+
+Whether the object holding the table defines it.
+
 ## `environment/`
 
 The process environment: read, set and remove variables, or take the whole block for `execve` and `posix_spawn`.
@@ -153,7 +730,7 @@ Removes every entry of name. errc::invalid_argument as set_variable.
 
 System error codes and where they come from.
 
-`ca::errc` names the errno values ca uses as `ca::error` constants, written per platform in `errc.hpp` and checked against `<errno.h>` when the library builds, so no program needs the header: `errc::no_entry` (ENOENT), `errc::access_denied` (EACCES), `errc::exists`, `errc::invalid_argument`, `errc::no_space`, `errc::out_of_range`, `errc::try_again`, `errc::interrupted`, `errc::not_supported`, `errc::not_recoverable` (what a trapped context fails with), and the rest of the common set.
+`ca::errc` names the errno values ca uses as `ca::error` constants, written per platform in `errc.hpp` and checked against `<errno.h>` when the library builds, so no program needs the header: `errc::no_entry` (ENOENT), `errc::access_denied` (EACCES), `errc::exists`, `errc::invalid_argument`, `errc::no_space`, `errc::out_of_range` (ERANGE), `errc::out_of_domain` (EDOM), `errc::try_again`, `errc::interrupted`, `errc::not_supported`, `errc::not_recoverable` (what a trapped context fails with), and the rest of the common set.
 
 | Function | Answers |
 |---|---|
@@ -1816,6 +2393,241 @@ Hardware: "x86_64", "arm64".
 
 Names of the running system.
 
+## `math/`
+
+The functions of libm whose result IEEE 754 fixes to the bit, for programs linked without libm: libca_runtime's `fmod`, `remainder`, `remquo`, `sqrt`, `floor`, `ceil`, `trunc`, `round`, `roundeven`, `rint`, `nearbyint`, `lrint`, `lround`, `fmin`, `fmax`, `fdim`, `fma`, `ldexp`, `scalbn`, `frexp`, `modf`, `logb`, `ilogb` and `nextafter` (each also with the f and l suffixes; fma not for long double), what compilers lower `__builtin_fmod` and the others to. They are `sys::impl` templates (Linux x86-64), not an interface of their own: a program calls the builtins.
+
+| How | Functions |
+|---|---|
+| x87 `fprem` / `fprem1` loop on the operands widened, exact | fmod, remainder, remquo |
+| the instruction (`sqrtsd`, `fsqrt`, `vfmadd213sd`) | sqrt, fma |
+| fraction bits cleared, a unit carried in; `frndint` for long double | floor, ceil, trunc, round, roundeven |
+| x + 2^p - 2^p in the current rounding mode; `cvtsd2si`, `fistp` | rint, nearbyint, lrint |
+| one final multiply by 2^n; `fscale` | ldexp, scalbn |
+| exponent and significand bits | frexp, modf, logb, ilogb, nextafter |
+
+Each gives glibc 2.39's result bit for bit, NaN payloads included, in every rounding mode, and sets errno (ca's last error) as glibc does, checked against it by `tests/sys_exact_math_libc.cpp`. One difference is deliberate: a zero remainder carries x's sign, as IEEE 754 requires, where glibc's remainder can give the other sign when rounding down or up, or for a double divisor below 2^-1020. Without the FMA instruction, fma computes the exact sum in 128-bit integers, rounds it to odd at 64 bits into a long double, then rounds that once to float or double. Transcendental functions (exp, log, sin, pow, ...) are not provided.
+
+## `math/impl/exact_math.hpp`
+
+The functions of libm whose result IEEE 754 fixes to the bit, without libm: what libca_runtime's fmod, floor, sqrt, ... are, and what compilers lower __builtin_fmod and the others to when no instruction does it. Each is a template instantiated for float, double and long double (x87 80-bit), behaving as glibc's: the same results, NaNs included, and errno set as glibc does (ca's last error). Transcendental functions (exp, sin, ...) are not exact and are not here. Linux x86-64 only.
+
+### function `impl::fmod`
+
+```c++
+template <typename T>
+[[nodiscard]] auto fmod(T x, T y) noexcept -> T;
+```
+
+x - n y, n the quotient truncated: the x87 fprem loop, exact. errc::out_of_domain for y zero or x infinite.
+
+### function `impl::remainder`
+
+```c++
+template <typename T>
+[[nodiscard]] auto remainder(T x, T y) noexcept -> T;
+```
+
+x - n y, n the quotient rounded to even: the x87 fprem1 loop, exact. errc::out_of_domain as fmod.
+
+### function `impl::remquo`
+
+```c++
+template <typename T>
+[[nodiscard]] auto remquo(T x, T y, int* quotient) noexcept -> T;
+```
+
+remainder, and in quotient the sign and the 3 low bits of n.
+
+### function `impl::sqrt`
+
+```c++
+template <typename T>
+[[nodiscard]] auto sqrt(T x) noexcept -> T;
+```
+
+The square root, correctly rounded. errc::out_of_domain below zero.
+
+### function `impl::floor`
+
+```c++
+template <typename T>
+[[nodiscard]] auto floor(T x) noexcept -> T;
+```
+
+The integer below x, as T.
+
+### function `impl::ceil`
+
+```c++
+template <typename T>
+[[nodiscard]] auto ceil(T x) noexcept -> T;
+```
+
+The integer above x, as T.
+
+### function `impl::trunc`
+
+```c++
+template <typename T>
+[[nodiscard]] auto trunc(T x) noexcept -> T;
+```
+
+x without its fraction.
+
+### function `impl::round`
+
+```c++
+template <typename T>
+[[nodiscard]] auto round(T x) noexcept -> T;
+```
+
+The nearest integer, halves away from zero.
+
+### function `impl::roundeven`
+
+```c++
+template <typename T>
+[[nodiscard]] auto roundeven(T x) noexcept -> T;
+```
+
+The nearest integer, halves to even.
+
+### function `impl::rint`
+
+```c++
+template <typename T>
+[[nodiscard]] auto rint(T x) noexcept -> T;
+```
+
+The integer x rounds to in the current rounding mode, inexact raised.
+
+### function `impl::nearbyint`
+
+```c++
+template <typename T>
+[[nodiscard]] auto nearbyint(T x) noexcept -> T;
+```
+
+rint, the floating-point exception flags left as they were.
+
+### function `impl::lrint`
+
+```c++
+template <typename T>
+[[nodiscard]] auto lrint(T x) noexcept -> ca::i64;
+```
+
+rint as an integer; out of range or NaN, the integer indefinite (-2^63).
+
+### function `impl::lround`
+
+```c++
+template <typename T>
+[[nodiscard]] auto lround(T x) noexcept -> ca::i64;
+```
+
+round as an integer; out of range or NaN as lrint.
+
+### function `impl::fmin`
+
+```c++
+template <typename T>
+[[nodiscard]] auto fmin(T x, T y) noexcept -> T;
+```
+
+The smaller; a quiet NaN only when both are.
+
+### function `impl::fmax`
+
+```c++
+template <typename T>
+[[nodiscard]] auto fmax(T x, T y) noexcept -> T;
+```
+
+The larger; a quiet NaN only when both are.
+
+### function `impl::fdim`
+
+```c++
+template <typename T>
+[[nodiscard]] auto fdim(T x, T y) noexcept -> T;
+```
+
+x - y when positive, else zero. errc::out_of_range when it overflows.
+
+### function `impl::fma`
+
+```c++
+template <typename T>
+[[nodiscard]] auto fma(T x, T y, T z) noexcept -> T;
+```
+
+x y + z, rounded once: the FMA instruction when the CPU has it, else exact integer arithmetic rounded to odd into long double, then to T. float and double.
+
+### function `impl::fma_software`
+
+```c++
+template <typename T>
+[[nodiscard]] auto fma_software(T x, T y, T z) noexcept -> T;
+```
+
+fma without the instruction, as on CPUs lacking it.
+
+### function `impl::scalbln`
+
+```c++
+template <typename T>
+[[nodiscard]] auto scalbln(T x, long n) noexcept -> T;
+```
+
+x 2^n, rounded once: ldexp, scalbn and scalbln. errc::out_of_range when finite nonzero x becomes zero or infinite.
+
+### function `impl::frexp`
+
+```c++
+template <typename T>
+[[nodiscard]] auto frexp(T x, int* exponent) noexcept -> T;
+```
+
+x as m 2^e, |m| in [0.5, 1); e in exponent.
+
+### function `impl::modf`
+
+```c++
+template <typename T>
+[[nodiscard]] auto modf(T x, T* whole) noexcept -> T;
+```
+
+The fraction of x, signed as x; the integer part in whole.
+
+### function `impl::logb`
+
+```c++
+template <typename T>
+[[nodiscard]] auto logb(T x) noexcept -> T;
+```
+
+The exponent of x as T, subnormals' true one; -inf for zero.
+
+### function `impl::ilogb`
+
+```c++
+template <typename T>
+[[nodiscard]] auto ilogb(T x) noexcept -> int;
+```
+
+The exponent of x as int; INT_MIN for zero and NaN, INT_MAX for infinities, each errc::out_of_domain.
+
+### function `impl::nextafter`
+
+```c++
+template <typename T>
+[[nodiscard]] auto nextafter(T x, T y) noexcept -> T;
+```
+
+The neighbor of x toward y. errc::out_of_range when it is infinite or subnormal.
+
 ## `memory/`
 
 Memory from the system: page mappings, and the C allocator for code that must interoperate with it. The allocators of layer 4 (`ca::heap`, `page_allocator`, `libc_allocator`) are built on these; application code normally uses those instead.
@@ -1933,6 +2745,16 @@ Allocates an uninitialized block of count * size bytes, aligned to malloc_alignm
 
 Maps size bytes of fresh zeroed memory, private to the process, page-aligned, with protection (sys::protection bits). Release with munmap.
 
+## `memory/mmap_anonymous_fixed.hpp`
+
+### function `mmap_anonymous_fixed`
+
+```c++
+[[nodiscard]] auto mmap_anonymous_fixed(ca::span<ca::byte> region, int protection) noexcept -> ca::result<void>;
+```
+
+Maps fresh zeroed pages over region, page-aligned, replacing the pages there (MAP_FIXED), private, with protection (sys::protection bits). region must lie in memory the caller owns.
+
 ## `memory/mmap_file.hpp`
 
 ### function `mmap_file`
@@ -1942,6 +2764,16 @@ Maps size bytes of fresh zeroed memory, private to the process, page-aligned, wi
 ```
 
 Maps size bytes of open file fd from offset (a multiple of page_size), page-aligned, with protection (sys::protection bits). The mapping outlives fd. Release with munmap.
+
+## `memory/mmap_file_fixed.hpp`
+
+### function `mmap_file_fixed`
+
+```c++
+[[nodiscard]] auto mmap_file_fixed(ca::span<ca::byte> region, int fd, ca::u64 offset, int protection) noexcept -> ca::result<void>;
+```
+
+Maps the bytes of open file fd from offset (a multiple of page_size) over region, page-aligned, replacing the pages there (MAP_FIXED), private copy-on-write, with protection (sys::protection bits). For laying out a mapping reserved beforehand, as a dynamic loader does; region must lie in memory the caller owns.
 
 ## `memory/move_paths.hpp`
 
@@ -3025,6 +3857,16 @@ Conversions between ca's portable process types and the platform's, declared wit
 - `wait_status_of(child, raw)`: the int status word of `waitpid` decoded into a `sys::wait_status` of child (exit code or terminating signal), with the platform's `WIFEXITED` family.
 - `start_child(...)`: what `posix_spawn` and `posix_spawnp` share. A `spawn_options` that sets nothing passes no `posix_spawnattr_t`; otherwise one is made, filled and destroyed around the call. Without libc, libca_runtime's `posix_spawnattr_*` keep a `spawn_attributes` in that storage (flags and group) for `spawn_process`, whose child calls setpgid before the file actions, as glibc's does.
 
+## `process/impl/clone_onto.hpp`
+
+### function `impl::clone_onto`
+
+```c++
+[[nodiscard]] auto clone_onto(ca::isz flags, void* stack, ca::i32* ptid, ca::i32* ctid, ca::u64 tls, int (*entry)(void*), void* argument) noexcept -> ca::result<ca::i32>;
+```
+
+clone with the child on a stack of its own: stack is its top, 16-aligned. The child comes out of the syscall in assembly, with no C++ frame to return into, runs entry(argument) and exits with the result, ending that task only. ptid, ctid and tls are what flags makes of them (CLONE_PARENT_SETTID, CLONE_CHILD_SETTID or CLONE_CHILD_CLEARTID, CLONE_SETTLS), null or 0 otherwise. Returns the child's id, in the parent only. Linux x86-64 only.
+
 ## `process/impl/native_resource.hpp`
 
 ### function `impl::native_resource`
@@ -3535,7 +4377,7 @@ At most six syscall arguments, the kernel's limit.
 [[nodiscard]] auto auxiliary(ca::u64 type) noexcept -> ca::u64;
 ```
 
-Value of entry type (AT_*) of the auxiliary vector the kernel handed the process, 0 when absent. Read from /proc/self/auxv at each call: for one-time lookups (the vDSO). Linux x86-64; 0 elsewhere.
+Value of entry type (elf::auxiliary_types) of the auxiliary vector the kernel handed the process, 0 when absent. Read from /proc/self/auxv at each call: for one-time lookups (the vDSO). Linux x86-64; 0 elsewhere.
 
 ## `syscall/invoke.hpp`
 
@@ -3602,6 +4444,8 @@ Address of function name in the vDSO, the shared object the kernel maps into eve
 
 `enter(number, args...)` is the instruction that enters the kernel. On Linux x86-64, aarch64 and riscv64 it is inline assembly with one overload per argument count, 0 to 6, each binding exactly the registers it uses through register variables, so the compiler loads the arguments in place and keeps everything else live across the call. Memory is clobbered, since the kernel reads and writes through the pointers it is given. It returns the raw kernel value: -errno, between -4095 and -1, on failure; `invoke` turns that into a `ca::result`.
 
+`read_own(address, out)` copies the process's own memory through `process_vm_readv`, which fails instead of faulting on an unmapped address: the backtrace walks frame records with it, and `elf::image::program()` reads the ELF header of a static PIE. It goes through `enter`, so a failure leaves the last error as it was.
+
 `inline_entry` tells whether `enter` is the inlined instruction (true on those three CPUs) or a call to libc's `syscall(2)`. Functions that must not return, such as `exit`, are generated as `[[noreturn]]` and end in `ca::unreachable()` after the instruction.
 
 ## `syscall/impl/enter.hpp`
@@ -3621,6 +4465,16 @@ inline constexpr bool inline_entry = true;
 ```
 
 Whether enter is the trap instruction inlined, rather than a call into libc.
+
+## `syscall/impl/read_own.hpp`
+
+### function `impl::read_own`
+
+```c++
+[[nodiscard]] auto read_own(ca::usz address, ca::span<ca::byte> out) noexcept -> bool;
+```
+
+Copies out.size() bytes of the process's own memory at address into out through the kernel (process_vm_readv), which fails instead of faulting on unmapped memory: whether they were all read. Raw, so the last error stays. Linux x86-64; false elsewhere.
 
 ## `syscall/table/`
 
@@ -6727,7 +7581,9 @@ How many of fraction digits after the point remain once trailing zeros go (%g wi
 
 ## `thread/`
 
-Futexes, yield, and per-thread slots with an exit callback.
+Threads, futexes, yield, and per-thread slots with an exit callback.
+
+`sys::thread::make(entry, argument)` starts a thread on raw clone: one mapping holds a guard page, its stack, a control block and its own TLS area. When entry returns the thread runs its `thread_local` destructors and key destructors, then leaves. `join()` waits for that and unmaps; `cleanup()` does the same and also accepts a thread already joined. Results travel through argument. It works only in programs started by libca_runtime: in a program started by libc, libc owns `%fs`, and make fails with `errc::not_supported`.
 
 `sys::futex_wait(word, expected)` sleeps while a `ca::atomic<u32>` holds expected, until a `sys::futex_wake(word, count)`; `futex_wait_until(word, expected, deadline)` gives up with `errc::timed_out` at a monotonic deadline. Either may return early, so callers loop on the word. Words are process-private. Linux only; elsewhere a wait yields once, which keeps every loop correct but spinning. The primitives built on them are in `sync/`. `sys::yield()` gives the CPU to another runnable thread.
 
@@ -6805,6 +7661,89 @@ auto futex_wake(const ca::atomic<ca::u32>& word, ca::u32 count) noexcept -> void
 ```
 
 Wakes up to count threads sleeping in futex_wait on word; ca::limits\<u32>::max() wakes all. Always a syscall: skip it when no thread can be waiting.
+
+## `thread/thread.hpp`
+
+### class `thread`
+
+```c++
+class thread final;
+```
+
+A thread on raw clone, without libc: one mapping holds a guard page, its stack, a control block and its TLS area. It runs entry(argument), then its thread_local destructors and key destructors, and leaves the kernel, which clears the control block's word and wakes join. join() waits for that, then unmaps. Only in programs started by libca_runtime: libc owns %fs in the others, where make fails with errc::not_supported, as it does outside linux x86-64. Move-only, the mapping stays put.
+
+### variable `thread::DEFAULT_STACK_SIZE`
+
+```c++
+static constexpr ca::usz DEFAULT_STACK_SIZE = ca::usz;
+```
+
+The stack make gives by default, committed as it is touched.
+
+### variable `thread::MINIMUM_STACK_SIZE`
+
+```c++
+static constexpr ca::usz MINIMUM_STACK_SIZE = ca::usz;
+```
+
+The smallest stack make accepts: what the exit path needs.
+
+### function `thread::thread`
+
+```c++
+thread(void) noexcept
+: _mapping{}, _control{nullptr};
+```
+
+Not live: what moving, join() and cleanup() leave. make() starts one.
+
+### function `thread::make`
+
+```c++
+[[nodiscard]] static auto make(void (*entry)(void*), void* argument, ca::usz stack_size = DEFAULT_STACK_SIZE) noexcept -> ca::result<self>;
+```
+
+Starts entry(argument) in a new thread, which inherits the signal mask, with stack_size bytes of stack (rounded up to pages) above a guard page. errc::invalid_argument for a size below MINIMUM_STACK_SIZE or beyond the address space, errc::not_supported as above, the mmap, mprotect or clone error.
+
+### function `thread::operator=`
+
+```c++
+auto operator=(self&& other) noexcept -> self&;
+```
+
+Takes other's thread. Traps when this one is live, joining being fallible: cleanup() first.
+
+### function `thread::is_live`
+
+```c++
+[[nodiscard]] constexpr auto is_live(void) const noexcept -> bool;
+```
+
+Whether make() started it and it has not been joined. It may have ended.
+
+### function `thread::id`
+
+```c++
+[[nodiscard]] auto id(void) const noexcept -> ca::i32;
+```
+
+The kernel's id of the thread, 0 once it has ended. A live one only.
+
+### function `thread::join`
+
+```c++
+[[nodiscard]] auto join(void) noexcept -> ca::result<void>;
+```
+
+Waits for the thread's end, then unmaps its stack: not live after, even on failure. errc::invalid_argument when not live. A thread joining itself never returns.
+
+### function `thread::cleanup`
+
+```c++
+[[nodiscard]] auto cleanup(void) noexcept -> ca::result<void>;
+```
+
+join(), which one not live succeeds.
 
 ## `thread/thread_key.hpp`
 
@@ -6948,7 +7887,7 @@ run_thread_exit_handlers, then run_key_destructors: the end of a thread ca start
 namespace impl;
 ```
 
-Thread-local storage without libc (x86-64 variant II): each thread's copy of the PT_TLS image sits right below its thread pointer, at the offsets the linker gave the variables, and the control block above it: the pointer itself at %fs:0, the stack canary at %fs:0x28. _start finds the image and lays out the main thread's area; a thread ca starts gets its own area the same way. The functions run before %fs is set: no thread_local, no stack protector, no call that fails. Linux x86-64 only.
+Thread-local storage without libc (x86-64 variant II): each thread's copy of the elf::segment_types::tls image sits right below its thread pointer, at the offsets the linker gave the variables, and the control block above it: the pointer itself at %fs:0, the stack canary at %fs:0x28. _start finds the image and lays out the main thread's area; a thread ca starts gets its own area the same way. The functions run before %fs is set: no thread_local, no stack protector, no call that fails. Linux x86-64 only.
 
 ### variable `impl::tls_control_block`
 
@@ -6965,6 +7904,14 @@ struct tls_image final;
 ```
 
 The program's TLS image: its initialized bytes, their count, the block's size (p_memsz rounded up to the image's own alignment, as the linker places variables) and the alignment of the thread pointer (the image's, at least 64).
+
+### function `impl::tls_block_size`
+
+```c++
+[[nodiscard, gnu::always_inline]] constexpr auto tls_block_size(const ca::u64 memory_size, const ca::u64 align) noexcept -> ca::usz;
+```
+
+Bytes of the TLS block of a PT_TLS segment of memory_size bytes aligned to align: rounded up to that alignment, as the linker places variables; the block ends at the thread pointer, so a variable at offset in it is at offset - this from it.
 
 ### variable `impl::program_tls`
 

@@ -37,6 +37,7 @@ namespace ca {
 		inline constexpr ca::error no_space{28};
 		inline constexpr ca::error not_seekable{29};
 		inline constexpr ca::error broken_pipe{32};
+		inline constexpr ca::error out_of_domain{33};
 		inline constexpr ca::error out_of_range{34};
 
 #if ca_platform(linux)

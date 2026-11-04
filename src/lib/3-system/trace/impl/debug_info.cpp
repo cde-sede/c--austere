@@ -2,6 +2,9 @@
 #include "1-primitives/integers/u16.hpp"
 #include "1-primitives/integers/u32.hpp"
 #include "1-primitives/integers/u8.hpp"
+#include "3-system/elf/file.hpp"
+#include "3-system/elf/section_header.hpp"
+#include "3-system/elf/symbol.hpp"
 #include "3-system/trace/impl/debug_info.hpp"
 
 
@@ -83,15 +86,6 @@ namespace {
 
 	constexpr ca::u64 LNCT_PATH = 0x1U;
 	constexpr ca::u64 LNCT_DIRECTORY_INDEX = 0x2U;
-
-	constexpr ca::u32 SHT_SYMTAB = 2U;
-	constexpr ca::u32 SHT_NOBITS = 8U;
-	constexpr ca::u32 SHT_DYNSYM = 11U;
-	constexpr ca::u64 SHF_COMPRESSED = 0x800U;
-	constexpr ca::u8 STT_FUNC = 2U;
-	constexpr ca::u8 STT_GNU_IFUNC = 10U;
-	constexpr ca::usz SYMBOL_SIZE = 24U;
-	constexpr ca::usz SECTION_HEADER_SIZE = 64U;
 
 
 	/* Reads a section: little-endian integers, LEB128, C strings. Reading past the end sets
@@ -1097,20 +1091,14 @@ namespace {
 			ca::trace::impl::location_access::set_source(out, directory_name(image, table, 0U), directory, name, line);
 	}
 
-	auto find_symbol(const ca::span<const ca::byte> symbols, const ca::span<const ca::byte> strings, const ca::u64 address, ca::sv::str& name, ca::u64& start) noexcept -> bool {
+	auto find_symbol(const ca::borrowed_slice<const ca::elf::symbol> symbols, const ca::span<const ca::byte> strings, const ca::u64 address, ca::sv::str& name, ca::u64& start) noexcept -> bool {
 
-		const ca::usz count = symbols.size() / SYMBOL_SIZE;
-		for (ca::usz i = 0U; i < count; ++i) {
-			cursor c = cursor_at(symbols, i * SYMBOL_SIZE);
-			const ca::u64 name_offset = read_fixed(c, 4U);
-			const ca::u8 type = static_cast<ca::u8>(read_fixed(c, 1U) & 0xFU);
-			skip(c, 1U);
-			const ca::u64 section = read_fixed(c, 2U);
-			const ca::u64 value = read_fixed(c, 8U);
-			const ca::u64 size = read_fixed(c, 8U);
-			if ((type == STT_FUNC || type == STT_GNU_IFUNC) && section != 0U && size != 0U && address >= value && address - value < size) {
-				 name = string_in(strings, name_offset);
-				start = value;
+		for (const ca::elf::symbol& symbol : symbols) {
+			const ca::u8 type = symbol.type();
+			if ((type == ca::elf::symbol_types::function || type == ca::elf::symbol_types::gnu_ifunc) && symbol.is_defined() && symbol._size != 0U
+			 && address >= symbol._value && address - symbol._value < symbol._size) {
+				 name = string_in(strings, symbol._name);
+				start = symbol._value;
 				return true;
 			}
 		}
@@ -1185,10 +1173,6 @@ namespace {
 		return 0U;
 	}
 
-	auto section_name(const ca::span<const ca::byte> file, const ca::u64 names, const ca::u64 offset) noexcept -> ca::sv::str {
-		return names == NONE ? ca::sv::str{} : string_in(file, names + offset);
-	}
-
 } // namespace
 
 
@@ -1222,64 +1206,22 @@ auto ca::trace::impl::location_access::set_inlined(ca::trace::location& at) noex
 
 [[nodiscard]] auto ca::trace::impl::read_image(const ca::span<const ca::byte> file) noexcept -> ca::optional<ca::trace::impl::debug_image> {
 
-	cursor header = cursor_at(file, 0U);
-	const ca::u64 magic = read_fixed(header, 4U);
-	const ca::u64 elf_class = read_fixed(header, 1U);
-	const ca::u64 encoding = read_fixed(header, 1U);
-	if (header._bad || magic != 0x464C457FU || elf_class != 2U || encoding != 1U)
+	const auto elf = ca::elf::file::from(file);
+	if (!elf)
 		return ca::optional<ca::trace::impl::debug_image>{};
-	header = cursor_at(file, 40U);
-	const ca::u64 section_offset = read_fixed(header, 8U);
-	header = cursor_at(file, 58U);
-	const ca::u64 section_size = read_fixed(header, 2U);
-	const ca::u64 section_count = read_fixed(header, 2U);
-	const ca::u64 names_index = read_fixed(header, 2U);
-	if (header._bad || section_size != SECTION_HEADER_SIZE || section_offset > file.size()
-	 || section_count > (file.size() - section_offset) / SECTION_HEADER_SIZE)
-		return ca::optional<ca::trace::impl::debug_image>{};
-	const auto section = [&](const ca::u64 index, ca::u32& type, ca::u64& flags, ca::u64& offset, ca::u64& size, ca::u64& link) noexcept -> ca::u64 {
-		cursor c = cursor_at(file, section_offset + index * SECTION_HEADER_SIZE);
-		const ca::u64 name = read_fixed(c, 4U);
-		  type = static_cast<ca::u32>(read_fixed(c, 4U));
-		 flags = read_fixed(c, 8U);
-		skip(c, 8U);
-		offset = read_fixed(c, 8U);
-		  size = read_fixed(c, 8U);
-		  link = read_fixed(c, 4U);
-		return name;
-	};
-	const auto bytes = [&](const ca::u64 offset, const ca::u64 size) noexcept -> ca::span<const ca::byte> {
-		if (offset > file.size() || size > file.size() - offset)
-			return ca::span<const ca::byte>{};
-		return ca::span<const ca::byte>{file.data() + offset, static_cast<ca::usz>(size)};
-	};
-	ca::u32 type = 0U;
-	ca::u64 flags = 0U;
-	ca::u64 offset = 0U;
-	ca::u64 size = 0U;
-	ca::u64 link = 0U;
-	ca::u64 names = NONE;
-	if (names_index < section_count) {
-		static_cast<void>(section(names_index, type, flags, offset, size, link));
-		names = offset <= file.size() ? offset : NONE;
-	}
 	ca::trace::impl::debug_image image{};
-	for (ca::u64 i = 0U; i < section_count; ++i) {
-		const ca::sv::str name = section_name(file, names, section(i, type, flags, offset, size, link));
-		if (type == SHT_NOBITS || (flags & SHF_COMPRESSED) != 0U)
+	for (const ca::elf::section_header& section : elf->sections()) {
+		if (section._type == ca::elf::section_types::no_bits || (section._flags & ca::elf::section_flags::compressed) != 0U)
 			continue;
-		const ca::span<const ca::byte> contents = bytes(offset, size);
-		if (type == SHT_SYMTAB || type == SHT_DYNSYM) {
-			ca::u32 link_type = 0U;
-			ca::u64 link_flags = 0U;
-			ca::u64 link_offset = 0U;
-			ca::u64 link_size = 0U;
-			ca::u64 link_link = 0U;
-			if (link >= section_count)
+		const ca::sv::str name = elf->name(section);
+		const ca::span<const ca::byte> contents = elf->contents(section);
+		if (section._type == ca::elf::section_types::symbols || section._type == ca::elf::section_types::dynamic_symbols) {
+			const auto strings = elf->linked(section);
+			if (!strings)
 				continue;
-			static_cast<void>(section(link, link_type, link_flags, link_offset, link_size, link_link));
-			(type == SHT_SYMTAB ? image._symtab : image._dynsym) = contents;
-			(type == SHT_SYMTAB ? image._symstr : image._dynstr) = bytes(link_offset, link_size);
+			const bool full = section._type == ca::elf::section_types::symbols;
+			(full ? image._symtab : image._dynsym) = elf->symbols(section);
+			(full ? image._symstr : image._dynstr) = elf->contents(*strings);
 		}
 		else if (name == ca::sv::str{".debug_info"})
 			image._info = contents;

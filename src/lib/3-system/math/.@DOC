@@ -1,0 +1,24 @@
+The functions of libm whose result IEEE 754 fixes to the bit, for programs linked without libm:
+libca_runtime's `fmod`, `remainder`, `remquo`, `sqrt`, `floor`, `ceil`, `trunc`, `round`,
+`roundeven`, `rint`, `nearbyint`, `lrint`, `lround`, `fmin`, `fmax`, `fdim`, `fma`, `ldexp`,
+`scalbn`, `frexp`, `modf`, `logb`, `ilogb` and `nextafter` (each also with the f and l suffixes;
+fma not for long double), what compilers lower `__builtin_fmod` and the others to. They are
+`sys::impl` templates (Linux x86-64), not an interface of their own: a program calls the
+builtins.
+
+| How | Functions |
+|---|---|
+| x87 `fprem` / `fprem1` loop on the operands widened, exact | fmod, remainder, remquo |
+| the instruction (`sqrtsd`, `fsqrt`, `vfmadd213sd`) | sqrt, fma |
+| fraction bits cleared, a unit carried in; `frndint` for long double | floor, ceil, trunc, round, roundeven |
+| x + 2^p - 2^p in the current rounding mode; `cvtsd2si`, `fistp` | rint, nearbyint, lrint |
+| one final multiply by 2^n; `fscale` | ldexp, scalbn |
+| exponent and significand bits | frexp, modf, logb, ilogb, nextafter |
+
+Each gives glibc 2.39's result bit for bit, NaN payloads included, in every rounding mode, and
+sets errno (ca's last error) as glibc does, checked against it by
+`tests/sys_exact_math_libc.cpp`. One difference is deliberate: a zero remainder carries x's
+sign, as IEEE 754 requires, where glibc's remainder can give the other sign when rounding down
+or up, or for a double divisor below 2^-1020. Without the FMA instruction, fma computes the
+exact sum in 128-bit integers, rounds it to odd at 64 bits into a long double, then rounds that
+once to float or double. Transcendental functions (exp, log, sin, pow, ...) are not provided.
